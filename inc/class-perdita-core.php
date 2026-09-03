@@ -184,9 +184,42 @@ final class Perdita_Core {
 	 * @return bool
 	 */
 	public static function theme_is_ready() {
-		return function_exists( 'perdita' )
-			&& class_exists( 'Perdita_Crypto' )
-			&& 'perdita' === wp_get_theme()->get_template();
+		return 'ok' === self::theme_status();
+	}
+
+	/**
+	 * Whether the plugin actually booted on this request (theme present and
+	 * new enough). False while it is installed but inert.
+	 *
+	 * @return bool
+	 */
+	public static function is_booted() {
+		return (bool) did_action( 'perdita_core_booted' );
+	}
+
+	/**
+	 * The theme has to be 0.17.0-alpha or newer, the first version that no
+	 * longer declares Perdita_Modules, Perdita_SEO_Store, Perdita_Shortcodes
+	 * and Perdita_Section itself. Booting this plugin against an older theme
+	 * would redeclare those classes and fatal on every request, so a site
+	 * that activates the plugin first (the safe upgrade order) stays inert
+	 * until the theme is updated, and then boots on the next request.
+	 */
+	const MIN_THEME = '0.17.0-alpha';
+
+	/**
+	 * Why the plugin cannot boot right now, or 'ok'.
+	 *
+	 * @return string ok|missing|old
+	 */
+	public static function theme_status() {
+		if ( ! function_exists( 'perdita' ) || ! class_exists( 'Perdita_Crypto' ) || 'perdita' !== wp_get_theme()->get_template() ) {
+			return 'missing';
+		}
+		if ( ! defined( 'PERDITA_VERSION' ) || version_compare( PERDITA_VERSION, self::MIN_THEME, '<' ) ) {
+			return 'old';
+		}
+		return 'ok';
 	}
 
 	/**
@@ -327,7 +360,15 @@ final class Perdita_Core {
 	 * moment for it now, and maybe_upgrade() below covers the case where the
 	 * files were updated in place without a deactivate/reactivate cycle.
 	 */
-	public static function on_activate() {
+	public static function on_activate( $network_wide = false ) {
+		if ( $network_wide && is_multisite() ) {
+			foreach ( get_sites( array( 'fields' => 'ids', 'number' => 0 ) ) as $site_id ) {
+				switch_to_blog( $site_id );
+				self::on_activate( false );
+				restore_current_blog();
+			}
+			return;
+		}
 		self::migrate_module_state();
 		self::install_modules();
 	}

@@ -131,7 +131,7 @@ class Perdita_Core_Updater {
 			return $transient;
 		}
 		$m = $this->manifest();
-		if ( empty( $m['version'] ) || empty( $m['download_url'] ) ) {
+		if ( empty( $m['version'] ) || ! is_string( $m['version'] ) || empty( $m['download_url'] ) || ! is_string( $m['download_url'] ) ) {
 			return $transient;
 		}
 
@@ -286,6 +286,15 @@ class Perdita_Core_Updater {
 
 		$m = $this->manifest();
 		if ( empty( $m['download_url'] ) || ! is_string( $m['download_url'] ) ) {
+			// No usable manifest on the request that performs the upgrade.
+			// If the package is ours (same pinned host) that is not a reason
+			// to install it unverified: fail closed and let the owner retry.
+			if ( self::package_url_is_pinned( $package ) ) {
+				return new WP_Error(
+					'perdita_core_manifest_unavailable',
+					__( 'The update manifest could not be fetched, so this package could not be verified. Nothing was installed. Try again in a few minutes.', 'perdita-core' )
+				);
+			}
 			return $reply;
 		}
 

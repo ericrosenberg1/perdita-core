@@ -136,6 +136,12 @@ if [ "$wporg" = "1" ]; then
 	rm -f "$work/$slug/inc/class-perdita-core-updater.php"
 	[ ! -f "$work/$slug/inc/class-perdita-core-updater.php" ] || die "--wporg: the self-hosted updater is still in the staged tree"
 	ok "--wporg: self-hosted updater removed from the staged tree"
+	# Every remaining reference to the class must sit next to a file_exists()
+	# guard, or a directory install would fatal on the first admin page.
+	while IFS= read -r f; do
+		grep -q 'file_exists' "$f" || die "--wporg: $f references Perdita_Core_Updater without a file_exists() guard"
+	done < <(grep -rl 'Perdita_Core_Updater' "$work/$slug" --include='*.php' || true)
+	ok "--wporg: every Perdita_Core_Updater reference is file_exists()-guarded"
 fi
 
 # git archive stamps every file with the commit date, but the directories --

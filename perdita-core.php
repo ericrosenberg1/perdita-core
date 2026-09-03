@@ -62,6 +62,14 @@ function perdita_core_boot() {
 		return;
 	}
 	perdita_core();
+	/**
+	 * Fires once the plugin has booted against a compatible theme. Perdita
+	 * Pro keys its own dependency check on this (Perdita_Core::is_booted()),
+	 * not on the plugin file merely being loaded.
+	 *
+	 * @param Perdita_Core $core The plugin instance.
+	 */
+	do_action( 'perdita_core_booted', perdita_core() );
 }
 add_action( 'after_setup_theme', 'perdita_core_boot', 0 );
 
@@ -74,6 +82,16 @@ add_action( 'after_setup_theme', 'perdita_core_boot', 0 );
  */
 function perdita_core_theme_notice() {
 	if ( ! current_user_can( 'manage_options' ) ) {
+		return;
+	}
+	if ( class_exists( 'Perdita_Core' ) && 'old' === Perdita_Core::theme_status() ) {
+		echo '<div class="notice notice-warning is-dismissible"><p>';
+		printf(
+			/* translators: %s: minimum Perdita theme version. */
+			esc_html__( 'Perdita Core is waiting for a theme update: it needs Perdita %s or newer. Update the Perdita theme and the modules switch on by themselves.', 'perdita-core' ),
+			esc_html( Perdita_Core::MIN_THEME )
+		);
+		echo '</p></div>';
 		return;
 	}
 	echo '<div class="notice notice-warning is-dismissible"><p>';

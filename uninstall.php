@@ -67,7 +67,8 @@ function perdita_core_uninstall_options() {
 		'perdita_analytics_settings',
 		'perdita_backups_settings',
 		'perdita_caching_settings',
-		'perdita_forms_settings',
+		// perdita_forms_settings is kept, like perdita_seo: notification recipients and
+		// spam-provider configuration are site configuration, not plugin bookkeeping.
 		'perdita_mcp_settings',
 		'perdita_pagespeed_settings',
 		'perdita_related_posts_settings',
