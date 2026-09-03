@@ -1,0 +1,327 @@
+<?php
+/**
+ * Self-hosted plugin updates.
+ *
+ * Perdita Core is distributed from perdita.ericrosenberg.com as well as (in
+ * time) wordpress.org, so it checks a manifest hosted alongside the zip and
+ * feeds WordPress the same update data the directory would. Live sites then
+ * see the update on the Updates screen and can install it in one click.
+ *
+ * Manifest (JSON) shape, served over HTTPS:
+ *   {
+ *     "name": "Perdita Core", "version": "1.0.0-alpha",
+ *     "download_url": "https://perdita.ericrosenberg.com/updates/perdita-core-1.0.0-alpha.zip",
+ *     "checksum": "sha256 hex digest of the zip, e.g. from `shasum -a 256`",
+ *     "requires": "6.4", "requires_php": "8.0", "tested": "7.1",
+ *     "url": "https://perdita.ericrosenberg.com", "last_updated": "2026-09-03"
+ *   }
+ *
+ * "download_url" must name a VERSIONED artifact, never a mutable filename
+ * like perdita-core-latest.zip. A mutable name lets the bytes a checksum pins
+ * be replaced without the version changing, and /updates is served with a
+ * ten-year max-age, so whatever the file holds at the next edge purge is
+ * pinned for a decade. The theme learned this the expensive way (ROS-2177);
+ * bin/build-release.sh only ever emits perdita-core-<version>.zip.
+ *
+ * HTTPS-only plus host pinning stop a tampered manifest from pointing
+ * WordPress at an attacker's zip, but they only protect the network path, not
+ * the update server itself. The "checksum" field, verified in
+ * verify_download(), closes that gap by rejecting a downloaded package that
+ * does not match the digest the manifest declared. It is optional, so an
+ * older manifest without it still installs; publish a checksum to get the
+ * protection.
+ *
+ * This whole file is absent from a wordpress.org build (bin/build-release.sh
+ * --wporg removes it), and Perdita_Core::init() only requires it when it
+ * exists, so a directory install takes its updates from the directory.
+ *
+ * @package Perdita_Core
+ */
+
+defined( 'ABSPATH' ) || exit;
+
+class Perdita_Core_Updater {
+
+	const MANIFEST = 'https://perdita.ericrosenberg.com/updates/perdita-core.json';
+	const CACHE    = 'perdita_core_update_manifest';
+
+	/**
+	 * Plugin basename, e.g. perdita-core/perdita-core.php. This is the key
+	 * WordPress uses in the update transient and in wp_get_active_plugins().
+	 *
+	 * @var string
+	 */
+	private $basename;
+
+	/**
+	 * Plugin directory slug, e.g. perdita-core.
+	 *
+	 * @var string
+	 */
+	private $slug;
+
+	/**
+	 * Constructor.
+	 */
+	public function __construct() {
+		$this->basename = plugin_basename( PERDITA_CORE_FILE );
+		$this->slug     = dirname( $this->basename );
+
+		add_filter( 'pre_set_site_transient_update_plugins', array( $this, 'check' ) );
+		add_filter( 'plugins_api', array( $this, 'details' ), 10, 3 );
+		add_filter( 'auto_update_plugin', array( $this, 'auto_update' ), 10, 2 );
+		add_filter( 'upgrader_pre_download', array( $this, 'verify_download' ), 10, 3 );
+		add_action( 'upgrader_process_complete', array( $this, 'flush' ), 10, 0 );
+	}
+
+	/**
+	 * Fetch the manifest, cached for 12 hours (failures cached briefly so a
+	 * down server does not get hammered on every admin page load).
+	 *
+	 * @return array
+	 */
+	private function manifest() {
+		$cached = get_transient( self::CACHE );
+		if ( false !== $cached ) {
+			return is_array( $cached ) ? $cached : array();
+		}
+		$res = wp_remote_get( self::MANIFEST, array( 'timeout' => 10 ) );
+		if ( is_wp_error( $res ) || 200 !== (int) wp_remote_retrieve_response_code( $res ) ) {
+			set_transient( self::CACHE, array(), 2 * HOUR_IN_SECONDS );
+			return array();
+		}
+		$data = json_decode( wp_remote_retrieve_body( $res ), true );
+		$data = is_array( $data ) ? $data : array();
+		set_transient( self::CACHE, $data, 12 * HOUR_IN_SECONDS );
+		return $data;
+	}
+
+	/**
+	 * The update row WordPress expects for a plugin. Returned as an object,
+	 * which is what both response[] and no_update[] hold.
+	 *
+	 * @param array $m Decoded manifest.
+	 * @return object
+	 */
+	private function row( array $m ) {
+		return (object) array(
+			'id'           => $this->basename,
+			'slug'         => $this->slug,
+			'plugin'       => $this->basename,
+			'new_version'  => $m['version'],
+			'url'          => isset( $m['url'] ) ? $m['url'] : 'https://perdita.ericrosenberg.com',
+			'package'      => $m['download_url'],
+			'requires'     => isset( $m['requires'] ) ? $m['requires'] : '',
+			'requires_php' => isset( $m['requires_php'] ) ? $m['requires_php'] : '',
+			'tested'       => isset( $m['tested'] ) ? $m['tested'] : '',
+			'icons'        => array(),
+			'banners'      => array(),
+			'banners_rtl'  => array(),
+		);
+	}
+
+	/**
+	 * Inject our update into the plugins update transient.
+	 *
+	 * @param object $transient Update transient.
+	 * @return object
+	 */
+	public function check( $transient ) {
+		if ( ! is_object( $transient ) || empty( $transient->checked ) ) {
+			return $transient;
+		}
+		$m = $this->manifest();
+		if ( empty( $m['version'] ) || empty( $m['download_url'] ) ) {
+			return $transient;
+		}
+
+		// Only install a package served over HTTPS from the update host.
+		// Without this, a tampered manifest could point WordPress at any ZIP
+		// and have it installed as a plugin update.
+		if ( ! self::package_url_is_pinned( $m['download_url'] ) ) {
+			return $transient;
+		}
+
+		$current = isset( $transient->checked[ $this->basename ] ) ? $transient->checked[ $this->basename ] : PERDITA_CORE_VERSION;
+		$row     = $this->row( $m );
+
+		if ( version_compare( $m['version'], $current, '>' ) ) {
+			$transient->response[ $this->basename ] = $row;
+			unset( $transient->no_update[ $this->basename ] );
+		} else {
+			$transient->no_update[ $this->basename ] = $row;
+			unset( $transient->response[ $this->basename ] );
+		}
+		return $transient;
+	}
+
+	/**
+	 * Answer the "View details" modal. Basic on purpose: the manifest carries
+	 * compatibility data and a link, not a full wordpress.org listing, and
+	 * inventing sections here would be inventing content.
+	 *
+	 * @param false|object|array $result The result object or array.
+	 * @param string             $action The API action being performed.
+	 * @param object             $args   Plugin API arguments.
+	 * @return false|object|array
+	 */
+	public function details( $result, $action, $args ) {
+		if ( 'plugin_information' !== $action || ! isset( $args->slug ) || $args->slug !== $this->slug ) {
+			return $result;
+		}
+		$m = $this->manifest();
+		if ( empty( $m['version'] ) ) {
+			return $result;
+		}
+
+		return (object) array(
+			'name'          => isset( $m['name'] ) ? $m['name'] : 'Perdita Core',
+			'slug'          => $this->slug,
+			'version'       => $m['version'],
+			'author'        => '<a href="https://ericrosenberg.com">Eric Rosenberg</a>',
+			'homepage'      => isset( $m['url'] ) ? $m['url'] : 'https://perdita.ericrosenberg.com',
+			'requires'      => isset( $m['requires'] ) ? $m['requires'] : '',
+			'requires_php'  => isset( $m['requires_php'] ) ? $m['requires_php'] : '',
+			'tested'        => isset( $m['tested'] ) ? $m['tested'] : '',
+			'last_updated'  => isset( $m['last_updated'] ) ? $m['last_updated'] : '',
+			'download_link' => self::package_url_is_pinned( isset( $m['download_url'] ) ? $m['download_url'] : '' ) ? $m['download_url'] : '',
+			'sections'      => array(
+				'description' => esc_html__( 'The free companion plugin for the Perdita theme: SEO, forms, caching, security, analytics, email, and more, as modules you turn on one at a time.', 'perdita-core' ),
+			),
+		);
+	}
+
+	/**
+	 * Whether a package URL is one we are willing to install: HTTPS, and on
+	 * the same host the manifest itself is served from. Shared by check()
+	 * (which decides what to offer) and verify_download() (which re-derives
+	 * the offer from the manifest rather than trusting anything the earlier
+	 * request left behind), so the pin can never drift between the two.
+	 *
+	 * @param string $url Package URL from the manifest.
+	 * @return bool
+	 */
+	private static function package_url_is_pinned( $url ) {
+		$pkg  = wp_parse_url( (string) $url );
+		$host = wp_parse_url( self::MANIFEST, PHP_URL_HOST );
+		return ! empty( $pkg['scheme'] )
+			&& 'https' === $pkg['scheme']
+			&& ! empty( $pkg['host'] )
+			&& $pkg['host'] === $host;
+	}
+
+	/**
+	 * The manifest's sha256 checksum, normalized, or '' when the manifest did
+	 * not publish a usable one (the field is optional, so an older manifest
+	 * without it still installs).
+	 *
+	 * @param array $m Decoded manifest.
+	 * @return string Lowercase 64-char hex digest, or ''.
+	 */
+	private static function manifest_checksum( array $m ) {
+		if ( ! isset( $m['checksum'] ) || ! is_string( $m['checksum'] ) ) {
+			return '';
+		}
+		$checksum = strtolower( trim( $m['checksum'] ) );
+		return preg_match( '/^[a-f0-9]{64}$/', $checksum ) ? $checksum : '';
+	}
+
+	/**
+	 * Background auto-updates are OFF by default here, the opposite of the
+	 * theme's default.
+	 *
+	 * A theme update changes presentation. A plugin update in this codebase
+	 * can change what runs on a login form, what an SMTP route does, and what
+	 * an MCP endpoint exposes, so the site owner picks the moment. Flip it
+	 * with the 'perdita_core_auto_update' filter, or per site from the
+	 * Plugins screen's own auto-update column.
+	 *
+	 * @param bool|null $update Whether to auto-update.
+	 * @param object    $item   Update offer.
+	 * @return bool|null
+	 */
+	public function auto_update( $update, $item ) {
+		if ( is_object( $item ) && isset( $item->plugin ) && $this->basename === $item->plugin ) {
+			return (bool) apply_filters( 'perdita_core_auto_update', false );
+		}
+		return $update;
+	}
+
+	/**
+	 * Drop the cached manifest after any upgrade so the next check is fresh.
+	 */
+	public function flush() {
+		delete_transient( self::CACHE );
+	}
+
+	/**
+	 * Verify the downloaded package against the manifest's checksum before
+	 * WordPress installs it. Hooked to 'upgrader_pre_download' so the package
+	 * is checked as it is fetched rather than after it is already unzipped.
+	 *
+	 * This re-reads the manifest instead of consulting anything check() left
+	 * on the instance. check() runs on 'pre_set_site_transient_update_plugins',
+	 * which fires when WordPress REFRESHES the update transient; the request
+	 * that actually performs the upgrade reads that already-stored transient
+	 * and never calls check() at all. A request-scoped "pending checksum"
+	 * would therefore always be empty here and the verification would silently
+	 * never happen, which is exactly the bug the theme's updater shipped with
+	 * before this pattern was fixed. manifest() is transient-cached (12
+	 * hours), so re-reading it here normally costs one get_transient(), and
+	 * the HTTPS + same-host pin is re-applied to the manifest's URL exactly as
+	 * check() applies it before offering anything.
+	 *
+	 * @param bool|WP_Error $reply    False (the default) to let WordPress
+	 *                                handle the download normally.
+	 * @param string        $package  Package URL being downloaded.
+	 * @param WP_Upgrader   $upgrader Upgrader instance (unused).
+	 * @return bool|WP_Error|string False to defer to core, a local temp file
+	 *                              path on a verified download, or a WP_Error
+	 *                              to abort the update on a checksum mismatch.
+	 */
+	public function verify_download( $reply, $package, $upgrader ) { // phpcs:ignore VariableAnalysis.CodeAnalysis.VariableAnalysis.UnusedVariable
+		if ( false !== $reply || ! is_string( $package ) || '' === $package ) {
+			return $reply;
+		}
+
+		$m = $this->manifest();
+		if ( empty( $m['download_url'] ) || ! is_string( $m['download_url'] ) ) {
+			return $reply;
+		}
+
+		// Same pin check as check(): a manifest that has been tampered with
+		// to point somewhere else is not something we verify a checksum for,
+		// it is something we decline to recognize as our package.
+		if ( ! self::package_url_is_pinned( $m['download_url'] ) ) {
+			return $reply;
+		}
+
+		// Only ever intercept our own package. Every other plugin and theme
+		// update running in this same request must fall through to core.
+		if ( $package !== $m['download_url'] ) {
+			return $reply;
+		}
+
+		$checksum = self::manifest_checksum( $m );
+		if ( '' === $checksum ) {
+			return $reply; // Manifest published no usable checksum; nothing to verify against.
+		}
+
+		if ( ! function_exists( 'download_url' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+		}
+		$tmp = download_url( $package, 300 );
+		if ( is_wp_error( $tmp ) ) {
+			return $tmp;
+		}
+		$actual = hash_file( 'sha256', $tmp );
+		if ( ! is_string( $actual ) || ! hash_equals( $checksum, $actual ) ) {
+			wp_delete_file( $tmp );
+			return new WP_Error(
+				'perdita_core_checksum_mismatch',
+				__( 'The Perdita Core update package failed checksum verification and was not installed. This can mean the download was corrupted, or that the update server or connection was tampered with. Please try again later. If it keeps happening, check perdita.ericrosenberg.com directly before updating.', 'perdita-core' )
+			);
+		}
+		return $tmp;
+	}
+}

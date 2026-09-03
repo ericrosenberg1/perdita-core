@@ -1,0 +1,49 @@
+.perdita-related {
+	margin-top: 2.5rem;
+	padding-top: 2rem;
+	border-top: 1px solid var(--perdita-color-border, #e5e7eb);
+}
+.perdita-related__heading {
+	font-size: 1.1rem;
+	margin: 0 0 1rem;
+}
+.perdita-related__grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+	gap: 1.25rem;
+}
+.perdita-related__card {
+	display: flex;
+	flex-direction: column;
+	color: inherit;
+	text-decoration: none;
+	border: 1px solid var(--perdita-color-border, #e5e7eb);
+	border-radius: var(--perdita-radius, 8px);
+	background: var(--perdita-color-surface, #fff);
+	overflow: hidden;
+}
+.perdita-related__card:hover .perdita-related__title,
+.perdita-related__card:focus .perdita-related__title {
+	color: var(--perdita-color-primary, #2563eb);
+}
+.perdita-related__thumb {
+	display: block;
+	aspect-ratio: 16 / 10;
+	overflow: hidden;
+	background: var(--perdita-color-bg, #f4f4f5);
+}
+.perdita-related__thumb img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	display: block;
+}
+.perdita-related__title {
+	font-weight: 600;
+	padding: .75rem .9rem 0;
+}
+.perdita-related__date {
+	font-size: .85rem;
+	color: var(--perdita-color-muted, #6b7280);
+	padding: .35rem .9rem .9rem;
+}

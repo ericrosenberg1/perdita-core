@@ -1,0 +1,94 @@
+/**
+ * Perdita Analytics consent banner styles.
+ *
+ * A fixed bar at the bottom of the viewport. Buttons have a visible focus ring
+ * so keyboard users can see where they are. Honors reduced-motion and dark
+ * color-scheme preferences.
+ */
+
+.perdita-consent-banner {
+	position: fixed;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 99999;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 16px 20px;
+	background: #1f2933;
+	color: #f5f7fa;
+	font-size: 15px;
+	line-height: 1.5;
+	box-shadow: 0 -2px 12px rgba( 0, 0, 0, 0.2 );
+}
+
+.perdita-consent-banner[hidden] {
+	display: none;
+}
+
+.perdita-consent-banner__message {
+	flex: 1 1 300px;
+	margin: 0;
+}
+
+.perdita-consent-banner__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+}
+
+.perdita-consent-banner__btn {
+	appearance: none;
+	cursor: pointer;
+	border: 1px solid transparent;
+	border-radius: 6px;
+	padding: 10px 18px;
+	font-size: 15px;
+	font-weight: 600;
+	line-height: 1.2;
+}
+
+.perdita-consent-banner__btn--accept {
+	background: #2563eb;
+	color: #ffffff;
+}
+
+.perdita-consent-banner__btn--accept:hover {
+	background: #1d4ed8;
+}
+
+.perdita-consent-banner__btn--decline {
+	background: transparent;
+	color: #f5f7fa;
+	border-color: rgba( 245, 247, 250, 0.5 );
+}
+
+.perdita-consent-banner__btn--decline:hover {
+	border-color: #f5f7fa;
+}
+
+.perdita-consent-banner__btn:focus-visible {
+	outline: 3px solid #93c5fd;
+	outline-offset: 2px;
+}
+
+@media ( max-width: 600px ) {
+	.perdita-consent-banner {
+		flex-direction: column;
+		align-items: stretch;
+	}
+
+	.perdita-consent-banner__actions {
+		justify-content: flex-end;
+	}
+}
+
+@media ( prefers-reduced-motion: reduce ) {
+	.perdita-consent-banner,
+	.perdita-consent-banner__btn {
+		transition: none;
+	}
+}

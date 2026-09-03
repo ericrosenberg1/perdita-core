@@ -1,0 +1,38 @@
+.perdita-form { max-width: var(--perdita-measure, 65ch); }
+.perdita-form__field { margin-bottom: 1.1rem; }
+.perdita-form__field label { display: block; font-weight: 600; margin-bottom: .35rem; }
+.perdita-form__req { color: var(--perdita-color-primary, #2563eb); }
+.perdita-form input[type=text],
+.perdita-form input[type=email],
+.perdita-form input[type=tel],
+.perdita-form input[type=url],
+.perdita-form input[type=number],
+.perdita-form input[type=date],
+.perdita-form select,
+.perdita-form textarea {
+	width: 100%;
+	padding: .6rem .7rem;
+	border: 1px solid var(--perdita-color-border, #e5e7eb);
+	border-radius: var(--perdita-radius, 8px);
+	background: var(--perdita-color-surface, #fff);
+	font: inherit;
+	color: inherit;
+}
+.perdita-form textarea { resize: vertical; }
+.perdita-form__choices { display: flex; flex-direction: column; gap: .35rem; }
+.perdita-form__choice { font-weight: 400; }
+.perdita-form__submit {
+	background: var(--perdita-color-primary, #2563eb);
+	color: #fff;
+	border: 0;
+	border-radius: var(--perdita-radius, 8px);
+	padding: .65rem 1.4rem;
+	font: inherit;
+	font-weight: 600;
+	cursor: pointer;
+}
+.perdita-form__submit:disabled { opacity: .6; cursor: default; }
+.perdita-form__spinner { margin-left: .5rem; }
+.perdita-form__message { margin-top: 1rem; }
+.perdita-form__message.is-success { color: #0a7c2f; }
+.perdita-form__message.is-error { color: #b32d2e; }
