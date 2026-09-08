@@ -393,6 +393,75 @@ class Perdita_SEO_Store {
 	}
 
 	/**
+	 * Import global settings from the Genesis Framework, if present.
+	 *
+	 * Genesis wrote its SEO Settings screen to the `genesis-seo-settings`
+	 * option, and that option survives a theme switch, which is what makes
+	 * this importable after the site has moved to Perdita. Per-post Genesis
+	 * titles and descriptions (`_genesis_title`, `_genesis_description`) are
+	 * post meta and belong to the Perdita Pro importer, the same split as the
+	 * Yoast and AIOSEO importers above.
+	 *
+	 * @return int Number of fields imported.
+	 */
+	public function import_genesis() {
+		$g = get_option( 'genesis-seo-settings' );
+		if ( ! is_array( $g ) || ! $g ) {
+			return 0;
+		}
+		$patch = array();
+		$n     = 0;
+
+		if ( ! empty( $g['home_doctitle'] ) ) {
+			$patch['home_title'] = (string) $g['home_doctitle'];
+			$n++;
+		}
+		if ( ! empty( $g['home_description'] ) ) {
+			$patch['home_description'] = (string) $g['home_description'];
+			$n++;
+		}
+		if ( ! empty( $g['doctitle_sep'] ) ) {
+			$patch['separator'] = (string) $g['doctitle_sep'];
+			$n++;
+		}
+		// Genesis only appends the site name when append_site_title is on
+		// (off by default), and puts the separator on whichever side
+		// doctitle_seplocation says. Carry the shape the site actually had.
+		if ( array_key_exists( 'append_site_title', $g ) ) {
+			if ( empty( $g['append_site_title'] ) ) {
+				$patch['title_template'] = '%title%';
+			} else {
+				$patch['title_template'] = ( 'left' === ( $g['doctitle_seplocation'] ?? 'right' ) )
+					? '%sitename% %sep% %title%'
+					: '%title% %sep% %sitename%';
+			}
+			$n++;
+		}
+
+		$noindex = array();
+		foreach ( array(
+			'noindex_cat_archive'    => 'archive_category',
+			'noindex_tag_archive'    => 'archive_tag',
+			'noindex_author_archive' => 'archive_author',
+			'noindex_date_archive'   => 'archive_date',
+			'noindex_search_archive' => 'search',
+		) as $theirs => $ours ) {
+			if ( array_key_exists( $theirs, $g ) ) {
+				$noindex[ $ours ] = (bool) $g[ $theirs ];
+				$n++;
+			}
+		}
+		if ( $noindex ) {
+			$patch['noindex'] = $noindex;
+		}
+
+		if ( $n ) {
+			$this->save( $patch );
+		}
+		return $n;
+	}
+
+	/**
 	 * Deep merge.
 	 *
 	 * @param array $base     Base.

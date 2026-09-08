@@ -4,7 +4,7 @@ Tags: forms, seo, caching, security, newsletter
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 1.0.0-alpha
+Stable tag: 1.0.1-alpha
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -76,6 +76,10 @@ Form entries, subscribers, orders, products, form definitions, the SMTP log, you
 Yes, that's what Pro is built on. Pro registers its own modules into this plugin's registry, so they appear on the same Modules screen and behave the same way.
 
 == Changelog ==
+
+= 1.0.1-alpha =
+* SEO: import site-wide Genesis Framework SEO settings (homepage title and description, separator, title shape, archive noindex rules) from Perdita SEO > Tools, next to the Yoast and All in One SEO importers.
+* The Premium feature list no longer claims a Rank Math per-post importer that does not exist.
 
 = 1.0.0-alpha =
 * First release. Split out of the Perdita theme so the theme can go to the wordpress.org theme directory, which doesn't allow plugin features in a theme.

@@ -1,7 +1,7 @@
 <?php
 /**
  * Perdita SEO admin: a top-level menu with Dashboard, Titles & Meta, Social,
- * Default Images, and Tools (import from Yoast / All in One SEO).
+ * Default Images, and Tools (import from Yoast, All in One SEO, or Genesis).
  *
  * @package Perdita_Core
  */
@@ -118,7 +118,7 @@ class Perdita_SEO_Admin {
 				<li><?php esc_html_e( 'Per-post SEO editor with live Google and social previews', 'perdita-core' ); ?></li>
 				<li><?php esc_html_e( 'Per-post-type title and meta templates, plus richer schema (Article, Product, FAQ, HowTo, LocalBusiness, Recipe)', 'perdita-core' ); ?></li>
 				<li><?php esc_html_e( 'Redirect manager and 404 monitor, with automatic redirects on slug changes', 'perdita-core' ); ?></li>
-				<li><?php esc_html_e( 'Import per-post meta and redirects from Yoast, AIOSEO, and Rank Math', 'perdita-core' ); ?></li>
+				<li><?php esc_html_e( 'Import per-post titles, descriptions, canonical URLs, and noindex flags from Yoast, AIOSEO, and Genesis', 'perdita-core' ); ?></li>
 				<li><?php esc_html_e( 'AI bulk meta-description generation and internal-link suggestions', 'perdita-core' ); ?></li>
 			</ul>
 			<p class="description"><?php esc_html_e( 'Everything on this page is free, forever. Premium adds depth for bigger sites.', 'perdita-core' ); ?></p>
@@ -153,7 +153,7 @@ class Perdita_SEO_Admin {
 			'perdita-seo-titles' => __( 'Set your title format, homepage title and description, schema, and noindex rules', 'perdita-core' ),
 			'perdita-seo-social' => __( 'Link your social profiles and pick the Twitter/X card style', 'perdita-core' ),
 			'perdita-seo-images' => __( 'Set the default image used when a page has no featured image', 'perdita-core' ),
-			'perdita-seo-tools'  => __( 'Import your settings from Yoast or All in One SEO', 'perdita-core' ),
+			'perdita-seo-tools'  => __( 'Import your settings from Yoast, All in One SEO, or Genesis', 'perdita-core' ),
 		);
 		echo '<ul>';
 		foreach ( $links as $slug => $desc ) {
@@ -228,8 +228,9 @@ class Perdita_SEO_Admin {
 	public function page_tools() {
 		$this->open( __( 'Tools', 'perdita-core' ) );
 		$has_yoast  = (bool) get_option( 'wpseo_titles' ) || defined( 'WPSEO_VERSION' );
-		$has_aioseo = (bool) get_option( 'aioseo_options' ) || defined( 'AIOSEO_VERSION' );
-		echo '<p>' . esc_html__( 'Bring your global SEO settings over from another plugin. This imports site-wide titles, social profiles, and default images. Per-post meta import is a Premium feature.', 'perdita-core' ) . '</p>';
+		$has_aioseo  = (bool) get_option( 'aioseo_options' ) || defined( 'AIOSEO_VERSION' );
+		$has_genesis = (bool) get_option( 'genesis-seo-settings' );
+		echo '<p>' . esc_html__( 'Bring your global SEO settings over from another plugin or from the Genesis Framework. This imports site-wide titles, social profiles, default images, and noindex rules. Per-post meta import is a Premium feature.', 'perdita-core' ) . '</p>';
 
 		echo '<h2>' . esc_html__( 'Import from Yoast SEO', 'perdita-core' ) . '</h2>';
 		echo '<p>' . ( $has_yoast ? esc_html__( 'Yoast settings detected.', 'perdita-core' ) : esc_html__( 'No Yoast settings found on this site.', 'perdita-core' ) ) . '</p>';
@@ -243,6 +244,13 @@ class Perdita_SEO_Admin {
 		$this->form_open( 'perdita_seo_import' );
 		echo '<input type="hidden" name="source" value="aioseo" />';
 		submit_button( __( 'Import from AIOSEO', 'perdita-core' ), 'secondary', 'submit', false );
+		echo '</form><hr />';
+
+		echo '<h2>' . esc_html__( 'Import from Genesis', 'perdita-core' ) . '</h2>';
+		echo '<p>' . ( $has_genesis ? esc_html__( 'Genesis SEO settings detected.', 'perdita-core' ) : esc_html__( 'No Genesis SEO settings found on this site.', 'perdita-core' ) ) . '</p>';
+		$this->form_open( 'perdita_seo_import' );
+		echo '<input type="hidden" name="source" value="genesis" />';
+		submit_button( __( 'Import from Genesis', 'perdita-core' ), 'secondary', 'submit', false );
 		echo '</form>';
 		echo '</div>';
 	}
@@ -336,9 +344,26 @@ class Perdita_SEO_Admin {
 	public function do_import() {
 		$this->guard( 'perdita_seo_import' );
 		$source = sanitize_key( wp_unslash( $_POST['source'] ?? '' ) );
-		$n      = 'yoast' === $source ? $this->store->import_yoast() : ( 'aioseo' === $source ? $this->store->import_aioseo() : 0 );
+		$labels = array(
+			'yoast'   => 'Yoast',
+			'aioseo'  => 'AIOSEO',
+			'genesis' => 'Genesis',
+		);
+		switch ( $source ) {
+			case 'yoast':
+				$n = $this->store->import_yoast();
+				break;
+			case 'aioseo':
+				$n = $this->store->import_aioseo();
+				break;
+			case 'genesis':
+				$n = $this->store->import_genesis();
+				break;
+			default:
+				$n = 0;
+		}
 		$msg    = $n
-			? sprintf( /* translators: 1: count, 2: source */ __( 'Imported %1$d settings from %2$s.', 'perdita-core' ), $n, 'yoast' === $source ? 'Yoast' : 'AIOSEO' )
+			? sprintf( /* translators: 1: count, 2: source */ __( 'Imported %1$d settings from %2$s.', 'perdita-core' ), $n, $labels[ $source ] )
 			: __( 'Nothing to import (no settings found).', 'perdita-core' );
 		$this->redirect( 'perdita-seo-tools', $msg );
 	}

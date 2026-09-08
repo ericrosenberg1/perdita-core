@@ -199,6 +199,43 @@ $bad->set_param( 'id', $form_id );
 $bad->set_param( 'perdita_nonce', 'nope' );
 $ok( 403 === $forms->submit( $bad )->get_status(), 'form bad nonce -> 403' );
 
+// --- SEO: Genesis site-wide importer ---
+$seo_g        = perdita_core()->seo;
+$__gen_before = $seo_g->all();
+$__gen_opt    = get_option( 'genesis-seo-settings', false );
+update_option( 'genesis-seo-settings', array(
+	'home_doctitle'          => 'Smoke Genesis Home',
+	'home_description'       => 'Genesis home description.',
+	'doctitle_sep'           => '|',
+	'doctitle_seplocation'   => 'right',
+	'append_site_title'      => 1,
+	'noindex_cat_archive'    => 0,
+	'noindex_tag_archive'    => 1,
+	'noindex_author_archive' => 1,
+	'noindex_date_archive'   => 1,
+	'noindex_search_archive' => 1,
+) );
+$__gen_n = $seo_g->import_genesis();
+$ok( 9 === $__gen_n, 'SEO Genesis import: counts every field it mapped (title, description, separator, title shape, five noindex rules)' );
+$ok( 'Smoke Genesis Home' === $seo_g->get( 'home_title' ) && 'Genesis home description.' === $seo_g->get( 'home_description' ) && '|' === $seo_g->get( 'separator' ), 'SEO Genesis import: homepage title, description, and separator land in the store' );
+$ok( '%title% %sep% %sitename%' === $seo_g->get( 'title_template' ), 'SEO Genesis import: append_site_title=1 with the separator on the right keeps the site name after the title' );
+$ok( false === $seo_g->get( 'noindex.archive_category' ) && true === $seo_g->get( 'noindex.archive_tag' ), 'SEO Genesis import: per-archive noindex rules carry over as booleans' );
+update_option( 'genesis-seo-settings', array( 'append_site_title' => 0 ) );
+$seo_g->import_genesis();
+$ok( '%title%' === $seo_g->get( 'title_template' ), 'SEO Genesis import: append_site_title=0 (the Genesis default) drops the site name from the title template' );
+delete_option( 'genesis-seo-settings' );
+$ok( 0 === $seo_g->import_genesis(), 'SEO Genesis import: nothing to import returns 0' );
+if ( false !== $__gen_opt ) {
+	update_option( 'genesis-seo-settings', $__gen_opt );
+}
+$seo_g->save( array(
+	'home_title'       => $__gen_before['home_title'],
+	'home_description' => $__gen_before['home_description'],
+	'separator'        => $__gen_before['separator'],
+	'title_template'   => $__gen_before['title_template'],
+	'noindex'          => $__gen_before['noindex'],
+) );
+
 // --- SEO attachment URL cache ---
 $seo = perdita_core()->seo;
 $seo->save( array( 'default_image_id' => 0, 'default_image_cache' => array() ) );
