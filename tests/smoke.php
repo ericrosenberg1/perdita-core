@@ -90,6 +90,20 @@ $ok( function_exists( 'perdita' ) && class_exists( 'Perdita_Crypto' ), 'the them
 $ok( 0 === has_action( 'after_setup_theme', 'perdita_core_boot' ), 'the plugin boots on after_setup_theme priority 0 (plugins load before functions.php, so plugins_loaded would be too early)' );
 $ok( ! has_action( 'admin_notices', 'perdita_core_theme_notice' ), 'the missing-theme notice is not registered when the theme IS active' );
 
+// --- lock step: the theme, this plugin, and Pro share one version number ---
+$ok( array() === Perdita_Core::version_drift(), 'lock step: every installed Perdita piece is on ' . PERDITA_CORE_VERSION . ' (bump all three with bin/bump-version.sh)' );
+$ok( defined( 'PERDITA_VERSION' ) && PERDITA_VERSION === PERDITA_CORE_VERSION, 'lock step: the theme version matches PERDITA_CORE_VERSION exactly' );
+$__vd = array( 'theme' => '0.18.0-alpha', 'core' => '0.17.1-alpha', 'pro' => '0.18.0-alpha' );
+$ok( $__vd === Perdita_Core::version_drift( $__vd ), 'lock step: version_drift() returns every piece when any one differs' );
+$ok( array() === Perdita_Core::version_drift( array( 'theme' => '1.0.0', 'core' => '1.0.0', 'pro' => '1.0.0' ) ), 'lock step: matching versions are no drift' );
+$ok( array() === Perdita_Core::version_drift( array( 'core' => '0.18.0-alpha' ) ), 'lock step: a lone piece can never be out of step' );
+$ok( array( 'theme' => '0.18.0', 'core' => '0.18.0-alpha' ) === Perdita_Core::version_drift( array( 'theme' => '0.18.0', 'core' => '0.18.0-alpha' ) ), 'lock step: an -alpha suffix is a different build, not the same version' );
+ob_start();
+perdita_core_render_version_notice( array( 'theme' => '0.18.0-alpha', 'core' => '0.17.1-alpha' ) );
+$__vd_html = ob_get_clean();
+$ok( false !== strpos( $__vd_html, 'notice-warning' ) && false !== strpos( $__vd_html, 'Perdita Core 0.17.1-alpha' ) && false !== strpos( $__vd_html, 'update-core.php' ) && false === strpos( $__vd_html, 'is-dismissible' ), 'lock step: the warning names each version, links to Updates, and cannot be dismissed while it is true' );
+$ok( function_exists( 'perdita_core_version_notice' ), 'lock step: the admin_notices callback exists' );
+
 $core = perdita_core();
 $ok( $core->modules instanceof Perdita_Modules, 'perdita_core()->modules is the registry' );
 $ok( $core->seo instanceof Perdita_SEO_Store, 'perdita_core()->seo is the SEO store (what the theme perdita()->seo used to be)' );

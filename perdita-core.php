@@ -3,7 +3,7 @@
  * Plugin Name:       Perdita Core
  * Plugin URI:        https://perdita.ericrosenberg.com
  * Description:       The free companion plugin for the Perdita theme. Adds SEO, forms, caching, security, analytics, email, and more as modules you turn on one at a time.
- * Version:           1.0.1-alpha
+ * Version:           0.18.0-alpha
  * Requires at least: 6.4
  * Requires PHP:      8.0
  * Author:            Eric Rosenberg
@@ -26,7 +26,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'PERDITA_CORE_VERSION', '1.0.1-alpha' );
+define( 'PERDITA_CORE_VERSION', '0.18.0-alpha' );
 define( 'PERDITA_CORE_FILE', __FILE__ );
 define( 'PERDITA_CORE_DIR', plugin_dir_path( __FILE__ ) );
 define( 'PERDITA_CORE_URL', plugin_dir_url( __FILE__ ) );
@@ -62,6 +62,9 @@ function perdita_core_boot() {
 		return;
 	}
 	perdita_core();
+	if ( is_admin() ) {
+		add_action( 'admin_notices', 'perdita_core_version_notice' );
+	}
 	/**
 	 * Fires once the plugin has booted against a compatible theme. Perdita
 	 * Pro keys its own dependency check on this (Perdita_Core::is_booted()),
@@ -72,6 +75,59 @@ function perdita_core_boot() {
 	do_action( 'perdita_core_booted', perdita_core() );
 }
 add_action( 'after_setup_theme', 'perdita_core_boot', 0 );
+
+/**
+ * Warn when the theme, this plugin, and Perdita Pro are not on the same
+ * version. They release together, so a difference means one piece has been
+ * updated and the others have not yet: normal for the hours between a
+ * wordpress.org auto-update and the next plugin update check, wrong for any
+ * longer. Not dismissible, because it stops being true only when the
+ * versions match again.
+ *
+ * This plugin owns the notice whenever it has booted. The theme shows its
+ * own copy only when this plugin predates version_drift(), and Pro only
+ * when both do, so a site never sees it twice.
+ */
+function perdita_core_version_notice() {
+	if ( ! current_user_can( 'update_plugins' ) ) {
+		return;
+	}
+	$drift = Perdita_Core::version_drift();
+	if ( $drift ) {
+		perdita_core_render_version_notice( $drift );
+	}
+}
+
+/**
+ * The out-of-step warning markup for a version_drift() result.
+ *
+ * @param array $drift slug => version, from Perdita_Core::version_drift().
+ */
+function perdita_core_render_version_notice( array $drift ) {
+	$labels = array(
+		'theme' => __( 'Perdita theme', 'perdita-core' ),
+		'core'  => __( 'Perdita Core', 'perdita-core' ),
+		'pro'   => __( 'Perdita Pro', 'perdita-core' ),
+	);
+	$parts = array();
+	foreach ( $drift as $slug => $version ) {
+		$parts[] = ( isset( $labels[ $slug ] ) ? $labels[ $slug ] : $slug ) . ' ' . $version;
+	}
+	echo '<div class="notice notice-warning"><p>';
+	echo esc_html(
+		sprintf(
+			/* translators: %s: list like "Perdita theme 0.18.0-alpha, Perdita Core 0.17.1-alpha" */
+			__( 'Perdita versions are out of step: %s. The theme, Perdita Core, and Perdita Pro are released together and should all be on the same version, so update whichever is behind.', 'perdita-core' ),
+			implode( ', ', $parts )
+		)
+	);
+	printf(
+		' <a href="%s">%s</a>',
+		esc_url( self_admin_url( 'update-core.php' ) ),
+		esc_html__( 'Check for updates', 'perdita-core' )
+	);
+	echo '</p></div>';
+}
 
 /**
  * Tell an administrator why nothing this plugin does is happening.

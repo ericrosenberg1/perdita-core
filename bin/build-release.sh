@@ -82,6 +82,27 @@ const_version="$(git show HEAD:${slug}.php | sed -n "s/.*PERDITA_CORE_VERSION'[[
 	|| die "version drift: the plugin header says '$version' but PERDITA_CORE_VERSION says '$const_version'"
 ok "version $version (plugin header and PERDITA_CORE_VERSION agree)"
 
+# --- 2c. lock step with the sibling checkouts --------------------------------
+# The theme, Perdita Core, and Perdita Pro ship as one release under one
+# version number, and each warns in wp-admin when the installed versions
+# differ. A build of one piece at a version the others do not share is a
+# release that warns on every site it reaches. bin/bump-version.sh (theme
+# repo) moves all of them at once; this refuses to package anything else.
+for sibling in perdita perdita-core perdita-pro; do
+	sibling_dir="$(cd "$repo_root/../$sibling" 2>/dev/null && pwd || true)"
+	if [ -z "$sibling_dir" ] || [ "$sibling_dir" = "$repo_root" ] || [ ! -d "$sibling_dir/.git" ]; then
+		continue
+	fi
+	if [ "$sibling" = perdita ]; then
+		sibling_version="$(git -C "$sibling_dir" show HEAD:style.css 2>/dev/null | sed -n 's/^[[:space:]]*Version:[[:space:]]*//p' | head -1 | tr -d '\r')"
+	else
+		sibling_version="$(git -C "$sibling_dir" show "HEAD:$sibling.php" 2>/dev/null | sed -n 's/^[[:space:]]*\*[[:space:]]*Version:[[:space:]]*//p' | head -1 | tr -d '\r' | sed 's/[[:space:]]*$//')"
+	fi
+	[ "$sibling_version" = "$version" ] \
+		|| die "lock step: $sibling is at '$sibling_version' (committed) but this build is '$version'. Run bin/bump-version.sh $version and commit every repo."
+	ok "lock step: $sibling is also $version"
+done
+
 # --- 2b. a version number may name exactly one artifact ----------------------
 # Perdita_Core_Updater offers an update only on version_compare(manifest,
 # installed, '>'), so re-publishing the same version with different bytes

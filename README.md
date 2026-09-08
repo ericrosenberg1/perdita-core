@@ -47,7 +47,11 @@ find . -name '*.php' -not -path './dist/*' -exec php -l {} \;
 # run the smoke suite against a real WordPress
 bash tests/run.sh /path/to/wordpress
 
-# build a release zip and its update manifest
+# move the theme, Perdita Core, Perdita Pro, and the license server to one version
+# (the three ship together and warn in wp-admin when their versions differ)
+bin/bump-version.sh 0.18.0-alpha
+
+# build a release zip and its update manifest (refuses a version the siblings do not share)
 bin/build-release.sh
 
 # build the wordpress.org submission zip (no self-hosted updater)

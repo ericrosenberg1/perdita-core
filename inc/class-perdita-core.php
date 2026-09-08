@@ -223,6 +223,52 @@ final class Perdita_Core {
 	}
 
 	/**
+	 * Every installed Perdita piece and its version, keyed theme|core|pro.
+	 * A piece that is not installed is simply absent.
+	 *
+	 * @return array slug => version
+	 */
+	public static function versions() {
+		$v = array();
+		if ( defined( 'PERDITA_VERSION' ) ) {
+			$v['theme'] = (string) PERDITA_VERSION;
+		}
+		$v['core'] = (string) PERDITA_CORE_VERSION;
+		if ( defined( 'PERDITA_PRO_VERSION' ) ) {
+			$v['pro'] = (string) PERDITA_PRO_VERSION;
+		}
+		return $v;
+	}
+
+	/**
+	 * The theme, this plugin, and Perdita Pro ship together under one
+	 * version number (bin/bump-version.sh in the theme repo moves all of
+	 * them at once, and every build script refuses a version the others do
+	 * not share). Returns every installed piece with its version when they
+	 * do not all agree, and an empty array when they do, or when only one
+	 * piece is installed, which cannot disagree with anything.
+	 *
+	 * Agreement is version_compare() equality: "0.18.0-alpha" and
+	 * "0.18.0" are different builds, not the same version.
+	 *
+	 * @param array $versions Optional replacement for versions(), for tests.
+	 * @return array slug => version when out of step, else empty.
+	 */
+	public static function version_drift( array $versions = array() ) {
+		$v = $versions ? $versions : self::versions();
+		if ( count( $v ) < 2 ) {
+			return array();
+		}
+		$first = (string) reset( $v );
+		foreach ( $v as $version ) {
+			if ( 0 !== version_compare( (string) $version, $first ) ) {
+				return $v;
+			}
+		}
+		return array();
+	}
+
+	/**
 	 * Constructor. Load everything.
 	 */
 	private function __construct() {
