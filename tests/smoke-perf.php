@@ -104,6 +104,9 @@ $__perf_cache = new Perdita_Caching( perdita_core() );
 $ok( false !== has_action( 'comment_post', array( $__perf_cache, 'on_comment' ) ), 'caching: comment_post now runs the targeted purge, not purge_all()' );
 $ok( false !== has_action( 'transition_comment_status', array( $__perf_cache, 'on_comment_status' ) ), 'caching: transition_comment_status now runs the targeted purge, not purge_all()' );
 $ok( false !== has_action( 'switch_theme', array( $__perf_cache, 'purge_all' ) ), 'caching: the other triggers still clear the whole cache' );
+$ok( false !== has_action( 'added_option', array( $__perf_cache, 'purge_on_option_change' ) ), 'caching: added_option is hooked, so a module\'s settings saved for the first time still purge' );
+$ok( false !== has_action( 'updated_option', array( $__perf_cache, 'purge_on_option_change' ) ), 'caching: updated_option is hooked, so any perdita_-prefixed option changing purges the cache' );
+$ok( false !== has_action( 'deleted_option', array( $__perf_cache, 'purge_on_option_change' ) ), 'caching: deleted_option is hooked too (e.g. resetting the SEO store deletes its option)' );
 
 // The constructor wires purge and serve hooks. This is a throwaway instance
 // for driving the decision methods directly, so unhook it again rather than
@@ -114,8 +117,9 @@ remove_action( 'comment_post', array( $__perf_cache, 'on_comment' ) );
 remove_action( 'transition_comment_status', array( $__perf_cache, 'on_comment_status' ), 10 );
 remove_action( 'switch_theme', array( $__perf_cache, 'purge_all' ) );
 remove_action( 'customize_save_after', array( $__perf_cache, 'purge_all' ) );
-remove_action( 'update_option_perdita_settings', array( $__perf_cache, 'purge_all' ) );
-remove_action( 'update_option_' . Perdita_Caching::OPTION, array( $__perf_cache, 'purge_all' ) );
+remove_action( 'added_option', array( $__perf_cache, 'purge_on_option_change' ) );
+remove_action( 'updated_option', array( $__perf_cache, 'purge_on_option_change' ) );
+remove_action( 'deleted_option', array( $__perf_cache, 'purge_on_option_change' ) );
 
 $__perf_is_cacheable = new ReflectionMethod( 'Perdita_Caching', 'is_cacheable' );
 $__perf_is_cacheable->setAccessible( true );
@@ -257,6 +261,53 @@ if ( is_file( $__perf_etag_file ) ) {
 	unlink( $__perf_etag_file );
 } else {
 	$ok( false, 'caching: could not write a cache file to test the ETag (is ' . $__perf_cache_dir . ' writable?)' );
+}
+
+/* --- any perdita_-prefixed option changing purges the whole cache, not just
+   the design tokens and this module's own settings (the real-world bug: the
+   Analytics module's measurement ID lives in a completely different option,
+   perdita_analytics_settings, and saving it never used to purge anything) --- */
+
+$__perf_opt_name = 'perdita_smoke_option_purge_test';
+$__perf_opt_key   = 'https://' . $__perf_site_host . '/perdita-perf-option-purge/';
+$__perf_opt_file  = Perdita_Caching::file_for_key( $__perf_opt_key );
+delete_option( $__perf_opt_name );
+delete_option( 'smoke_unrelated_option_purge_test' );
+
+add_action( 'added_option', array( $__perf_cache, 'purge_on_option_change' ) );
+add_action( 'updated_option', array( $__perf_cache, 'purge_on_option_change' ) );
+add_action( 'deleted_option', array( $__perf_cache, 'purge_on_option_change' ) );
+
+// add_option(): the option row does not exist yet, exactly the shape of a
+// module's settings being saved for the first time.
+$__perf_store->invoke( $__perf_cache, $__perf_opt_file, '<!doctype html><html><body>1</body></html>' );
+add_option( $__perf_opt_name, 'first value' );
+$ok( ! is_file( $__perf_opt_file ), 'caching: saving a perdita_-prefixed option for the first time (add_option) purges the cache' );
+
+// update_option(): the same option changing again.
+$__perf_store->invoke( $__perf_cache, $__perf_opt_file, '<!doctype html><html><body>2</body></html>' );
+update_option( $__perf_opt_name, 'second value' );
+$ok( ! is_file( $__perf_opt_file ), 'caching: updating an existing perdita_-prefixed option purges the cache' );
+
+// delete_option(): e.g. resetting the SEO store deletes its option outright.
+$__perf_store->invoke( $__perf_cache, $__perf_opt_file, '<!doctype html><html><body>3</body></html>' );
+delete_option( $__perf_opt_name );
+$ok( ! is_file( $__perf_opt_file ), 'caching: deleting a perdita_-prefixed option purges the cache too' );
+
+// This hooks EVERY option write on the site, so the 'perdita_' prefix match
+// is the only thing keeping it from clearing the cache on unrelated
+// core/plugin activity.
+$__perf_store->invoke( $__perf_cache, $__perf_opt_file, '<!doctype html><html><body>4</body></html>' );
+add_option( 'smoke_unrelated_option_purge_test', 'x' );
+update_option( 'smoke_unrelated_option_purge_test', 'y' );
+delete_option( 'smoke_unrelated_option_purge_test' );
+$ok( is_file( $__perf_opt_file ), 'caching: a non-perdita_ option changing does not purge the cache' );
+
+remove_action( 'added_option', array( $__perf_cache, 'purge_on_option_change' ) );
+remove_action( 'updated_option', array( $__perf_cache, 'purge_on_option_change' ) );
+remove_action( 'deleted_option', array( $__perf_cache, 'purge_on_option_change' ) );
+if ( is_file( $__perf_opt_file ) ) {
+	unlink( $__perf_opt_file );
 }
 
 /* --- a comment purges its own post and the front page, nothing else --- */

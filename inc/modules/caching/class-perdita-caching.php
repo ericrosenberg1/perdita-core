@@ -115,11 +115,18 @@ class Perdita_Caching {
 		add_action( 'transition_comment_status', array( $this, 'on_comment_status' ), 10, 3 );
 		add_action( 'switch_theme', array( $this, 'purge_all' ) );
 		add_action( 'customize_save_after', array( $this, 'purge_all' ) );
-		// The design token document is stored in option 'perdita_settings'. When
-		// it changes, generated CSS changes, so every cached page is stale.
-		add_action( 'update_option_perdita_settings', array( $this, 'purge_all' ) );
-		// When our own settings change (TTL, exclusions, on/off), drop everything.
-		add_action( 'update_option_' . self::OPTION, array( $this, 'purge_all' ) );
+		// Any Perdita-owned option can change rendered HTML: the design token
+		// document, this module's own settings, the SEO store, the module
+		// on/off registry, and every other module's settings (analytics,
+		// search console, security headers, and so on). Rather than hardcoding
+		// one hook per option name here (easy to write once and forget to
+		// repeat for the next module), hook the generic, un-suffixed actions
+		// WordPress fires for every option write and match by the 'perdita_'
+		// prefix every one of those options shares. See
+		// purge_on_option_change() for why all three are needed.
+		add_action( 'added_option', array( $this, 'purge_on_option_change' ) );
+		add_action( 'updated_option', array( $this, 'purge_on_option_change' ) );
+		add_action( 'deleted_option', array( $this, 'purge_on_option_change' ) );
 	}
 
 	/* ---------- settings ---------- */
@@ -890,6 +897,37 @@ class Perdita_Caching {
 	 */
 	public function on_comment_status( $new_status, $old_status, $comment ) {
 		return $this->on_comment( $comment );
+	}
+
+	/**
+	 * Purge on any Perdita-prefixed option being added, changed, or deleted.
+	 *
+	 * WordPress only fires the per-option `update_option_{$name}` action when
+	 * the option already existed AND its value changed; a module's settings
+	 * saved for the FIRST time (e.g. turning on Analytics and setting a
+	 * measurement ID) instead creates the row, which fires `add_option`/
+	 * `added_option` (hooks nothing here used to listen for). That gap left a
+	 * site serving the old, cached homepage (missing or wrong tracking tag)
+	 * for up to a full TTL after the save, with no error anywhere to say why.
+	 *
+	 * Rather than adding one `update_option_{$name}` + `add_option_{$name}`
+	 * pair per module option (and relying on remembering to do it again for
+	 * every module added later), this hooks the three generic, un-suffixed
+	 * actions WordPress fires for every option write and matches by the
+	 * `perdita_` prefix that the design token document, this module's own
+	 * settings, the SEO store, the module on/off registry, and every other
+	 * module's settings all share. A false-positive match (some unrelated
+	 * option that happens to start with `perdita_`) costs one harmless extra
+	 * purge; a missed match serves stale HTML, which is the failure this
+	 * closes.
+	 *
+	 * @param string $option Option name being added, updated, or deleted.
+	 */
+	public function purge_on_option_change( $option ) {
+		if ( 0 !== strpos( (string) $option, 'perdita_' ) ) {
+			return;
+		}
+		$this->purge_all();
 	}
 
 	/**
