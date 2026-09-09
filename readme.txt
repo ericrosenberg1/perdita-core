@@ -4,7 +4,7 @@ Tags: forms, seo, caching, security, newsletter
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.18.0-alpha
+Stable tag: 0.18.1-alpha
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -76,6 +76,9 @@ Form entries, subscribers, orders, products, form definitions, the SMTP log, you
 Yes, that's what Pro is built on. Pro registers its own modules into this plugin's registry, so they appear on the same Modules screen and behave the same way.
 
 == Changelog ==
+
+= 0.18.1-alpha =
+* Fix: the page cache now purges when ANY module's settings change (Analytics, Search Console, security, PageSpeed, related posts, sales, SMTP, subscriptions, backups), when the SEO store changes or resets, and when a module is switched on or off. Previously only the design tokens and the caching module's own settings purged the cache, so saving another module's settings (for example turning on Analytics and setting a GA4 measurement ID) could leave the previous, stale page serving until the cache TTL expired.
 
 = 0.18.0-alpha =
 * Version numbers now match the Perdita theme and Perdita Pro release for release, so 1.0.1-alpha is followed by 0.18.0-alpha on purpose. Warns in wp-admin when the three installed pieces are not on the same version.
