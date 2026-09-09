@@ -4,7 +4,7 @@ Tags: forms, seo, caching, security, newsletter
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.18.1-alpha
+Stable tag: 0.18.2-alpha
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -76,6 +76,11 @@ Form entries, subscribers, orders, products, form definitions, the SMTP log, you
 Yes, that's what Pro is built on. Pro registers its own modules into this plugin's registry, so they appear on the same Modules screen and behave the same way.
 
 == Changelog ==
+
+= 0.18.2-alpha =
+* MCP server: writes to the OAuth storage (registered clients, tokens, connected apps) now run under a short database lock and re-read the stored row inside it, so two requests landing at once can no longer overwrite each other's tokens. A write that cannot take the lock returns a retryable 503 instead of guessing.
+* MCP server: get_post caps content_raw and content_rendered at 60,000 characters each, and says truncated: true with both full lengths when it cuts, so one huge post cannot swallow an AI client's context unannounced. Change the ceiling with the perdita_mcp_get_post_max_chars filter, or pass max_chars on a call to ask for less.
+* Caching: the MCP server's OAuth records changing (every token issue and refresh) no longer purges the page cache. Nothing on a rendered page depends on them.
 
 = 0.18.1-alpha =
 * Fix: the page cache now purges when ANY module's settings change (Analytics, Search Console, security, PageSpeed, related posts, sales, SMTP, subscriptions, backups), when the SEO store changes or resets, and when a module is switched on or off. Previously only the design tokens and the caching module's own settings purged the cache, so saving another module's settings (for example turning on Analytics and setting a GA4 measurement ID) could leave the previous, stale page serving until the cache TTL expired.
