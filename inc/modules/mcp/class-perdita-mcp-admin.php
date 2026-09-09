@@ -148,10 +148,14 @@ class Perdita_MCP_Admin {
 	private function render_notices() {
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only status message on a redirect, no state change.
 		$msg = isset( $_GET['perdita_mcp_msg'] ) ? sanitize_text_field( wp_unslash( $_GET['perdita_mcp_msg'] ) ) : '';
-		if ( '' === $msg ) {
-			return;
+		if ( '' !== $msg ) {
+			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( $msg ) . '</p></div>';
 		}
-		echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( $msg ) . '</p></div>';
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- same as above, the failure variant.
+		$err = isset( $_GET['perdita_mcp_err'] ) ? sanitize_text_field( wp_unslash( $_GET['perdita_mcp_err'] ) ) : '';
+		if ( '' !== $err ) {
+			echo '<div class="notice notice-error is-dismissible"><p>' . esc_html( $err ) . '</p></div>';
+		}
 	}
 
 	/**
@@ -455,8 +459,15 @@ class Perdita_MCP_Admin {
 
 		$user_id = get_current_user_id();
 
+		$arg     = 'perdita_mcp_msg';
+		$message = __( 'App access revoked.', 'perdita-core' );
 		if ( '' !== $client_id && Perdita_MCP_OAuth::user_owns_connection( $user_id, $client_id ) ) {
-			Perdita_MCP_OAuth::revoke_connection( $user_id, $client_id );
+			if ( ! Perdita_MCP_OAuth::revoke_connection( $user_id, $client_id ) ) {
+				// The storage lock could not be taken, so the client may
+				// still hold live tokens. Say so rather than report success.
+				$arg     = 'perdita_mcp_err';
+				$message = __( 'Could not revoke app access: the site was busy saving another connection. Please try again.', 'perdita-core' );
+			}
 		}
 
 		// Send an admin back to the MCP settings screen; anyone else (who
@@ -465,13 +476,7 @@ class Perdita_MCP_Admin {
 		// same list.
 		$redirect_to = current_user_can( 'manage_options' ) ? $this->page_url() : admin_url( 'profile.php' );
 
-		wp_safe_redirect(
-			add_query_arg(
-				'perdita_mcp_msg',
-				rawurlencode( __( 'App access revoked.', 'perdita-core' ) ),
-				$redirect_to
-			)
-		);
+		wp_safe_redirect( add_query_arg( $arg, rawurlencode( $message ), $redirect_to ) );
 		exit;
 	}
 

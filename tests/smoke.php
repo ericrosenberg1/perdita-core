@@ -637,7 +637,7 @@ wp_delete_user( $mcp_contrib_id );
 // session's review found and fixed.
 wp_set_current_user( 1 );
 $mcp_create2       = $mcp_ref->getMethod( 'tool_create_post' );
-$mcp_create2->setAccessible( true );
+if ( PHP_VERSION_ID < 80100 ) { $mcp_create2->setAccessible( true ); }
 $mcp_valid_post    = $mcp_create2->invoke( $mcp_instance, array( 'title' => 'Perdita Smoke Status Post', 'content' => 'x', 'status' => 'publish' ) );
 $mcp_valid_post_id = $mcp_valid_post['structuredContent']['id'] ?? 0;
 $ok( $mcp_valid_post_id > 0 && 'publish' === get_post_status( $mcp_valid_post_id ), 'mcp: create_post with a valid status and publish_posts capability actually publishes' );
@@ -663,6 +663,51 @@ $ok( true === ( $mcp_attach_result['isError'] ?? false ), 'mcp: get_post refuses
 $mcp_attach_update = $mcp_update->invoke( $mcp_instance, array( 'id' => $mcp_attachment_id, 'title' => 'should not apply' ) );
 $ok( true === ( $mcp_attach_update['isError'] ?? false ), 'mcp: update_post refuses to touch a non-post/page post type' );
 
+// get_post content ceiling: one huge post must never swallow the calling
+// model's context with no warning. Both content fields are cut at a
+// per-field character ceiling (site default, filterable, lowered but never
+// raised by the call's max_chars) and the response says so.
+$mcp_long_content = str_repeat( 'PerditaSmokeLongContent ', 400 );
+wp_update_post( array( 'ID' => $mcp_valid_post_id, 'post_content' => $mcp_long_content ) );
+$mcp_whole = $mcp_get->invoke( $mcp_instance, array( 'id' => $mcp_valid_post_id ) );
+$ok( false === ( $mcp_whole['structuredContent']['truncated'] ?? null ) && $mcp_long_content === ( $mcp_whole['structuredContent']['content_raw'] ?? '' ) && Perdita_MCP::GET_POST_MAX_CHARS === ( $mcp_whole['structuredContent']['content_max_chars'] ?? 0 ), 'mcp: get_post returns the whole content with truncated:false under the default 60,000-character ceiling' );
+$mcp_cut    = $mcp_get->invoke( $mcp_instance, array( 'id' => $mcp_valid_post_id, 'max_chars' => 500 ) );
+$mcp_cut_sc = $mcp_cut['structuredContent'] ?? array();
+$ok( true === ( $mcp_cut_sc['truncated'] ?? null ) && 500 === mb_strlen( $mcp_cut_sc['content_raw'] ?? '' ) && mb_strlen( $mcp_cut_sc['content_rendered'] ?? '' ) <= 500 && mb_strlen( $mcp_long_content ) === ( $mcp_cut_sc['content_raw_length'] ?? 0 ), 'mcp: get_post max_chars cuts both content fields, sets truncated:true, and reports the full lengths' );
+$ok( false !== strpos( (string) ( $mcp_cut['content'][0]['text'] ?? '' ), '500' ), 'mcp: the human-readable get_post summary says the content was cut and at what ceiling' );
+$mcp_cap_filter = function () { return 1000; };
+add_filter( 'perdita_mcp_get_post_max_chars', $mcp_cap_filter );
+$mcp_site_cap = $mcp_get->invoke( $mcp_instance, array( 'id' => $mcp_valid_post_id ) );
+$ok( true === ( $mcp_site_cap['structuredContent']['truncated'] ?? null ) && 1000 === mb_strlen( $mcp_site_cap['structuredContent']['content_raw'] ?? '' ), 'mcp: perdita_mcp_get_post_max_chars sets the site ceiling, applied with no max_chars argument' );
+$mcp_raise = $mcp_get->invoke( $mcp_instance, array( 'id' => $mcp_valid_post_id, 'max_chars' => 5000 ) );
+$ok( 1000 === mb_strlen( $mcp_raise['structuredContent']['content_raw'] ?? '' ), 'mcp: max_chars can lower the site ceiling but never raise it' );
+remove_filter( 'perdita_mcp_get_post_max_chars', $mcp_cap_filter );
+$mcp_no_cap = function () { return 0; };
+add_filter( 'perdita_mcp_get_post_max_chars', $mcp_no_cap );
+$mcp_uncapped = $mcp_get->invoke( $mcp_instance, array( 'id' => $mcp_valid_post_id ) );
+$ok( false === ( $mcp_uncapped['structuredContent']['truncated'] ?? null ) && 0 === ( $mcp_uncapped['structuredContent']['content_max_chars'] ?? -1 ), 'mcp: returning 0 from perdita_mcp_get_post_max_chars removes the ceiling' );
+remove_filter( 'perdita_mcp_get_post_max_chars', $mcp_no_cap );
+
+// The JSON-RPC layer, end to end through handle_request() with a real
+// bearer key: an unknown TOOL is -32602 (invalid params: tools/call itself
+// exists and the tool name is one of its params, the code the MCP spec's
+// "Error Handling" example and the reference @modelcontextprotocol/sdk
+// server both use), while an unknown METHOD is -32601.
+$mcp_rpc_key = Perdita_MCP::generate_api_key( 1 );
+$mcp_rpc     = function ( array $body ) use ( $mcp_instance, $mcp_rpc_key ) {
+	$req = new WP_REST_Request( 'POST', '/' . Perdita_MCP::NS . '/mcp' );
+	$req->set_header( 'Authorization', 'Bearer ' . $mcp_rpc_key );
+	$req->set_header( 'Content-Type', 'application/json' );
+	$req->set_body( wp_json_encode( $body ) );
+	$res = $mcp_instance->handle_request( $req );
+	return $res instanceof WP_REST_Response ? $res->get_data() : null;
+};
+$mcp_unknown_tool = $mcp_rpc( array( 'jsonrpc' => '2.0', 'id' => 7, 'method' => 'tools/call', 'params' => array( 'name' => 'no_such_tool', 'arguments' => array() ) ) );
+$ok( -32602 === ( $mcp_unknown_tool['error']['code'] ?? null ) && false !== strpos( (string) ( $mcp_unknown_tool['error']['message'] ?? '' ), 'no_such_tool' ), 'mcp: tools/call with an unknown tool name is JSON-RPC error -32602 (invalid params) and the message names the tool' );
+$mcp_unknown_method = $mcp_rpc( array( 'jsonrpc' => '2.0', 'id' => 8, 'method' => 'no/such/method' ) );
+$ok( -32601 === ( $mcp_unknown_method['error']['code'] ?? null ), 'mcp: an unknown JSON-RPC method is -32601 (method not found)' );
+delete_transient( Perdita_MCP::rate_limit_key( Perdita_MCP::TOOL_CALL_RATE_LIMIT_PREFIX, 'user:1' ) );
+
 wp_delete_post( $mcp_attachment_id, true );
 wp_delete_post( $mcp_valid_post_id, true );
 
@@ -676,6 +721,8 @@ $mcp_defs_missing_annotations = array_filter( $mcp_defs, function ( $t ) {
 $ok( empty( $mcp_defs_missing_annotations ), 'mcp: every tool definition carries all four MCP annotation hints' );
 $mcp_create_def = current( array_filter( $mcp_defs, function ( $t ) { return 'create_post' === $t['name']; } ) );
 $ok( false === $mcp_create_def['annotations']['readOnlyHint'] && false === $mcp_create_def['annotations']['idempotentHint'], 'mcp: create_post is correctly annotated as non-read-only and non-idempotent' );
+$mcp_get_def = current( array_filter( $mcp_defs, function ( $t ) { return 'get_post' === $t['name']; } ) );
+$ok( isset( $mcp_get_def['inputSchema']['properties']['max_chars'] ), 'mcp: get_post advertises the max_chars argument in its input schema' );
 
 // Generalized rate limiter (Perdita_MCP::rate_limit_check()/rate_limit_record()
 // are now public static + parameterized so Perdita_MCP_OAuth can reuse them

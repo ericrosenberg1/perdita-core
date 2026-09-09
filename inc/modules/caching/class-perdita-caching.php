@@ -921,10 +921,18 @@ class Perdita_Caching {
 	 * purge; a missed match serves stale HTML, which is the failure this
 	 * closes.
 	 *
+	 * The one carve-out is the MCP server's OAuth storage
+	 * (`perdita_mcp_oauth_*`: registered clients, live tokens, single-use
+	 * claim rows, the connected-apps list). Those options are written on
+	 * every token issue, refresh, and expiry, and nothing on a rendered page
+	 * depends on any of them, so without the carve-out every AI client
+	 * connecting would empty the page cache for every visitor.
+	 *
 	 * @param string $option Option name being added, updated, or deleted.
 	 */
 	public function purge_on_option_change( $option ) {
-		if ( 0 !== strpos( (string) $option, 'perdita_' ) ) {
+		$option = (string) $option;
+		if ( 0 !== strpos( $option, 'perdita_' ) || 0 === strpos( $option, 'perdita_mcp_oauth_' ) ) {
 			return;
 		}
 		$this->purge_all();

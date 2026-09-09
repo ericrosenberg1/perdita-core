@@ -90,6 +90,15 @@
  * a straightforward future migration, not a reason to add this codebase's
  * first custom table for what is, today, a small structured list.
  *
+ * Every write to one of those option blobs is a read-modify-write of the
+ * whole array, so two near-simultaneous requests (a token exchange for one
+ * client landing while another client refreshes, say) used to be able to
+ * overwrite each other's unrelated keys. mutate_option() now serialises
+ * those writes behind a short database lock (acquire_lock(), the same
+ * INSERT IGNORE test-and-set WP_Upgrader::create_lock() uses) and re-reads
+ * the row from the database inside the lock, so every write starts from
+ * what is actually stored, never from a copy cached earlier in the request.
+ *
  * SECURITY MODEL: read the class docblock of class-perdita-mcp.php first
  * (bearer token -> exact WP user -> every current_user_can() reflects that
  * user's real capabilities). Everything below is *only* about how a token
@@ -589,16 +598,25 @@ class Perdita_MCP_OAuth {
 		// (RFC7591). Only removes clients that never completed a single
 		// token exchange (no reason to keep them at all) and are old
 		// enough that they're not mid-flow right now.
-		$clients = self::prune_stale_clients( self::all_clients() );
-		$clients[ $client_id ] = array(
-			'client_name'  => $client_name,
+		$record  = array(
+			'client_name'   => $client_name,
 			'redirect_uris' => array_map( 'esc_url_raw', $redirect_uris ),
-			'grant_types'  => $grant_types,
-			'auth_method'  => $is_public ? 'none' : 'client_secret_post',
-			'secret_hash'  => $secret_hash,
-			'created'      => time(),
+			'grant_types'   => $grant_types,
+			'auth_method'   => $is_public ? 'none' : 'client_secret_post',
+			'secret_hash'   => $secret_hash,
+			'created'       => time(),
 		);
-		update_option( self::OPTION_CLIENTS, $clients, false );
+		$clients = self::mutate_option(
+			self::OPTION_CLIENTS,
+			static function ( array $clients ) use ( $client_id, $record ) {
+				$clients               = self::prune_stale_clients( $clients );
+				$clients[ $client_id ] = $record;
+				return $clients;
+			}
+		);
+		if ( null === $clients ) {
+			return $this->storage_busy_response();
+		}
 
 		$response = array(
 			'client_id'                  => $client_id,
@@ -984,8 +1002,8 @@ class Perdita_MCP_OAuth {
 		// Mint a single-use authorization code bound to every value the
 		// eventual token exchange must re-validate: user, client, exact
 		// redirect_uri, PKCE challenge, resource (audience), and scope.
-		$code = self::ACCESS_TOKEN_PREFIX . 'code_' . wp_generate_password( 40, false );
-		$this->store_grant(
+		$code   = self::ACCESS_TOKEN_PREFIX . 'code_' . wp_generate_password( 40, false );
+		$stored = $this->store_grant(
 			$code,
 			array(
 				'type'           => 'code',
@@ -999,6 +1017,13 @@ class Perdita_MCP_OAuth {
 				'used'           => false,
 			)
 		);
+		if ( ! $stored ) {
+			// The storage lock could not be taken, so no code exists to
+			// redeem. temporarily_unavailable is RFC6749 4.1.2.1's code for
+			// exactly this, and the user can simply approve again.
+			$this->redirect_with_error( $pending['redirect_uri'], $pending['state'], 'temporarily_unavailable', __( 'The site was busy saving another connection. Please try again.', 'perdita-core' ) );
+			return;
+		}
 
 		$redirect = add_query_arg(
 			array_filter(
@@ -1233,10 +1258,11 @@ class Perdita_MCP_OAuth {
 		// client retry logic without weakening single-use enforcement.
 		$this->mark_grant_used( $code );
 
-		return new WP_REST_Response(
-			$this->issue_token_pair( (int) $grant['user_id'], $grant['client_id'], $grant['resource'], $grant['scope'] ),
-			200
-		);
+		$pair = $this->issue_token_pair( (int) $grant['user_id'], $grant['client_id'], $grant['resource'], $grant['scope'] );
+		if ( null === $pair ) {
+			return $this->storage_busy_response();
+		}
+		return new WP_REST_Response( $pair, 200 );
 	}
 
 	/**
@@ -1303,18 +1329,25 @@ class Perdita_MCP_OAuth {
 
 		// Rotate: this exact refresh token is consumed, a new one is issued
 		// alongside the new access token.
-		$this->delete_grant( $refresh_token );
+		if ( ! $this->delete_grant( $refresh_token ) ) {
+			// The storage lock could not be taken, so nothing was rotated
+			// and nothing was issued. Release the claim so the client's
+			// retry can go through, and tell it to retry.
+			delete_option( self::refresh_claim_option_name( self::hash_token( $refresh_token ) ) );
+			return $this->storage_busy_response();
+		}
 		// The grant is gone now, so a later request presenting this same
 		// token fails the get_grant() check above instead; the claim row
 		// only needed to survive the brief window before that delete took
 		// effect, so remove it immediately rather than leaving it to
 		// accumulate forever.
-		delete_option( self::refresh_claim_option_name( $refresh_token ) );
+		delete_option( self::refresh_claim_option_name( self::hash_token( $refresh_token ) ) );
 
-		return new WP_REST_Response(
-			$this->issue_token_pair( (int) $grant['user_id'], $grant['client_id'], $grant['resource'], $grant['scope'] ),
-			200
-		);
+		$pair = $this->issue_token_pair( (int) $grant['user_id'], $grant['client_id'], $grant['resource'], $grant['scope'] );
+		if ( null === $pair ) {
+			return $this->storage_busy_response();
+		}
+		return new WP_REST_Response( $pair, 200 );
 	}
 
 	/**
@@ -1343,14 +1376,15 @@ class Perdita_MCP_OAuth {
 
 	/**
 	 * The option name used to atomically claim a refresh token for
-	 * one-time rotation. Derived the same one-way way as every other
-	 * bearer-credential lookup key in this file (see hash_token()).
+	 * one-time rotation. Keyed by the same one-way hash the grant itself is
+	 * stored under (see hash_token()), so pruning an expired refresh grant
+	 * can delete its claim row without ever seeing the plaintext again.
 	 *
-	 * @param string $refresh_token Plaintext refresh token.
+	 * @param string $refresh_token_hash sha256 of the plaintext refresh token.
 	 * @return string
 	 */
-	private static function refresh_claim_option_name( $refresh_token ) {
-		return 'perdita_mcp_oauth_refresh_claim_' . self::hash_token( $refresh_token );
+	private static function refresh_claim_option_name( $refresh_token_hash ) {
+		return 'perdita_mcp_oauth_refresh_claim_' . $refresh_token_hash;
 	}
 
 	/**
@@ -1364,7 +1398,7 @@ class Perdita_MCP_OAuth {
 	 * @return bool True if this call won the race (proceed with rotation), false if another request already claimed it.
 	 */
 	private static function claim_refresh_token_for_rotation( $refresh_token ) {
-		return add_option( self::refresh_claim_option_name( $refresh_token ), time(), '', false );
+		return add_option( self::refresh_claim_option_name( self::hash_token( $refresh_token ) ), time(), '', false );
 	}
 
 	/**
@@ -1375,34 +1409,37 @@ class Perdita_MCP_OAuth {
 	 * @param string $client_id OAuth client id the tokens are bound to.
 	 * @param string $resource  Canonical resource URI the access token is scoped to (RFC8707 audience).
 	 * @param string $scope     Granted scope string.
-	 * @return array
+	 * @return array|null The token response, or null if the storage lock could not be taken (nothing was issued).
 	 */
 	private function issue_token_pair( $user_id, $client_id, $resource, $scope ) {
 		$access_token  = self::ACCESS_TOKEN_PREFIX . wp_generate_password( 48, false );
 		$refresh_token = self::REFRESH_TOKEN_PREFIX . wp_generate_password( 48, false );
 
-		$this->store_grant(
-			$access_token,
+		// One locked write for the pair, so the access token and its
+		// refresh token land together or not at all.
+		$stored = $this->store_grants(
 			array(
-				'type'      => 'access',
-				'user_id'   => (int) $user_id,
-				'client_id' => $client_id,
-				'resource'  => $resource,
-				'scope'     => $scope,
-				'expires'   => time() + self::ACCESS_TOKEN_TTL,
+				$access_token  => array(
+					'type'      => 'access',
+					'user_id'   => (int) $user_id,
+					'client_id' => $client_id,
+					'resource'  => $resource,
+					'scope'     => $scope,
+					'expires'   => time() + self::ACCESS_TOKEN_TTL,
+				),
+				$refresh_token => array(
+					'type'      => 'refresh',
+					'user_id'   => (int) $user_id,
+					'client_id' => $client_id,
+					'resource'  => $resource,
+					'scope'     => $scope,
+					'expires'   => time() + self::REFRESH_TOKEN_TTL,
+				),
 			)
 		);
-		$this->store_grant(
-			$refresh_token,
-			array(
-				'type'      => 'refresh',
-				'user_id'   => (int) $user_id,
-				'client_id' => $client_id,
-				'resource'  => $resource,
-				'scope'     => $scope,
-				'expires'   => time() + self::REFRESH_TOKEN_TTL,
-			)
-		);
+		if ( ! $stored ) {
+			return null;
+		}
 
 		// Record a human-readable "connected app" entry for the admin
 		// screen's revoke list, separate from the grants themselves (a
@@ -1502,6 +1539,21 @@ class Perdita_MCP_OAuth {
 		);
 	}
 
+	/**
+	 * The response for a write that could not take the storage lock within
+	 * LOCK_WAIT_SECONDS. Nothing was changed, so the client should simply
+	 * try again: 503 is what OAuth clients and HTTP libraries already treat
+	 * as retryable, and temporarily_unavailable is the RFC6749 error code
+	 * with that meaning.
+	 *
+	 * @return WP_REST_Response
+	 */
+	private function storage_busy_response() {
+		$response = $this->oauth_error_response( 503, 'temporarily_unavailable', __( 'The site is busy saving another connection. Try again in a moment.', 'perdita-core' ) );
+		$response->header( 'Retry-After', '2' );
+		return $response;
+	}
+
 	/* ==========================================================
 	 * Phase 1 integration: perdita_mcp_validate_oauth_token
 	 * ========================================================== */
@@ -1545,6 +1597,165 @@ class Perdita_MCP_OAuth {
 
 		$user_id = (int) $grant['user_id'];
 		return $user_id > 0 ? $user_id : $default;
+	}
+
+	/* ==========================================================
+	 * Storage: write serialisation
+	 * ========================================================== */
+
+	/**
+	 * How long a writer waits for the storage lock before giving up, in
+	 * seconds. A locked section here is one option read plus one option
+	 * write, a few milliseconds, so a wait this long is only ever exhausted
+	 * when the database itself has stopped answering.
+	 */
+	const LOCK_WAIT_SECONDS = 5;
+
+	/**
+	 * A lock row older than this belongs to a request that died between
+	 * taking the lock and releasing it (a fatal, a killed worker) and is
+	 * taken over rather than waited on. Comfortably longer than any real
+	 * locked section, comfortably shorter than a request timeout.
+	 */
+	const LOCK_STALE_SECONDS = 15;
+
+	/**
+	 * Every write to OPTION_CLIENTS, OPTION_GRANTS, and OPTION_CONNECTIONS
+	 * goes through here. Each of those options is one serialised array, so
+	 * a write is always a read-modify-write of the whole thing, and two
+	 * requests doing that at once (a token exchange for one client landing
+	 * while another client refreshes, or a registration during a revoke)
+	 * would each write back a copy missing the other's change. This takes a
+	 * short database lock for the option, re-reads the row from the
+	 * database INSIDE the lock, hands that current array to $mutate, and
+	 * persists whatever comes back, so a write always starts from what is
+	 * actually stored, never from a copy WordPress cached earlier in this
+	 * request.
+	 *
+	 * @param string   $option Option name.
+	 * @param callable $mutate Receives the current array, returns the array to store (a non-array return stores nothing).
+	 * @return array|null The array now stored, or null if the lock could not be taken within LOCK_WAIT_SECONDS (nothing was written).
+	 */
+	private static function mutate_option( $option, callable $mutate ) {
+		$lock = self::acquire_lock( $option );
+		if ( false === $lock ) {
+			return null;
+		}
+		try {
+			$current = self::fresh_option( $option );
+			$next    = $mutate( $current );
+			if ( ! is_array( $next ) ) {
+				return $current;
+			}
+			if ( $next !== $current ) {
+				update_option( $option, $next, false );
+			}
+			return $next;
+		} finally {
+			self::release_lock( $lock );
+		}
+	}
+
+	/**
+	 * Read an option straight from the database, evicting every copy
+	 * WordPress may be holding from earlier in this request first. Without
+	 * this, get_option() inside the lock would return whatever it cached
+	 * before the lock was taken, which is exactly the stale read the lock
+	 * exists to prevent. Mirrors the cache bookkeeping delete_option()
+	 * itself does: the per-option entry, the notoptions negative cache, and
+	 * the alloptions blob in case the row was ever autoloaded.
+	 *
+	 * @param string $option Option name.
+	 * @return array The stored array, or an empty array when the option is missing or malformed.
+	 */
+	private static function fresh_option( $option ) {
+		wp_cache_delete( $option, 'options' );
+
+		$notoptions = wp_cache_get( 'notoptions', 'options' );
+		if ( is_array( $notoptions ) && isset( $notoptions[ $option ] ) ) {
+			unset( $notoptions[ $option ] );
+			wp_cache_set( 'notoptions', $notoptions, 'options' );
+		}
+
+		$alloptions = wp_cache_get( 'alloptions', 'options' );
+		if ( is_array( $alloptions ) && isset( $alloptions[ $option ] ) ) {
+			unset( $alloptions[ $option ] );
+			wp_cache_set( 'alloptions', $alloptions, 'options' );
+		}
+
+		$value = get_option( $option, array() );
+		return is_array( $value ) ? $value : array();
+	}
+
+	/**
+	 * Take the write lock for one option, waiting up to $wait seconds.
+	 *
+	 * The lock is a row in wp_options inserted with INSERT IGNORE against
+	 * the table's UNIQUE option_name key, the same construction
+	 * WP_Upgrader::create_lock() uses for core updates: the database itself
+	 * guarantees that exactly one of any number of simultaneous inserts
+	 * succeeds. Nothing built on get-then-set can promise that. A transient
+	 * is read, then written (two callers can both see "absent"), and
+	 * wp_cache_add() is only atomic on a persistent object cache, which
+	 * most sites running this plugin do not have.
+	 *
+	 * The row carries the time it was taken so a lock left behind by a
+	 * request that died mid-write is taken over after LOCK_STALE_SECONDS
+	 * instead of blocking every write until someone clears it by hand.
+	 *
+	 * @param string     $option The option the lock guards.
+	 * @param float|null $wait   Seconds to keep trying; defaults to LOCK_WAIT_SECONDS, 0 means one attempt.
+	 * @return string|false The lock's option name (pass it to release_lock()), or false if it could not be taken in time.
+	 */
+	private static function acquire_lock( $option, $wait = null ) {
+		global $wpdb;
+
+		$lock     = $option . '_lock';
+		$deadline = microtime( true ) + ( null === $wait ? self::LOCK_WAIT_SECONDS : (float) $wait );
+
+		while ( true ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- INSERT IGNORE against the UNIQUE key is the atomic test-and-set; the options API has no equivalent.
+			$taken = $wpdb->query( $wpdb->prepare( "INSERT IGNORE INTO `{$wpdb->options}` (`option_name`, `option_value`, `autoload`) VALUES (%s, %s, 'off')", $lock, (string) time() ) );
+			if ( $taken ) {
+				return $lock;
+			}
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- the row is read for its age and must never come from a cache.
+			$held_since = (int) $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM `{$wpdb->options}` WHERE option_name = %s", $lock ) );
+			if ( $held_since > 0 && ( time() - $held_since ) > self::LOCK_STALE_SECONDS ) {
+				// Delete only that exact stale row (matched on its value),
+				// so a live lock taken between the two queries is never
+				// stolen, then go straight back to the insert.
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- see above.
+				$wpdb->delete(
+					$wpdb->options,
+					array(
+						'option_name'  => $lock,
+						'option_value' => (string) $held_since,
+					)
+				);
+				continue;
+			}
+
+			if ( microtime( true ) >= $deadline ) {
+				return false;
+			}
+			usleep( 50000 );
+		}
+	}
+
+	/**
+	 * Release a lock taken by acquire_lock(). A direct delete rather than
+	 * delete_option(): the row was never read through the options API, so
+	 * there is no cache entry to keep in step, and the caching module's
+	 * "any perdita_ option changed" purge has no reason to fire for it.
+	 *
+	 * @param string $lock The option name acquire_lock() returned.
+	 */
+	private static function release_lock( $lock ) {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- see acquire_lock().
+		$wpdb->delete( $wpdb->options, array( 'option_name' => $lock ) );
 	}
 
 	/* ==========================================================
@@ -1649,22 +1860,39 @@ class Perdita_MCP_OAuth {
 	 *
 	 * @param string $plaintext Plaintext code/token.
 	 * @param array  $data      Bound data (type, user_id, client_id, resource, scope, expires, ...).
+	 * @return bool False only if the storage lock could not be taken, in which case nothing was stored.
 	 */
 	private function store_grant( $plaintext, array $data ) {
-		$grants = self::all_grants();
-		$grants[ self::hash_token( $plaintext ) ] = $data;
-		self::save_grants( $grants );
+		return $this->store_grants( array( $plaintext => $data ) );
 	}
 
 	/**
-	 * Look up a grant by its plaintext code/token, hashing to compare. Also
-	 * opportunistically prunes expired grants on every call (cheap: this
-	 * option is small by construction, see the class docblock's storage
-	 * rationale) so the stored option never accumulates dead rows forever
-	 * on a site that is never visited long enough for its own garbage
-	 * collection cron (there isn't one; pruning piggybacks on normal use
-	 * instead, the same "no dedicated cron needed" simplicity as
-	 * Perdita_MCP's rate-limit transients self-expiring).
+	 * Store several grants in one locked write. issue_token_pair() uses
+	 * this so an access token and its refresh token land together or not
+	 * at all.
+	 *
+	 * @param array $grants Plaintext code/token => bound data, see store_grant().
+	 * @return bool False only if the storage lock could not be taken, in which case nothing was stored.
+	 */
+	private function store_grants( array $grants ) {
+		return self::mutate_grants(
+			static function ( array $stored ) use ( $grants ) {
+				foreach ( $grants as $plaintext => $data ) {
+					$stored[ self::hash_token( $plaintext ) ] = $data;
+				}
+				return $stored;
+			}
+		);
+	}
+
+	/**
+	 * Look up a grant by its plaintext code/token, hashing to compare.
+	 * Expired grants are never returned (all_grants() hides them), and the
+	 * next locked write drops them from storage for good, so the stored
+	 * option never accumulates dead rows on a site with no garbage
+	 * collection cron (there isn't one; pruning piggybacks on normal use,
+	 * the same "no dedicated cron needed" simplicity as Perdita_MCP's
+	 * rate-limit transients self-expiring).
 	 *
 	 * @param string $plaintext Plaintext code/token.
 	 * @return array|null
@@ -1678,52 +1906,67 @@ class Perdita_MCP_OAuth {
 	/**
 	 * Mark a code grant used (single-use enforcement), without deleting it
 	 * outright, so a replay attempt gets an informative "already used"
-	 * error rather than an ambiguous "unknown code" one.
+	 * error rather than an ambiguous "unknown code" one. The atomic claim
+	 * row (claim_code_for_redemption()) is what actually enforces single
+	 * use, so a caller need not act on a false return here.
 	 *
 	 * @param string $plaintext Plaintext code.
+	 * @return bool False only if the storage lock could not be taken.
 	 */
 	private function mark_grant_used( $plaintext ) {
-		$grants = self::all_grants();
-		$key    = self::hash_token( $plaintext );
-		if ( isset( $grants[ $key ] ) ) {
-			$grants[ $key ]['used'] = true;
-			self::save_grants( $grants );
-		}
+		$key = self::hash_token( $plaintext );
+		return self::mutate_grants(
+			static function ( array $grants ) use ( $key ) {
+				if ( isset( $grants[ $key ] ) ) {
+					$grants[ $key ]['used'] = true;
+				}
+				return $grants;
+			}
+		);
 	}
 
 	/**
-	 * Delete one grant.
+	 * Delete one grant, and the single-use claim row of a code grant with
+	 * it.
 	 *
 	 * @param string $plaintext Plaintext code/token.
+	 * @return bool False only if the storage lock could not be taken, in which case the grant is still on file.
 	 */
 	private function delete_grant( $plaintext ) {
-		$grants = self::all_grants();
-		$key    = self::hash_token( $plaintext );
-		$type   = isset( $grants[ $key ]['type'] ) ? $grants[ $key ]['type'] : '';
-		unset( $grants[ $key ] );
-		self::save_grants( $grants );
-		if ( 'code' === $type ) {
+		$key  = self::hash_token( $plaintext );
+		$type = '';
+		$done = self::mutate_grants(
+			static function ( array $grants ) use ( $key, &$type ) {
+				$type = isset( $grants[ $key ]['type'] ) ? (string) $grants[ $key ]['type'] : '';
+				unset( $grants[ $key ] );
+				return $grants;
+			}
+		);
+		if ( $done && 'code' === $type ) {
 			delete_option( self::code_claim_option_name( $key ) );
 		}
+		return $done;
 	}
 
 	/**
-	 * Request-scoped cache of the (already-pruned) grants array. A single
-	 * MCP tool call or token-endpoint request can hit all_grants() several
-	 * times (get_grant() then store_grant()/mark_grant_used()/
+	 * Request-scoped cache of the (expired-entries-hidden) grants array. A
+	 * single MCP tool call or token-endpoint request can hit all_grants()
+	 * several times (get_grant() then store_grant()/mark_grant_used()/
 	 * delete_grant() in the same call), each of which previously did its
 	 * own full get_option()+deserialize+prune pass; this reuses one read
-	 * for the lifetime of the request. Always go through save_grants() to
-	 * write, never update_option() directly, so this cache can never go
-	 * stale relative to what's actually stored.
+	 * for the lifetime of the request. Every write goes through
+	 * mutate_grants(), which re-reads under the lock and then replaces this
+	 * cache with exactly what it persisted, so the cache can never drift
+	 * from what is stored.
 	 *
 	 * @var array[]|null
 	 */
 	private static $grants_cache = null;
 
 	/**
-	 * All grants, with expired entries pruned on read (see get_grant()'s
-	 * docblock for why this piggybacks here instead of a dedicated cron).
+	 * All live grants. Expired entries are hidden here (in memory only; a
+	 * read never writes, see mutate_grants() for where the stored array
+	 * actually shrinks).
 	 *
 	 * @return array[]
 	 */
@@ -1732,43 +1975,63 @@ class Perdita_MCP_OAuth {
 			return self::$grants_cache;
 		}
 
-		$grants = get_option( self::OPTION_GRANTS, array() );
-		if ( ! is_array( $grants ) ) {
-			$grants = array();
-		}
-		$now    = time();
-		$pruned = array();
-		foreach ( $grants as $key => $data ) {
-			if ( is_array( $data ) && isset( $data['expires'] ) && (int) $data['expires'] >= $now ) {
-				$pruned[ $key ] = $data;
-				continue;
-			}
-			// The grant is going away, so its single-use claim row (if it
-			// ever had one) has nothing left to protect. Drop it here so
-			// claims cannot accumulate forever the way the grants
-			// themselves never do.
-			if ( is_array( $data ) && isset( $data['type'] ) && 'code' === $data['type'] ) {
-				delete_option( self::code_claim_option_name( $key ) );
-			}
-		}
-		if ( count( $pruned ) !== count( $grants ) ) {
-			update_option( self::OPTION_GRANTS, $pruned, false );
-		}
-		self::$grants_cache = $pruned;
-		return $pruned;
+		$grants             = get_option( self::OPTION_GRANTS, array() );
+		self::$grants_cache = self::prune_expired_grants( is_array( $grants ) ? $grants : array(), false );
+		return self::$grants_cache;
 	}
 
 	/**
-	 * Write the grants array back to storage and keep the request-scoped
-	 * cache in sync, so every mutation (store/mark-used/delete) goes
-	 * through one place instead of each one separately calling
-	 * update_option() and risking the cache drifting from the DB.
+	 * Drop expired grants from an array. Reads call this to hide expired
+	 * entries in memory, and every locked write calls it with $drop_claims
+	 * so the stored array shrinks as a side effect of normal use and the
+	 * single-use claim rows of expired codes and refresh tokens (see
+	 * claim_code_for_redemption() and claim_refresh_token_for_rotation())
+	 * go with them instead of accumulating forever.
 	 *
-	 * @param array[] $grants The full grants array to persist.
+	 * @param array[] $grants      Grants keyed by token hash.
+	 * @param bool    $drop_claims Also delete the claim rows of the expired entries.
+	 * @return array[] The grants that are still live.
 	 */
-	private static function save_grants( array $grants ) {
-		update_option( self::OPTION_GRANTS, $grants, false );
-		self::$grants_cache = $grants;
+	private static function prune_expired_grants( array $grants, $drop_claims ) {
+		$now  = time();
+		$kept = array();
+		foreach ( $grants as $key => $data ) {
+			if ( is_array( $data ) && isset( $data['expires'] ) && (int) $data['expires'] >= $now ) {
+				$kept[ $key ] = $data;
+				continue;
+			}
+			if ( ! $drop_claims || ! is_array( $data ) || ! isset( $data['type'] ) ) {
+				continue;
+			}
+			if ( 'code' === $data['type'] ) {
+				delete_option( self::code_claim_option_name( $key ) );
+			} elseif ( 'refresh' === $data['type'] ) {
+				delete_option( self::refresh_claim_option_name( $key ) );
+			}
+		}
+		return $kept;
+	}
+
+	/**
+	 * Apply one change to the stored grants under the storage lock, pruning
+	 * expired entries in the same write, and keep the request-scoped cache
+	 * in step with exactly what was persisted.
+	 *
+	 * @param callable $mutate Receives the current (pruned) grants array, returns the array to store.
+	 * @return bool False if the storage lock could not be taken (nothing was written).
+	 */
+	private static function mutate_grants( callable $mutate ) {
+		$stored = self::mutate_option(
+			self::OPTION_GRANTS,
+			static function ( array $grants ) use ( $mutate ) {
+				return $mutate( self::prune_expired_grants( $grants, true ) );
+			}
+		);
+		if ( null === $stored ) {
+			return false;
+		}
+		self::$grants_cache = $stored;
+		return true;
 	}
 
 	/* ==========================================================
@@ -1792,17 +2055,22 @@ class Perdita_MCP_OAuth {
 	 * @param string $client_id OAuth client id.
 	 */
 	private function record_connection( $user_id, $client_id ) {
-		$connections = self::all_connections();
-		$key         = $user_id . ':' . $client_id;
-		$existing    = isset( $connections[ $key ] ) ? $connections[ $key ] : array();
-
-		$connections[ $key ] = array(
-			'user_id'      => (int) $user_id,
-			'client_id'    => $client_id,
-			'first_authorized' => isset( $existing['first_authorized'] ) ? $existing['first_authorized'] : time(),
-			'last_used'    => time(),
+		$key = $user_id . ':' . $client_id;
+		// Bookkeeping only: if the lock cannot be taken the tokens are still
+		// valid, and the next issuance for this pair records it again.
+		self::mutate_option(
+			self::OPTION_CONNECTIONS,
+			static function ( array $connections ) use ( $key, $user_id, $client_id ) {
+				$existing            = isset( $connections[ $key ] ) ? $connections[ $key ] : array();
+				$connections[ $key ] = array(
+					'user_id'          => (int) $user_id,
+					'client_id'        => $client_id,
+					'first_authorized' => isset( $existing['first_authorized'] ) ? $existing['first_authorized'] : time(),
+					'last_used'        => time(),
+				);
+				return $connections;
+			}
 		);
-		update_option( self::OPTION_CONNECTIONS, $connections, false );
 	}
 
 	/**
@@ -1860,22 +2128,28 @@ class Perdita_MCP_OAuth {
 	 *
 	 * @param int    $user_id   WP user id.
 	 * @param string $client_id OAuth client id.
+	 * @return bool False if either write could not take the storage lock, in which case the client may still hold live tokens and the caller should say so.
 	 */
 	public static function revoke_connection( $user_id, $client_id ) {
-		$grants  = self::all_grants();
-		$changed = false;
-		foreach ( $grants as $key => $data ) {
-			if ( is_array( $data ) && (int) ( $data['user_id'] ?? 0 ) === (int) $user_id && ( $data['client_id'] ?? '' ) === $client_id ) {
-				unset( $grants[ $key ] );
-				$changed = true;
+		$grants_done = self::mutate_grants(
+			static function ( array $grants ) use ( $user_id, $client_id ) {
+				foreach ( $grants as $key => $data ) {
+					if ( is_array( $data ) && (int) ( $data['user_id'] ?? 0 ) === (int) $user_id && ( $data['client_id'] ?? '' ) === $client_id ) {
+						unset( $grants[ $key ] );
+					}
+				}
+				return $grants;
 			}
-		}
-		if ( $changed ) {
-			self::save_grants( $grants );
-		}
+		);
 
-		$connections = self::all_connections();
-		unset( $connections[ $user_id . ':' . $client_id ] );
-		update_option( self::OPTION_CONNECTIONS, $connections, false );
+		$connections = self::mutate_option(
+			self::OPTION_CONNECTIONS,
+			static function ( array $connections ) use ( $user_id, $client_id ) {
+				unset( $connections[ $user_id . ':' . $client_id ] );
+				return $connections;
+			}
+		);
+
+		return $grants_done && null !== $connections;
 	}
 }

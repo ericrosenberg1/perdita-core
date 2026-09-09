@@ -133,6 +133,93 @@ $ok( true === $psx_claim->invoke( null, $psx_code ), 'mcp-oauth: the first redem
 $ok( false === $psx_claim->invoke( null, $psx_code ), 'mcp-oauth: a second, concurrent redemption of the same code loses the claim (no double token issue)' );
 delete_option( $psx_claim_name->invoke( null, $psx_hash_token->invoke( null, $psx_code ) ) );
 
+/* --- OAuth storage: writes are serialised and never start from a stale copy.
+   OPTION_CLIENTS, OPTION_GRANTS and OPTION_CONNECTIONS are each one serialised
+   array, so every write is a read-modify-write of the whole thing, and two
+   requests doing that at once (one client's token exchange landing while
+   another refreshed) used to overwrite each other's unrelated keys. --- */
+
+$psx_lock   = new ReflectionMethod( 'Perdita_MCP_OAuth', 'acquire_lock' );
+$psx_unlock = new ReflectionMethod( 'Perdita_MCP_OAuth', 'release_lock' );
+$psx_mutate = new ReflectionMethod( 'Perdita_MCP_OAuth', 'mutate_option' );
+$psx_store  = new ReflectionMethod( 'Perdita_MCP_OAuth', 'store_grant' );
+$psx_grants = new ReflectionMethod( 'Perdita_MCP_OAuth', 'all_grants' );
+$psx_gcache = new ReflectionProperty( 'Perdita_MCP_OAuth', 'grants_cache' );
+if ( PHP_VERSION_ID < 80100 ) {
+	foreach ( array( $psx_lock, $psx_unlock, $psx_mutate, $psx_store, $psx_grants, $psx_gcache ) as $psx_r ) {
+		$psx_r->setAccessible( true );
+	}
+}
+$psx_row = function ( $name ) use ( $wpdb ) {
+	return $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", $name ) );
+};
+
+// The lock primitive: a database-enforced test-and-set with stale takeover.
+$psx_opt = 'perdita_mcp_oauth_smoke_race';
+delete_option( $psx_opt );
+$wpdb->delete( $wpdb->options, array( 'option_name' => $psx_opt . '_lock' ) );
+
+$psx_l1 = $psx_lock->invoke( null, $psx_opt, 0 );
+$ok( is_string( $psx_l1 ), 'mcp-oauth: acquire_lock() takes a free lock' );
+$ok( false === $psx_lock->invoke( null, $psx_opt, 0 ), 'mcp-oauth: a second caller cannot take a lock that is held' );
+$psx_unlock->invoke( null, $psx_l1 );
+$ok( null === $psx_row( $psx_l1 ), 'mcp-oauth: release_lock() removes the lock row' );
+$psx_l2 = $psx_lock->invoke( null, $psx_opt, 0 );
+$ok( is_string( $psx_l2 ), 'mcp-oauth: the lock is free again after release_lock()' );
+$wpdb->update( $wpdb->options, array( 'option_value' => (string) ( time() - Perdita_MCP_OAuth::LOCK_STALE_SECONDS - 5 ) ), array( 'option_name' => $psx_l2 ) );
+$psx_l3 = $psx_lock->invoke( null, $psx_opt, 0 );
+$ok( is_string( $psx_l3 ), 'mcp-oauth: a lock left behind by a request that died is taken over after LOCK_STALE_SECONDS' );
+$psx_unlock->invoke( null, $psx_l3 );
+
+// The stale-copy race, reproduced in one process: "another request" writes
+// straight to the database after this request has already read, and so
+// cached, the option.
+update_option( $psx_opt, array( 'mine' => 1 ), false );
+get_option( $psx_opt ); // This request now holds array( 'mine' => 1 ) in its options cache.
+$wpdb->update( $wpdb->options, array( 'option_value' => maybe_serialize( array( 'mine' => 1, 'theirs' => 1 ) ) ), array( 'option_name' => $psx_opt ) );
+$psx_stale = get_option( $psx_opt );
+$ok( is_array( $psx_stale ) && ! isset( $psx_stale['theirs'] ), 'mcp-oauth: (control) a plain get_option() still returns the copy cached before the other request wrote, the stale read the lock exists to beat' );
+$psx_merged = $psx_mutate->invoke( null, $psx_opt, function ( array $current ) { $current['also_mine'] = 1; return $current; } );
+$ok( is_array( $psx_merged ) && isset( $psx_merged['mine'], $psx_merged['theirs'], $psx_merged['also_mine'] ), 'mcp-oauth: mutate_option() re-reads under the lock, so the other request\'s key survives next to this one\'s' );
+$psx_db = maybe_unserialize( $psx_row( $psx_opt ) );
+$ok( is_array( $psx_db ) && isset( $psx_db['theirs'], $psx_db['also_mine'] ), 'mcp-oauth: and that merged array is what the database holds' );
+$ok( null === $psx_row( $psx_opt . '_lock' ), 'mcp-oauth: mutate_option() releases the lock when it is done' );
+$psx_untouched = $psx_mutate->invoke( null, $psx_opt, function ( array $current ) { return $current; } );
+$ok( is_array( $psx_untouched ) && $psx_untouched === $psx_db, 'mcp-oauth: a mutation that changes nothing writes nothing and still returns the current array' );
+delete_option( $psx_opt );
+
+// The real grants path goes through the same door: a grant another request
+// wrote after this request's last read survives this request's store_grant(),
+// and the same locked write prunes what has expired (plus its claim row).
+$psx_orig_grants = get_option( Perdita_MCP_OAuth::OPTION_GRANTS );
+$psx_base        = is_array( $psx_orig_grants ) ? $psx_orig_grants : array();
+update_option( Perdita_MCP_OAuth::OPTION_GRANTS, $psx_base, false );
+$psx_gcache->setValue( null, null );
+$psx_grants->invoke( null ); // Warm the request-scoped cache from the current row.
+$psx_other_key   = $psx_hash_token->invoke( null, 'perdita-smoke-other-request-token' );
+$psx_expired_key = $psx_hash_token->invoke( null, 'perdita-smoke-expired-code' );
+$psx_other       = $psx_base;
+$psx_other[ $psx_other_key ]   = array( 'type' => 'access', 'user_id' => 1, 'client_id' => 'perdita_smoke', 'resource' => 'smoke', 'scope' => '', 'expires' => time() + 600 );
+$psx_other[ $psx_expired_key ] = array( 'type' => 'code', 'user_id' => 1, 'client_id' => 'perdita_smoke', 'resource' => 'smoke', 'scope' => '', 'expires' => time() - 600, 'used' => true );
+$wpdb->update( $wpdb->options, array( 'option_value' => maybe_serialize( $psx_other ) ), array( 'option_name' => Perdita_MCP_OAuth::OPTION_GRANTS ) );
+add_option( $psx_claim_name->invoke( null, $psx_expired_key ), time(), '', false );
+
+$psx_stored    = $psx_store->invoke( $psx_oauth, 'perdita-smoke-my-token', array( 'type' => 'access', 'user_id' => 1, 'client_id' => 'perdita_smoke', 'resource' => 'smoke', 'scope' => '', 'expires' => time() + 600 ) );
+$psx_db_grants = maybe_unserialize( $psx_row( Perdita_MCP_OAuth::OPTION_GRANTS ) );
+$ok( true === $psx_stored && is_array( $psx_db_grants ) && isset( $psx_db_grants[ $psx_other_key ], $psx_db_grants[ $psx_hash_token->invoke( null, 'perdita-smoke-my-token' ) ] ), 'mcp-oauth: store_grant() keeps a grant another request wrote after this request\'s last read (no clobbered token)' );
+$ok( is_array( $psx_db_grants ) && ! isset( $psx_db_grants[ $psx_expired_key ] ), 'mcp-oauth: the same locked write prunes an expired grant from storage' );
+$ok( false === get_option( $psx_claim_name->invoke( null, $psx_expired_key ) ), 'mcp-oauth: and drops the expired code\'s single-use claim row with it' );
+$psx_live = $psx_grants->invoke( null );
+$ok( is_array( $psx_live ) && isset( $psx_live[ $psx_other_key ] ) && ! isset( $psx_live[ $psx_expired_key ] ), 'mcp-oauth: the request-scoped grants cache is replaced with exactly what was persisted' );
+
+if ( false === $psx_orig_grants ) {
+	delete_option( Perdita_MCP_OAuth::OPTION_GRANTS );
+} else {
+	update_option( Perdita_MCP_OAuth::OPTION_GRANTS, $psx_orig_grants, false );
+}
+$psx_gcache->setValue( null, null );
+$wpdb->delete( $wpdb->options, array( 'option_name' => Perdita_MCP_OAuth::OPTION_GRANTS . '_lock' ) );
+
 
 /* =============================================================
  * Updater: the checksum is verified in the real upgrade path.

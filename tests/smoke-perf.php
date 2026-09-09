@@ -122,11 +122,11 @@ remove_action( 'updated_option', array( $__perf_cache, 'purge_on_option_change' 
 remove_action( 'deleted_option', array( $__perf_cache, 'purge_on_option_change' ) );
 
 $__perf_is_cacheable = new ReflectionMethod( 'Perdita_Caching', 'is_cacheable' );
-$__perf_is_cacheable->setAccessible( true );
+if ( PHP_VERSION_ID < 80100 ) { $__perf_is_cacheable->setAccessible( true ); }
 $__perf_request_key = new ReflectionMethod( 'Perdita_Caching', 'request_key' );
-$__perf_request_key->setAccessible( true );
+if ( PHP_VERSION_ID < 80100 ) { $__perf_request_key->setAccessible( true ); }
 $__perf_disallowed = new ReflectionMethod( 'Perdita_Caching', 'has_disallowed_query' );
-$__perf_disallowed->setAccessible( true );
+if ( PHP_VERSION_ID < 80100 ) { $__perf_disallowed->setAccessible( true ); }
 
 // A settings array built here rather than read from the option, so a site's
 // own exclusions cannot change the answer.
@@ -240,9 +240,9 @@ $__perf_dir_preexists = is_dir( $__perf_cache_dir );
 Perdita_Caching::install();
 
 $__perf_store = new ReflectionMethod( 'Perdita_Caching', 'store' );
-$__perf_store->setAccessible( true );
+if ( PHP_VERSION_ID < 80100 ) { $__perf_store->setAccessible( true ); }
 $__perf_etag_for = new ReflectionMethod( 'Perdita_Caching', 'etag_for_file' );
-$__perf_etag_for->setAccessible( true );
+if ( PHP_VERSION_ID < 80100 ) { $__perf_etag_for->setAccessible( true ); }
 
 $__perf_etag_key  = 'https://' . $__perf_site_host . '/perdita-perf-etag/';
 $__perf_etag_file = Perdita_Caching::file_for_key( $__perf_etag_key );
@@ -302,6 +302,15 @@ add_option( 'smoke_unrelated_option_purge_test', 'x' );
 update_option( 'smoke_unrelated_option_purge_test', 'y' );
 delete_option( 'smoke_unrelated_option_purge_test' );
 $ok( is_file( $__perf_opt_file ), 'caching: a non-perdita_ option changing does not purge the cache' );
+
+// The MCP server's OAuth records are perdita_-prefixed too, but they change
+// on every token issue, refresh, and expiry, and nothing rendered depends on
+// them, so they are the one carve-out.
+$__perf_store->invoke( $__perf_cache, $__perf_opt_file, '<!doctype html><html><body>5</body></html>' );
+add_option( 'perdita_mcp_oauth_smoke_purge_test', 'x', '', false );
+update_option( 'perdita_mcp_oauth_smoke_purge_test', 'y' );
+delete_option( 'perdita_mcp_oauth_smoke_purge_test' );
+$ok( is_file( $__perf_opt_file ), 'caching: the MCP server\'s OAuth storage (perdita_mcp_oauth_*) changing does not purge the cache' );
 
 remove_action( 'added_option', array( $__perf_cache, 'purge_on_option_change' ) );
 remove_action( 'updated_option', array( $__perf_cache, 'purge_on_option_change' ) );
@@ -431,9 +440,9 @@ for ( $__perf_i = 1; $__perf_i <= 3; $__perf_i++ ) {
 $__perf_rp = new Perdita_Related_Posts( perdita_core() );
 
 $__perf_find = new ReflectionMethod( 'Perdita_Related_Posts', 'find_related' );
-$__perf_find->setAccessible( true );
+if ( PHP_VERSION_ID < 80100 ) { $__perf_find->setAccessible( true ); }
 $__perf_rp_key_method = new ReflectionMethod( 'Perdita_Related_Posts', 'cache_key' );
-$__perf_rp_key_method->setAccessible( true );
+if ( PHP_VERSION_ID < 80100 ) { $__perf_rp_key_method->setAccessible( true ); }
 $__perf_rp_key = $__perf_rp_key_method->invoke( null );
 
 $ok( 0 === strpos( $__perf_rp_key, Perdita_Related_Posts::META_PREFIX ), 'related posts: the cache meta key is prefixed and settings-hashed' );
@@ -540,7 +549,7 @@ if ( false === $__perf_orig_seo_opt ) {
 if ( file_exists( PERDITA_CORE_DIR . 'inc/modules/sales/class-perdita-sales.php' ) ) {
 	require_once PERDITA_CORE_DIR . 'inc/modules/sales/class-perdita-sales.php';
 	$__perf_sales_tags = new ReflectionMethod( 'Perdita_Sales', 'shortcode_tags' );
-	$__perf_sales_tags->setAccessible( true );
+	if ( PHP_VERSION_ID < 80100 ) { $__perf_sales_tags->setAccessible( true ); }
 	$__perf_tags = $__perf_sales_tags->invoke( null );
 	$__perf_sales_src = (string) file_get_contents( PERDITA_CORE_DIR . 'inc/modules/sales/class-perdita-sales.php' ); // phpcs:ignore WordPress.WP.AlternativeFunctions -- reading the theme's own source to check the two lists agree.
 	$__perf_registered = array();
@@ -553,7 +562,7 @@ if ( file_exists( PERDITA_CORE_DIR . 'inc/modules/sales/class-perdita-sales.php'
 	$ok( $__perf_registered === $__perf_tags_sorted, 'sales: the shortcode list the stylesheet gate reads matches the tags the module actually registers' );
 
 	$__perf_needs = new ReflectionMethod( 'Perdita_Sales', 'needs_store_css' );
-	$__perf_needs->setAccessible( true );
+	if ( PHP_VERSION_ID < 80100 ) { $__perf_needs->setAccessible( true ); }
 	// Built without its constructor: the gate reads only the query, so this
 	// avoids registering a second set of the module's shortcodes and REST
 	// routes just to ask it a question.

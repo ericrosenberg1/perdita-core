@@ -113,6 +113,21 @@ class Perdita_MCP {
 	const TOOL_CALL_RATE_LIMIT_WINDOW = HOUR_IN_SECONDS;
 
 	/**
+	 * Default ceiling, in characters, on each of get_post's content_raw and
+	 * content_rendered fields. Both go straight into the calling model's
+	 * context window, so one very long post (an imported book chapter, a
+	 * page built from hundreds of blocks) used to be able to swallow the
+	 * whole conversation with no warning. 60,000 characters is roughly
+	 * 15,000 tokens per field: well above any ordinary post, and still a
+	 * fraction of every current client's context. A site changes it with
+	 * the perdita_mcp_get_post_max_chars filter (0 removes the cap), and a
+	 * client can ask for less on any one call with the max_chars argument.
+	 * Whenever a field is cut the response says so (truncated: true) and
+	 * reports both full lengths, so the model knows what it did not see.
+	 */
+	const GET_POST_MAX_CHARS = 60000;
+
+	/**
 	 * The Perdita core (settings, modules registry, ai router, ...).
 	 *
 	 * @var Perdita
@@ -359,6 +374,16 @@ class Perdita_MCP {
 					// "Error Handling" section for why these two cases are kept
 					// distinct: a model is less likely to recover from this one
 					// than from a tool execution error.
+					//
+					// The code is -32602 (invalid params), not -32601 (method
+					// not found), on purpose: the METHOD here is tools/call,
+					// which exists, and the tool name is one of its params.
+					// That is the code the MCP spec's own "Error Handling"
+					// example uses for "Unknown tool", and what the reference
+					// @modelcontextprotocol/sdk server throws
+					// (McpError(ErrorCode.InvalidParams, "Tool X not found")).
+					// The default branch below is where -32601 belongs: a
+					// method this server does not implement at all.
 					return $this->rpc_response(
 						$id,
 						null,
@@ -873,13 +898,18 @@ class Perdita_MCP {
 			),
 			array(
 				'name'        => 'get_post',
-				'description' => __( 'Get the full content of a single post or page by ID, including both the rendered HTML and the raw editor content.', 'perdita-core' ),
+				'description' => __( 'Get the full content of a single post or page by ID, including both the rendered HTML and the raw editor content. Very long content is cut at a per-field character ceiling and the response then says truncated: true.', 'perdita-core' ),
 				'inputSchema' => array(
 					'type'       => 'object',
 					'properties' => array(
-						'id' => array(
+						'id'        => array(
 							'type'        => 'integer',
 							'description' => __( 'The post or page ID to fetch.', 'perdita-core' ),
+						),
+						'max_chars' => array(
+							'type'        => 'integer',
+							'minimum'     => 100,
+							'description' => __( 'Optional. Return at most this many characters of content_raw and of content_rendered. The site sets the default ceiling (60,000 unless changed) and this can only lower it. When either field is cut short the response sets truncated: true and reports the full lengths in content_raw_length and content_rendered_length.', 'perdita-core' ),
 						),
 					),
 					'required'             => array( 'id' ),
@@ -1221,29 +1251,87 @@ class Perdita_MCP {
 			return $this->tool_error( __( 'You do not have permission to read this post. It may be a draft or private post owned by another user.', 'perdita-core' ) );
 		}
 
+		$max_chars = self::get_post_max_chars( $args );
+		$raw       = (string) $post->post_content;
+		$rendered  = (string) apply_filters( 'the_content', $post->post_content );
+		$raw_len   = mb_strlen( $raw );
+		$rend_len  = mb_strlen( $rendered );
+		$truncated = $max_chars > 0 && ( $raw_len > $max_chars || $rend_len > $max_chars );
+
 		$data = array(
-			'id'             => $post->ID,
-			'title'          => get_the_title( $post ),
-			'status'         => $post->post_status,
-			'type'           => $post->post_type,
-			'date'           => $post->post_date,
-			'author'         => (int) $post->post_author,
-			'author_name'    => (string) get_the_author_meta( 'display_name', $post->post_author ),
-			'permalink'      => get_permalink( $post ),
-			'content_raw'    => $post->post_content,
-			'content_rendered' => apply_filters( 'the_content', $post->post_content ),
-			'excerpt'        => get_the_excerpt( $post ),
+			'id'                      => $post->ID,
+			'title'                   => get_the_title( $post ),
+			'status'                  => $post->post_status,
+			'type'                    => $post->post_type,
+			'date'                    => $post->post_date,
+			'author'                  => (int) $post->post_author,
+			'author_name'             => (string) get_the_author_meta( 'display_name', $post->post_author ),
+			'permalink'               => get_permalink( $post ),
+			'content_raw'             => self::clip( $raw, $max_chars ),
+			'content_rendered'        => self::clip( $rendered, $max_chars ),
+			'content_raw_length'      => $raw_len,
+			'content_rendered_length' => $rend_len,
+			'content_max_chars'       => $max_chars,
+			'truncated'               => $truncated,
+			'excerpt'                 => get_the_excerpt( $post ),
 		);
 
-		return $this->tool_result(
-			sprintf(
-				/* translators: 1: post title, 2: post status. */
-				__( '"%1$s" (%2$s)', 'perdita-core' ),
-				$data['title'],
-				$data['status']
-			),
-			$data
+		$summary = sprintf(
+			/* translators: 1: post title, 2: post status. */
+			__( '"%1$s" (%2$s)', 'perdita-core' ),
+			$data['title'],
+			$data['status']
 		);
+		if ( $truncated ) {
+			$summary .= ' ' . sprintf(
+				/* translators: 1: character ceiling, 2: full raw content length, 3: full rendered content length. */
+				__( 'Content was cut to %1$d characters per field (the full raw content is %2$d characters, the rendered HTML %3$d). Pass a larger max_chars, up to the site ceiling, to see more.', 'perdita-core' ),
+				$max_chars,
+				$raw_len,
+				$rend_len
+			);
+		}
+
+		return $this->tool_result( $summary, $data );
+	}
+
+	/**
+	 * The content ceiling for one get_post call: the site's (filtered)
+	 * default, lowered but never raised by the call's own max_chars.
+	 *
+	 * @param array $args Tool arguments.
+	 * @return int Characters per field, 0 for no ceiling.
+	 */
+	private static function get_post_max_chars( array $args ) {
+		/**
+		 * The per-field character ceiling get_post applies to content_raw
+		 * and content_rendered. Return 0 to remove it.
+		 *
+		 * @param int $max_chars Default self::GET_POST_MAX_CHARS.
+		 */
+		$site_max = max( 0, (int) apply_filters( 'perdita_mcp_get_post_max_chars', self::GET_POST_MAX_CHARS ) );
+
+		$requested = isset( $args['max_chars'] ) ? (int) $args['max_chars'] : 0;
+		if ( $requested <= 0 ) {
+			return $site_max;
+		}
+		$requested = max( 100, $requested );
+		return 0 === $site_max ? $requested : min( $site_max, $requested );
+	}
+
+	/**
+	 * The first $max_chars characters of $text (whole text when $max_chars
+	 * is 0). Multibyte-safe so a cut never lands inside a character.
+	 *
+	 * @param string $text      Text to clip.
+	 * @param int    $max_chars Ceiling, 0 for none.
+	 * @return string
+	 */
+	private static function clip( $text, $max_chars ) {
+		if ( $max_chars <= 0 || mb_strlen( $text ) <= $max_chars ) {
+			return $text;
+		}
+		return mb_substr( $text, 0, $max_chars );
 	}
 
 	/**
