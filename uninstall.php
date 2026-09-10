@@ -77,6 +77,10 @@ function perdita_core_uninstall_options() {
 		'perdita_security_settings',
 		'perdita_smtp_settings',
 		'perdita_subscriptions_settings',
+		'perdita_indexnow',       // Key, engines, submission log.
+		'perdita_breadcrumbs',
+		'perdita_image_seo',
+		'perdita_seo_llms_rules', // Rewrite-flush stamp for llms.txt.
 
 		// MCP OAuth authorization-server state: registered clients, issued
 		// grants, and live connections. Every one is a credential for reaching
@@ -125,6 +129,9 @@ function perdita_core_uninstall_transient_prefixes() {
 		'perdita_subs_rl_', // Subscription signup rate limiter.
 		'perdita_fl_',     // Forms submission rate limiter.
 		'perdita_backups_notice_',
+		'perdita_indexnow_', // Sitemap ping throttle.
+		'perdita_image_sitemap', // Cached image sitemap XML.
+		'perdita_seo_llms_', // Cached llms.txt and llms-full.txt.
 	);
 }
 
@@ -147,6 +154,7 @@ function perdita_core_uninstall_site() {
 		array(
 			'perdita_backups_run',
 			'perdita_subscriptions_send_batch',
+			'perdita_indexnow_submit',
 		) as $hook
 	) {
 		wp_clear_scheduled_hook( $hook );

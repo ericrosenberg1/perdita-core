@@ -99,7 +99,7 @@ class Perdita_SEO {
 		add_filter( 'document_title_separator', array( $this, 'separator' ) );
 		add_action( 'wp_head', array( $this, 'head' ), 1 );
 		add_filter( 'wp_robots', array( $this, 'robots' ) );
-		add_filter( 'robots_txt', array( $this, 'robots_txt' ), 20, 2 );
+		add_filter( 'robots_txt', array( $this, 'robots_txt' ), 5, 2 );
 		add_action( 'template_redirect', array( $this, 'attachment_redirect' ), 2 );
 
 		// Core prints its own canonical on singular views at wp_head 10, so a
@@ -493,19 +493,12 @@ class Perdita_SEO {
 			return $output;
 		}
 		$custom = str_replace( "\r\n", "\n", $custom );
-		// Keep every Sitemap line the generated file carried (core's index, the
-		// image sitemap, anything another module added) unless the stored text
-		// already names that URL. The override replaces rules, not discovery.
-		if ( preg_match_all( '/^sitemap:\s*(\S+)\s*$/mi', (string) $output, $m, PREG_SET_ORDER ) ) {
-			$missing = array();
-			foreach ( $m as $line ) {
-				if ( false === stripos( $custom, $line[1] ) ) {
-					$missing[] = 'Sitemap: ' . $line[1];
-				}
-			}
-			if ( $missing ) {
-				$custom .= "\n\n" . implode( "\n", $missing );
-			}
+		// This runs at priority 5, so the only Sitemap line in $output is the
+		// one WordPress core added. Carry it over unless the stored text names
+		// a sitemap of its own. Modules that add their own Sitemap lines (the
+		// image sitemap, for one) hook later and append to the override.
+		if ( false === stripos( $custom, 'sitemap:' ) && preg_match_all( '/^sitemap:\s*\S+\s*$/mi', (string) $output, $m ) ) {
+			$custom .= "\n\n" . implode( "\n", array_map( 'trim', $m[0] ) );
 		}
 		return $custom . "\n";
 	}
@@ -526,11 +519,11 @@ class Perdita_SEO {
 		$output  .= "Allow: $path/wp-admin/admin-ajax.php\n";
 		$self     = self::instance();
 		if ( $self ) {
-			remove_filter( 'robots_txt', array( $self, 'robots_txt' ), 20 );
+			remove_filter( 'robots_txt', array( $self, 'robots_txt' ), 5 );
 		}
 		$output = (string) apply_filters( 'robots_txt', $output, $public ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- core's own hook, applied to reproduce core's file.
 		if ( $self ) {
-			add_filter( 'robots_txt', array( $self, 'robots_txt' ), 20, 2 );
+			add_filter( 'robots_txt', array( $self, 'robots_txt' ), 5, 2 );
 		}
 		return $output;
 	}
