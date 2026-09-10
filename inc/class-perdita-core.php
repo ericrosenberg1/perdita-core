@@ -645,6 +645,11 @@ final class Perdita_Core {
 				'default'     => true,
 				'contexts'    => array( 'front', 'admin', 'rest' ),
 				'boot'        => function ( $core ) {
+					require_once PERDITA_CORE_DIR . 'inc/class-perdita-seo-variables.php';
+					require_once PERDITA_CORE_DIR . 'inc/class-perdita-seo-author.php';
+					require_once PERDITA_CORE_DIR . 'inc/class-perdita-seo-terms.php';
+					require_once PERDITA_CORE_DIR . 'inc/class-perdita-seo-feeds.php';
+					require_once PERDITA_CORE_DIR . 'inc/class-perdita-seo-llms.php';
 					require_once PERDITA_CORE_DIR . 'inc/class-perdita-seo.php';
 					new Perdita_SEO( $core->seo );
 					if ( is_admin() ) {

@@ -1,0 +1,38 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "perdita/breadcrumbs",
+	"title": "Breadcrumbs",
+	"category": "theme",
+	"icon": "networking",
+	"description": "A breadcrumb trail from the home page down to whatever is being viewed.",
+	"textdomain": "perdita-core",
+	"keywords": [ "breadcrumb", "trail", "navigation", "seo" ],
+	"supports": {
+		"html": false,
+		"multiple": false,
+		"align": [ "wide", "full" ],
+		"spacing": {
+			"margin": true,
+			"padding": true
+		},
+		"typography": {
+			"fontSize": true,
+			"lineHeight": true
+		},
+		"color": {
+			"text": true,
+			"background": true,
+			"link": true
+		}
+	},
+	"attributes": {
+		"separator": {
+			"type": "string"
+		},
+		"showCurrent": {
+			"type": "boolean"
+		}
+	},
+	"editorScript": "perdita-breadcrumbs-editor"
+}

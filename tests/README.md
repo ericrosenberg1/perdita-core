@@ -49,6 +49,16 @@ can live in its own fragment without two people editing the main file at once.
 - `smoke-perf.php` covers performance regressions: lazy construction, page
   cache keying and purging, the related-posts memo, the SEO store's negative
   cache, and the sales stylesheet only loading where it's used.
+- `smoke-seo-core.php` covers the free SEO layer end to end: template
+  variables, per-post-type and term templates, robots directives, the
+  extension filters, the linked JSON-LD graph, author E-E-A-T, webmaster
+  tags, the robots.txt override, feed controls, and llms.txt.
+- `smoke-indexnow.php`, `smoke-breadcrumbs.php`, and `smoke-image-seo.php`
+  cover the three SEO modules: key file and submission scheduling with HTTP
+  stubbed, the breadcrumb trail for every view type, and alt text generation
+  plus the image sitemap.
+- `smoke-mcp-seo.php` covers the MCP SEO fields: the update action fires with
+  sanitized fields and `get_post` merges the filter result.
 
 ## What it does not cover
 

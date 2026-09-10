@@ -898,7 +898,7 @@ class Perdita_MCP {
 			),
 			array(
 				'name'        => 'get_post',
-				'description' => __( 'Get the full content of a single post or page by ID, including both the rendered HTML and the raw editor content. Very long content is cut at a per-field character ceiling and the response then says truncated: true.', 'perdita-core' ),
+				'description' => __( 'Get the full content of a single post or page by ID, including both the rendered HTML and the raw editor content. Very long content is cut at a per-field character ceiling and the response then says truncated: true. The "seo" key carries the stored SEO fields, which need Perdita Pro\'s SEO module to hold anything.', 'perdita-core' ),
 				'inputSchema' => array(
 					'type'       => 'object',
 					'properties' => array(
@@ -924,28 +924,31 @@ class Perdita_MCP {
 			),
 			array(
 				'name'        => 'create_post',
-				'description' => __( 'Create a new post or page. If the connected user is not allowed to publish content, the new item is always saved as a draft regardless of the requested status, and the response says so explicitly.', 'perdita-core' ),
+				'description' => __( 'Create a new post or page. If the connected user is not allowed to publish content, the new item is always saved as a draft regardless of the requested status, and the response says so explicitly. The optional SEO fields need Perdita Pro\'s SEO module to be stored: without it they are accepted and ignored.', 'perdita-core' ),
 				'inputSchema' => array(
 					'type'       => 'object',
-					'properties' => array(
-						'title'     => array(
-							'type'        => 'string',
-							'description' => __( 'The title of the new post or page.', 'perdita-core' ),
+					'properties' => array_merge(
+						array(
+							'title'     => array(
+								'type'        => 'string',
+								'description' => __( 'The title of the new post or page.', 'perdita-core' ),
+							),
+							'content'   => array(
+								'type'        => 'string',
+								'description' => __( 'The body content. Accepts HTML or plain paragraphs.', 'perdita-core' ),
+							),
+							'post_type' => array(
+								'type'        => 'string',
+								'enum'        => array( 'post', 'page' ),
+								'description' => __( 'Content type to create. Defaults to "post".', 'perdita-core' ),
+							),
+							'status'    => array(
+								'type'        => 'string',
+								'enum'        => array( 'draft', 'publish', 'pending' ),
+								'description' => __( 'Desired status. Defaults to "draft". Forced to "draft" if the connected user cannot publish.', 'perdita-core' ),
+							),
 						),
-						'content'   => array(
-							'type'        => 'string',
-							'description' => __( 'The body content. Accepts HTML or plain paragraphs.', 'perdita-core' ),
-						),
-						'post_type' => array(
-							'type'        => 'string',
-							'enum'        => array( 'post', 'page' ),
-							'description' => __( 'Content type to create. Defaults to "post".', 'perdita-core' ),
-						),
-						'status'    => array(
-							'type'        => 'string',
-							'enum'        => array( 'draft', 'publish', 'pending' ),
-							'description' => __( 'Desired status. Defaults to "draft". Forced to "draft" if the connected user cannot publish.', 'perdita-core' ),
-						),
+						self::seo_schema_properties()
 					),
 					'required'             => array( 'title', 'content' ),
 					'additionalProperties' => false,
@@ -959,27 +962,30 @@ class Perdita_MCP {
 			),
 			array(
 				'name'        => 'update_post',
-				'description' => __( 'Update the title, content, and/or status of an existing post or page. Only the fields provided are changed. The same publish-permission rule as create_post applies to status changes.', 'perdita-core' ),
+				'description' => __( 'Update the title, content, status, and/or SEO fields of an existing post or page. Only the fields provided are changed. The same publish-permission rule as create_post applies to status changes. The optional SEO fields need Perdita Pro\'s SEO module to be stored: without it they are accepted and ignored.', 'perdita-core' ),
 				'inputSchema' => array(
 					'type'       => 'object',
-					'properties' => array(
-						'id'      => array(
-							'type'        => 'integer',
-							'description' => __( 'The post or page ID to update.', 'perdita-core' ),
+					'properties' => array_merge(
+						array(
+							'id'      => array(
+								'type'        => 'integer',
+								'description' => __( 'The post or page ID to update.', 'perdita-core' ),
+							),
+							'title'   => array(
+								'type'        => 'string',
+								'description' => __( 'New title. Omit to leave unchanged.', 'perdita-core' ),
+							),
+							'content' => array(
+								'type'        => 'string',
+								'description' => __( 'New body content. Omit to leave unchanged.', 'perdita-core' ),
+							),
+							'status'  => array(
+								'type'        => 'string',
+								'enum'        => array( 'draft', 'publish', 'pending' ),
+								'description' => __( 'New status. Omit to leave unchanged. Forced to "draft" if the connected user cannot publish.', 'perdita-core' ),
+							),
 						),
-						'title'   => array(
-							'type'        => 'string',
-							'description' => __( 'New title. Omit to leave unchanged.', 'perdita-core' ),
-						),
-						'content' => array(
-							'type'        => 'string',
-							'description' => __( 'New body content. Omit to leave unchanged.', 'perdita-core' ),
-						),
-						'status'  => array(
-							'type'        => 'string',
-							'enum'        => array( 'draft', 'publish', 'pending' ),
-							'description' => __( 'New status. Omit to leave unchanged. Forced to "draft" if the connected user cannot publish.', 'perdita-core' ),
-						),
+						self::seo_schema_properties()
 					),
 					'required'             => array( 'id' ),
 					'additionalProperties' => false,
@@ -1070,6 +1076,111 @@ class Perdita_MCP {
 		}
 
 		return $tools;
+	}
+
+	/* ==========================================================
+	 * SEO fields on create_post / update_post
+	 * ========================================================== */
+
+	/**
+	 * The optional SEO properties create_post and update_post accept, merged
+	 * into both input schemas.
+	 *
+	 * This server never writes these itself. It hands them to the
+	 * perdita_seo_update_post_fields action, which Perdita Pro's SEO module
+	 * listens on, so a site without Pro accepts the arguments and stores
+	 * nothing rather than failing the whole call.
+	 *
+	 * @return array Property definitions, keyed by argument name.
+	 */
+	private static function seo_schema_properties() {
+		return array(
+			'seo_title'        => array(
+				'type'        => 'string',
+				'description' => __( 'SEO title tag, if it should differ from the post title. Needs Perdita Pro\'s SEO module to be stored.', 'perdita-core' ),
+			),
+			'seo_description'  => array(
+				'type'        => 'string',
+				'description' => __( 'Meta description. Needs Perdita Pro\'s SEO module to be stored.', 'perdita-core' ),
+			),
+			'focus_keyphrase'  => array(
+				'type'        => 'string',
+				'description' => __( 'The phrase this content is meant to rank for. Needs Perdita Pro\'s SEO module to be stored.', 'perdita-core' ),
+			),
+			'canonical'        => array(
+				'type'        => 'string',
+				'format'      => 'uri',
+				'description' => __( 'Canonical URL, when this content is the copy rather than the original. Needs Perdita Pro\'s SEO module to be stored.', 'perdita-core' ),
+			),
+			'noindex'          => array(
+				'type'        => 'boolean',
+				'description' => __( 'Ask search engines not to index this item. Needs Perdita Pro\'s SEO module to be stored.', 'perdita-core' ),
+			),
+			'og_title'         => array(
+				'type'        => 'string',
+				'description' => __( 'Open Graph title for social shares. Needs Perdita Pro\'s SEO module to be stored.', 'perdita-core' ),
+			),
+			'og_description'   => array(
+				'type'        => 'string',
+				'description' => __( 'Open Graph description for social shares. Needs Perdita Pro\'s SEO module to be stored.', 'perdita-core' ),
+			),
+			'schema_type'      => array(
+				'type'        => 'string',
+				'description' => __( 'Schema.org type for this item, for example Article, NewsArticle, or FAQPage. Needs Perdita Pro\'s SEO module to be stored.', 'perdita-core' ),
+			),
+		);
+	}
+
+	/**
+	 * The SEO arguments a call actually sent, unslashed and sanitized. Keys
+	 * the caller left out are absent from the result, so a listener can tell
+	 * "clear this field" (an empty string was sent) from "leave it alone".
+	 *
+	 * @param array $args Tool arguments.
+	 * @return array Only the provided keys.
+	 */
+	private static function seo_fields_from_args( array $args ) {
+		$fields = array();
+		foreach ( array_keys( self::seo_schema_properties() ) as $key ) {
+			if ( ! array_key_exists( $key, $args ) ) {
+				continue;
+			}
+			$value = $args[ $key ];
+			if ( 'noindex' === $key ) {
+				$fields[ $key ] = (bool) $value;
+				continue;
+			}
+			if ( ! is_scalar( $value ) ) {
+				continue;
+			}
+			$value          = wp_unslash( (string) $value );
+			$fields[ $key ] = 'canonical' === $key ? esc_url_raw( $value ) : sanitize_text_field( $value );
+		}
+		return $fields;
+	}
+
+	/**
+	 * Hand a post's SEO fields to whatever stores them, if any were sent.
+	 *
+	 * @param int   $post_id Post id.
+	 * @param array $fields  Sanitized fields from seo_fields_from_args().
+	 */
+	private static function dispatch_seo_fields( $post_id, array $fields ) {
+		if ( empty( $fields ) ) {
+			return;
+		}
+
+		/**
+		 * Store SEO fields sent through the MCP server with a post.
+		 *
+		 * Only the keys the caller provided are present, already unslashed
+		 * and sanitized. Perdita Pro's SEO module is the listener that makes
+		 * this do anything; core accepts the fields and drops them.
+		 *
+		 * @param int   $post_id Post id.
+		 * @param array $fields  Provided SEO fields.
+		 */
+		do_action( 'perdita_seo_update_post_fields', (int) $post_id, $fields );
 	}
 
 	/* ==========================================================
@@ -1274,6 +1385,17 @@ class Perdita_MCP {
 			'content_max_chars'       => $max_chars,
 			'truncated'               => $truncated,
 			'excerpt'                 => get_the_excerpt( $post ),
+			/**
+			 * The post's stored SEO fields, for MCP clients reading content
+			 * before rewriting it. Core has nowhere to keep these, so it
+			 * ships an empty array. Perdita Pro's SEO module is the filter
+			 * that fills it in.
+			 *
+			 * @param array $fields  SEO fields, keyed as create_post and
+			 *                       update_post accept them.
+			 * @param int   $post_id Post id.
+			 */
+			'seo'                     => (array) apply_filters( 'perdita_seo_get_post_fields', array(), (int) $post->ID ),
 		);
 
 		$summary = sprintf(
@@ -1386,6 +1508,8 @@ class Perdita_MCP {
 			) );
 		}
 
+		self::dispatch_seo_fields( $post_id, self::seo_fields_from_args( $args ) );
+
 		$note = $forced_to_draft
 			? __( ' Note: the connected user cannot publish content, so this was saved as a draft instead of the requested status.', 'perdita-core' )
 			: '';
@@ -1457,18 +1581,27 @@ class Perdita_MCP {
 			$update['post_status'] = $status;
 		}
 
-		if ( count( $update ) === 1 ) {
-			return $this->tool_error( __( 'Provide at least one of "title", "content", or "status" to update.', 'perdita-core' ) );
+		$seo_fields = self::seo_fields_from_args( $args );
+
+		if ( count( $update ) === 1 && empty( $seo_fields ) ) {
+			return $this->tool_error( __( 'Provide at least one of "title", "content", "status", or an SEO field to update.', 'perdita-core' ) );
 		}
 
-		$result = wp_update_post( $update, true );
-		if ( is_wp_error( $result ) ) {
-			return $this->tool_error( sprintf(
-				/* translators: %s: underlying WordPress error message. */
-				__( 'Could not update the post: %s', 'perdita-core' ),
-				$result->get_error_message()
-			) );
+		// An SEO-only call has nothing for wp_update_post to write, so it
+		// skips the post write entirely rather than saving a revision and
+		// bumping post_modified for a change that never touched the post row.
+		if ( count( $update ) > 1 ) {
+			$result = wp_update_post( $update, true );
+			if ( is_wp_error( $result ) ) {
+				return $this->tool_error( sprintf(
+					/* translators: %s: underlying WordPress error message. */
+					__( 'Could not update the post: %s', 'perdita-core' ),
+					$result->get_error_message()
+				) );
+			}
 		}
+
+		self::dispatch_seo_fields( $id, $seo_fields );
 
 		$note = $forced_to_draft
 			? __( ' Note: the connected user cannot publish content, so the status was set to "draft" instead of the requested status.', 'perdita-core' )

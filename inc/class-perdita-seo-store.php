@@ -4,15 +4,20 @@
  *
  * Kept separate from the design token document so the SEO subsystem can grow
  * without bloating the design schema the AI edits. Holds site-wide title and
- * meta defaults, linked social profiles, default social images, schema, and
- * noindex rules. Includes best-effort import of global settings from Yoast and
- * All in One SEO.
+ * meta templates (global, per post type, per taxonomy), robots directives,
+ * linked social profiles, default social images, schema identity, webmaster
+ * verification tokens, the robots.txt override, feed controls, and the
+ * llms.txt toggles. Includes best-effort import of global settings from
+ * Yoast, All in One SEO, and Genesis.
  *
  * @package Perdita_Core
  */
 
 defined( 'ABSPATH' ) || exit;
 
+/**
+ * Reads, sanitizes, and writes the perdita_seo settings option.
+ */
 class Perdita_SEO_Store {
 
 	const OPTION = 'perdita_seo';
@@ -31,33 +36,133 @@ class Perdita_SEO_Store {
 	 */
 	public function defaults() {
 		return array(
-			'enabled'          => true,
-			'separator'        => '-',
-			'title_template'   => '%title% %sep% %sitename%',
-			'home_title'       => '',
-			'home_description' => '',
-			'default_description' => '',
-			'default_image_id' => 0,
-			'twitter_card'     => 'summary_large_image',
-			'schema_type'      => 'Organization',
-			'org_name'         => '',
-			'org_logo_id'      => 0,
-			'social'           => array(
+			'enabled'                   => true,
+			'separator'                 => '-',
+			'title_template'            => '%title% %sep% %sitename%',
+			'home_title'                => '',
+			'home_description'          => '',
+			'default_description'       => '',
+			'default_image_id'          => 0,
+			'twitter_card'              => 'summary_large_image',
+			'schema_type'               => 'Organization',
+			'org_name'                  => '',
+			'org_logo_id'               => 0,
+			'facebook_app_id'           => '',
+			'social'                    => array(
 				'twitter'   => '',
 				'facebook'  => '',
 				'instagram' => '',
 				'linkedin'  => '',
 				'youtube'   => '',
 			),
-			'noindex'          => array(
-				'archive_date'     => true,
-				'archive_author'   => false,
-				'archive_tag'      => false,
-				'archive_category' => false,
+			'noindex'                   => array(
+				'archive_date'      => true,
+				'archive_author'    => false,
+				'archive_tag'       => false,
+				'archive_category'  => false,
 				'archive_post_type' => false,
-				'search'           => true,
+				'search'            => true,
 			),
+			// Robots directives (Perdita_SEO::robots() feeds these into core's
+			// wp_robots filter). -1 on the two counters means no limit.
+			'noindex_paginated'         => false,
+			'attachments'               => 'redirect',
+			'max_snippet'               => -1,
+			'max_image_preview'         => 'large',
+			'max_video_preview'         => -1,
+			// Per post type and per taxonomy overrides, keyed by slug, each a
+			// partial array of title, description, noindex. Missing keys fall
+			// back through post_type_settings() / taxonomy_settings().
+			'post_types'                => array(),
+			'taxonomies'                => array(),
+			'archive_title'             => '%archive_title% %sep% %sitename%',
+			'search_title'              => '%title% %sep% %sitename%',
+			'404_title'                 => '%title% %sep% %sitename%',
+			// Webmaster verification tokens, printed on the front page only.
+			'verify_google'             => '',
+			'verify_bing'               => '',
+			'verify_pinterest'          => '',
+			'verify_yandex'             => '',
+			'verify_baidu'              => '',
+			// robots.txt override. Empty means core's virtual file.
+			'robots_txt'                => '',
+			// Feed controls.
+			'rss_before'                => '',
+			'rss_after'                 => '',
+			'rss_disable_comments_feed' => false,
+			'rss_disable_all'           => false,
+			// llms.txt index (on) and llms-full.txt body dump (off).
+			'llms_txt'                  => true,
+			'llms_full_txt'             => false,
 		);
+	}
+
+	/**
+	 * Per post type title/description/noindex, with the global title template
+	 * and the excerpt as the fallbacks so an older site that only ever set
+	 * title_template keeps exactly the titles it had.
+	 *
+	 * @param string $slug Post type slug.
+	 * @return array title, description, noindex.
+	 */
+	public function post_type_settings( $slug ) {
+		$row = $this->get( 'post_types.' . $slug, array() );
+		$row = is_array( $row ) ? $row : array();
+		return array(
+			'title'       => isset( $row['title'] ) && '' !== trim( (string) $row['title'] ) ? (string) $row['title'] : (string) $this->get( 'title_template', '%title% %sep% %sitename%' ),
+			'description' => isset( $row['description'] ) && '' !== trim( (string) $row['description'] ) ? (string) $row['description'] : '%excerpt%',
+			'noindex'     => ! empty( $row['noindex'] ),
+		);
+	}
+
+	/**
+	 * Per taxonomy title/description/noindex with the term name and term
+	 * description as the fallbacks.
+	 *
+	 * @param string $slug Taxonomy slug.
+	 * @return array title, description, noindex.
+	 */
+	public function taxonomy_settings( $slug ) {
+		$row = $this->get( 'taxonomies.' . $slug, array() );
+		$row = is_array( $row ) ? $row : array();
+		return array(
+			'title'       => isset( $row['title'] ) && '' !== trim( (string) $row['title'] ) ? (string) $row['title'] : '%term_title% %sep% %sitename%',
+			'description' => isset( $row['description'] ) && '' !== trim( (string) $row['description'] ) ? (string) $row['description'] : '%term_description%',
+			'noindex'     => ! empty( $row['noindex'] ),
+		);
+	}
+
+	/**
+	 * Sanitize a title or description template without losing its tokens.
+	 * sanitize_text_field() strips anything that looks like a percent-encoded
+	 * octet, and %category% starts with one (%ca), so it came back as
+	 * "tegory%". This keeps the tag stripping and the UTF-8 check, collapses
+	 * whitespace, and leaves percent signs alone.
+	 *
+	 * @param mixed $value Raw template.
+	 * @return string
+	 */
+	public static function sanitize_template( $value ) {
+		$value = wp_check_invalid_utf8( (string) $value );
+		$value = wp_strip_all_tags( $value, true );
+		$value = preg_replace( '/[\r\n\t ]+/', ' ', $value );
+		return trim( (string) $value );
+	}
+
+	/**
+	 * Reduce a pasted verification value to its token. Accepts the bare token
+	 * or the full meta tag the console hands out, in which case the content
+	 * attribute is what gets kept.
+	 *
+	 * @param mixed $value Raw value.
+	 * @return string
+	 */
+	public static function sanitize_verification( $value ) {
+		$value = trim( (string) $value );
+		if ( preg_match( '/content\s*=\s*["\']([^"\']*)["\']/i', $value, $m ) ) {
+			$value = $m[1];
+		}
+		return sanitize_text_field( $value );
 	}
 
 	/**
@@ -112,10 +217,11 @@ class Perdita_SEO_Store {
 
 	/**
 	 * Write to the option without the role-based sanitization in save().
-	 * Used only by cached_attachment_url() for its internal { id, url } cache,
+	 * Used only by cached_attachment() for its internal attachment cache,
 	 * whose shape is already fully controlled at the call site (id from an
-	 * (int) cast, url from wp_get_attachment_image_url()) -- never for
-	 * anything derived from user, import, or migration input.
+	 * (int) cast, url and size from wp_get_attachment_image_src(), alt
+	 * through sanitize_text_field()), never for anything derived from user,
+	 * import, or migration input.
 	 *
 	 * @param array $patch Partial doc.
 	 * @return bool
@@ -154,9 +260,33 @@ class Perdita_SEO_Store {
 			}
 			if ( in_array( $key, array( 'default_image_cache', 'org_logo_cache' ), true ) && is_array( $value ) ) {
 				$out[ $key ] = array(
-					'id'  => absint( $value['id'] ?? 0 ),
-					'url' => esc_url_raw( (string) ( $value['url'] ?? '' ) ),
+					'id'     => absint( $value['id'] ?? 0 ),
+					'url'    => esc_url_raw( (string) ( $value['url'] ?? '' ) ),
+					'width'  => absint( $value['width'] ?? 0 ),
+					'height' => absint( $value['height'] ?? 0 ),
+					'alt'    => sanitize_text_field( (string) ( $value['alt'] ?? '' ) ),
 				);
+				continue;
+			}
+			if ( in_array( $key, array( 'post_types', 'taxonomies' ), true ) && is_array( $value ) ) {
+				$out[ $key ] = array();
+				foreach ( $value as $slug => $row ) {
+					$slug = sanitize_key( (string) $slug );
+					if ( '' === $slug || ! is_array( $row ) ) {
+						continue;
+					}
+					$clean = array();
+					if ( array_key_exists( 'title', $row ) ) {
+						$clean['title'] = self::sanitize_template( $row['title'] );
+					}
+					if ( array_key_exists( 'description', $row ) ) {
+						$clean['description'] = self::sanitize_template( $row['description'] );
+					}
+					if ( array_key_exists( 'noindex', $row ) ) {
+						$clean['noindex'] = (bool) $row['noindex'];
+					}
+					$out[ $key ][ $slug ] = $clean;
+				}
 				continue;
 			}
 			if ( ! is_scalar( $value ) ) {
@@ -164,11 +294,23 @@ class Perdita_SEO_Store {
 			}
 			switch ( $key ) {
 				case 'enabled':
+				case 'noindex_paginated':
+				case 'rss_disable_comments_feed':
+				case 'rss_disable_all':
+				case 'llms_txt':
+				case 'llms_full_txt':
 					$out[ $key ] = (bool) $value;
 					break;
 				case 'home_description':
 				case 'default_description':
 					$out[ $key ] = sanitize_textarea_field( (string) $value );
+					break;
+				case 'title_template':
+				case 'home_title':
+				case 'archive_title':
+				case 'search_title':
+				case '404_title':
+					$out[ $key ] = self::sanitize_template( $value );
 					break;
 				case 'schema_type':
 					$out[ $key ] = in_array( $value, array( 'Organization', 'Person' ), true ) ? (string) $value : 'Organization';
@@ -176,13 +318,41 @@ class Perdita_SEO_Store {
 				case 'twitter_card':
 					$out[ $key ] = in_array( $value, array( 'summary', 'summary_large_image' ), true ) ? (string) $value : 'summary_large_image';
 					break;
+				case 'attachments':
+					$out[ $key ] = in_array( $value, array( 'noindex', 'redirect' ), true ) ? (string) $value : 'redirect';
+					break;
+				case 'max_image_preview':
+					$out[ $key ] = in_array( $value, array( 'none', 'standard', 'large' ), true ) ? (string) $value : 'large';
+					break;
+				case 'max_snippet':
+				case 'max_video_preview':
+					$out[ $key ] = max( -1, (int) $value );
+					break;
 				case 'org_logo_id':
 				case 'default_image_id':
 					$out[ $key ] = absint( $value );
 					break;
+				case 'facebook_app_id':
+					$out[ $key ] = preg_replace( '/\D+/', '', (string) $value );
+					break;
+				case 'verify_google':
+				case 'verify_bing':
+				case 'verify_pinterest':
+				case 'verify_yandex':
+				case 'verify_baidu':
+					$out[ $key ] = self::sanitize_verification( $value );
+					break;
+				case 'robots_txt':
+					$out[ $key ] = trim( sanitize_textarea_field( str_replace( "\r\n", "\n", (string) $value ) ) );
+					break;
+				case 'rss_before':
+				case 'rss_after':
+					// Feed footers carry links, so they keep post-safe HTML.
+					$out[ $key ] = trim( wp_kses_post( (string) $value ) );
+					break;
 				default:
-					// title_template, separator, home_title, org_name, and any
-					// future plain-text field default to the same safe rule.
+					// separator, org_name, and any future plain-text field
+					// default to the same safe rule.
 					$out[ $key ] = sanitize_text_field( (string) $value );
 			}
 		}
@@ -204,7 +374,18 @@ class Perdita_SEO_Store {
 	 * @return string
 	 */
 	public function image_url() {
-		return $this->cached_attachment_url( 'default_image_id', 'default_image_cache', 'large' );
+		return (string) $this->cached_attachment( 'default_image_id', 'default_image_cache', 'large' )['url'];
+	}
+
+	/**
+	 * Resolved default social image as id, url, width, height, alt, from the
+	 * same cache as image_url(), so the Open Graph size and alt tags cost no
+	 * extra lookup either.
+	 *
+	 * @return array
+	 */
+	public function image_data() {
+		return $this->cached_attachment( 'default_image_id', 'default_image_cache', 'large' );
 	}
 
 	/**
@@ -213,12 +394,12 @@ class Perdita_SEO_Store {
 	 * @return string
 	 */
 	public function logo_url() {
-		return $this->cached_attachment_url( 'org_logo_id', 'org_logo_cache', 'full' );
+		return (string) $this->cached_attachment( 'org_logo_id', 'org_logo_cache', 'full' )['url'];
 	}
 
 	/**
-	 * Resolve an attachment id to a URL once and remember it in the option.
-	 * Later reads skip the DB lookup until the id changes.
+	 * Resolve an attachment id to a URL (plus size and alt) once and remember
+	 * it in the option. Later reads skip the DB lookup until the id changes.
 	 *
 	 * The empty result is cached too. A dangling id (the default social image
 	 * or the org logo was deleted from the media library, but the id stayed in
@@ -228,30 +409,37 @@ class Perdita_SEO_Store {
 	 * recorded url non-empty".
 	 *
 	 * @param string $id_key    Option key holding the attachment id.
-	 * @param string $cache_key Option key holding the { id, url } cache.
+	 * @param string $cache_key Option key holding the { id, url, width, height, alt } cache.
 	 * @param string $size      Image size.
-	 * @return string
+	 * @return array id, url, width, height, alt.
 	 */
-	private function cached_attachment_url( $id_key, $cache_key, $size ) {
-		$doc = $this->all();
-		$id  = (int) ( isset( $doc[ $id_key ] ) ? $doc[ $id_key ] : 0 );
+	private function cached_attachment( $id_key, $cache_key, $size ) {
+		$empty = array(
+			'id'     => 0,
+			'url'    => '',
+			'width'  => 0,
+			'height' => 0,
+			'alt'    => '',
+		);
+		$doc   = $this->all();
+		$id    = (int) ( isset( $doc[ $id_key ] ) ? $doc[ $id_key ] : 0 );
 		if ( ! $id ) {
-			return '';
+			return $empty;
 		}
 		$cache = isset( $doc[ $cache_key ] ) && is_array( $doc[ $cache_key ] ) ? $doc[ $cache_key ] : array();
 		if ( array_key_exists( 'url', $cache ) && (int) ( isset( $cache['id'] ) ? $cache['id'] : 0 ) === $id ) {
-			return (string) $cache['url'];
+			return array_merge( $empty, array_intersect_key( $cache, $empty ) );
 		}
-		$url = (string) wp_get_attachment_image_url( $id, $size );
-		$this->save_raw(
-			array(
-				$cache_key => array(
-					'id'  => $id,
-					'url' => $url,
-				),
-			)
+		$src   = wp_get_attachment_image_src( $id, $size );
+		$entry = array(
+			'id'     => $id,
+			'url'    => is_array( $src ) ? (string) $src[0] : '',
+			'width'  => is_array( $src ) ? (int) $src[1] : 0,
+			'height' => is_array( $src ) ? (int) $src[2] : 0,
+			'alt'    => is_array( $src ) ? sanitize_text_field( (string) get_post_meta( $id, '_wp_attachment_image_alt', true ) ) : '',
 		);
-		return $url;
+		$this->save_raw( array( $cache_key => $entry ) );
+		return $entry;
 	}
 
 	/**
@@ -306,27 +494,27 @@ class Perdita_SEO_Store {
 		);
 		if ( ! empty( $titles['separator'] ) && isset( $sep_map[ $titles['separator'] ] ) ) {
 			$patch['separator'] = $sep_map[ $titles['separator'] ];
-			$n++;
+			++$n;
 		}
 		if ( ! empty( $titles['metadesc-home-wpseo'] ) ) {
 			$patch['home_description'] = $titles['metadesc-home-wpseo'];
-			$n++;
+			++$n;
 		}
 		if ( ! empty( $titles['title-home-wpseo'] ) ) {
 			$patch['home_title'] = $titles['title-home-wpseo'];
-			$n++;
+			++$n;
 		}
 		if ( ! empty( $titles['company_name'] ) ) {
 			$patch['org_name'] = $titles['company_name'];
-			$n++;
+			++$n;
 		}
 		if ( ! empty( $titles['company_logo_id'] ) ) {
 			$patch['org_logo_id'] = (int) $titles['company_logo_id'];
-			$n++;
+			++$n;
 		}
 		if ( ! empty( $social['og_default_image_id'] ) ) {
 			$patch['default_image_id'] = (int) $social['og_default_image_id'];
-			$n++;
+			++$n;
 		}
 		foreach ( array(
 			'facebook'  => 'facebook_site',
@@ -337,7 +525,7 @@ class Perdita_SEO_Store {
 		) as $ours => $theirs ) {
 			if ( ! empty( $social[ $theirs ] ) ) {
 				$patch['social'][ $ours ] = $social[ $theirs ];
-				$n++;
+				++$n;
 			}
 		}
 		if ( $n ) {
@@ -366,11 +554,11 @@ class Perdita_SEO_Store {
 		$global = isset( $o['searchAppearance']['global'] ) ? $o['searchAppearance']['global'] : array();
 		if ( ! empty( $global['separator'] ) ) {
 			$patch['separator'] = (string) $global['separator'];
-			$n++;
+			++$n;
 		}
 		if ( ! empty( $global['metaDescription'] ) && false === strpos( $global['metaDescription'], '#' ) ) {
 			$patch['default_description'] = (string) $global['metaDescription'];
-			$n++;
+			++$n;
 		}
 
 		$urls = isset( $o['social']['profiles']['urls'] ) ? $o['social']['profiles']['urls'] : array();
@@ -383,7 +571,7 @@ class Perdita_SEO_Store {
 		) as $ours => $theirs ) {
 			if ( ! empty( $urls[ $theirs ] ) ) {
 				$patch['social'][ $ours ] = (string) $urls[ $theirs ];
-				$n++;
+				++$n;
 			}
 		}
 		if ( $n ) {
@@ -414,15 +602,15 @@ class Perdita_SEO_Store {
 
 		if ( ! empty( $g['home_doctitle'] ) ) {
 			$patch['home_title'] = (string) $g['home_doctitle'];
-			$n++;
+			++$n;
 		}
 		if ( ! empty( $g['home_description'] ) ) {
 			$patch['home_description'] = (string) $g['home_description'];
-			$n++;
+			++$n;
 		}
 		if ( ! empty( $g['doctitle_sep'] ) ) {
 			$patch['separator'] = (string) $g['doctitle_sep'];
-			$n++;
+			++$n;
 		}
 		// Genesis only appends the site name when append_site_title is on
 		// (off by default), and puts the separator on whichever side
@@ -435,7 +623,7 @@ class Perdita_SEO_Store {
 					? '%sitename% %sep% %title%'
 					: '%title% %sep% %sitename%';
 			}
-			$n++;
+			++$n;
 		}
 
 		$noindex = array();
@@ -448,7 +636,7 @@ class Perdita_SEO_Store {
 		) as $theirs => $ours ) {
 			if ( array_key_exists( $theirs, $g ) ) {
 				$noindex[ $ours ] = (bool) $g[ $theirs ];
-				$n++;
+				++$n;
 			}
 		}
 		if ( $noindex ) {
