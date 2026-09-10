@@ -307,7 +307,9 @@ EOF
 
 printf '\n\033[32mbuilt\033[0m %s\n  sha256 %s\n  manifest %s\n' \
 	"$out_dir/$zip_name" "$checksum" "$out_dir/${slug}.json"
-printf '\nPublish with (order matters -- zip first, manifest last, or the\nupdater will fail checksum verification for every user in between):\n'
+printf '\nPublish with ~/Code/perdita/bin/publish-release.sh (uploads the zip, then the\nmanifest, then proves the live channel names this build and serves these bytes):\n'
+printf '  ~/Code/perdita/bin/publish-release.sh %s\n' "$out_dir"
+printf '\nOr by hand (order matters -- zip first, manifest last, or the\nupdater will fail checksum verification for every user in between), then run\n~/Code/perdita/bin/publish-release.sh --check:\n'
 printf '  scp %s cloudpanel:/tmp/ && ssh cloudpanel "sudo install -o perdita -g perdita -m 644 /tmp/%s %s/"\n' \
 	"$out_dir/$zip_name" "$zip_name" "/home/perdita/htdocs/${update_host}/updates"
 printf '  ...then the same for %s.json\n' "$slug"
