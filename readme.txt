@@ -4,7 +4,7 @@ Tags: forms, seo, caching, security, newsletter
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.18.2-alpha
+Stable tag: 0.19.0-alpha
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -76,6 +76,20 @@ Form entries, subscribers, orders, products, form definitions, the SMTP log, you
 Yes, that's what Pro is built on. Pro registers its own modules into this plugin's registry, so they appear on the same Modules screen and behave the same way.
 
 == Changelog ==
+
+= 0.19.0-alpha =
+* SEO: title and description templates per post type and per taxonomy, with 18 variables (%title%, %sitename%, %sep%, %tagline%, %excerpt%, %category%, %tag%, %author%, %currentyear%, %currentmonth%, %currentdate%, %archive_title%, %term_title%, %term_description%, %post_type_singular%, %post_type_plural%, %page%, %search_term%) and a perdita_seo_variables filter. Category, tag, and custom taxonomy terms get their own SEO title and description fields.
+* SEO: robots directives now go through WordPress core's wp_robots, with controls for paginated archives, attachment pages (noindex or redirect to the parent), per-post-type and per-taxonomy noindex defaults, and max-snippet, max-image-preview, and max-video-preview.
+* SEO: the head output is filterable (perdita_seo_description, perdita_seo_canonical, perdita_seo_og_tags, perdita_seo_json_ld, perdita_seo_article_type). Perdita Pro uses these instead of rewriting the page buffer.
+* SEO: structured data is one linked graph. Every page gets a WebPage node, every public post type gets an Article node, and the author is a full Person with job title, credentials, knows-about topics, and profile links from new fields on the user profile screen. Author archives are ProfilePage.
+* SEO: article Open Graph tags (published and modified time, author, section, tags), og:locale, image dimensions and alt, Twitter title, description, image, and creator, plus a Facebook app id field.
+* SEO: webmaster verification tags for Google, Bing, Pinterest, Yandex, and Baidu. A robots.txt editor that keeps every Sitemap line other features add. RSS feed prefix and suffix templates, and switches to disable the comments feed or all feeds.
+* SEO: llms.txt is served at /llms.txt as an index of the site's content by post type, with an optional llms-full.txt.
+* New IndexNow module (on by default): serves the key file, submits new and updated URLs to IndexNow shortly after publish, pings the sitemap to Google and Bing, keeps a log, and adds wp perdita indexnow commands.
+* New Breadcrumbs module (on by default): perdita_breadcrumbs() template tag, [perdita_breadcrumbs] shortcode, a Breadcrumbs block, optional automatic placement above content, and a trail that Perdita Pro reuses for BreadcrumbList schema.
+* New Image SEO module (off by default): fills missing alt text from the filename on upload, a bulk fill for the existing library, and an image sitemap at /image-sitemap.xml.
+* MCP server: create_post, update_post, and get_post accept and return SEO title, description, focus keyphrase, canonical, noindex, Open Graph title and description, and schema type when Perdita Pro's SEO module is active.
+* Fix: five translatable SEO strings carried template tokens that read as printf placeholders, and two robots settings were saved without unslashing.
 
 = 0.18.2-alpha =
 * MCP server: writes to the OAuth storage (registered clients, tokens, connected apps) now run under a short database lock and re-read the stored row inside it, so two requests landing at once can no longer overwrite each other's tokens. A write that cannot take the lock returns a retryable 503 instead of guessing.
