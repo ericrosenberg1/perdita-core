@@ -245,11 +245,11 @@ class Perdita_Security_Admin {
 		$out['login_window']  = isset( $_POST['login_window'] ) ? max( 1, min( 1440, (int) $_POST['login_window'] ) ) : 15;
 		$out['login_lockout'] = isset( $_POST['login_lockout'] ) ? max( 1, min( 1440, (int) $_POST['login_lockout'] ) ) : 15;
 
-		$out['ip_allowlist'] = $this->parse_allowlist( isset( $_POST['ip_allowlist'] ) ? wp_unslash( $_POST['ip_allowlist'] ) : '' ); // phpcs:ignore WordPress.Security.ValidationSanitization.InputNotSanitized -- validated per-line below.
+		$out['ip_allowlist'] = $this->parse_allowlist( isset( $_POST['ip_allowlist'] ) ? wp_unslash( $_POST['ip_allowlist'] ) : '' ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- validated per-line below.
 
 		$mode                = isset( $_POST['csp_mode'] ) ? sanitize_key( wp_unslash( $_POST['csp_mode'] ) ) : 'report-only';
 		$out['csp_mode']     = in_array( $mode, array( 'off', 'report-only', 'enforce' ), true ) ? $mode : 'report-only';
-		$out['csp']          = isset( $_POST['csp'] ) ? $this->sanitize_csp( wp_unslash( $_POST['csp'] ) ) : Perdita_Security::default_csp(); // phpcs:ignore WordPress.Security.ValidationSanitization.InputNotSanitized -- sanitized in sanitize_csp().
+		$out['csp']          = isset( $_POST['csp'] ) ? $this->sanitize_csp( wp_unslash( $_POST['csp'] ) ) : Perdita_Security::default_csp(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- sanitized in sanitize_csp().
 
 		update_option( Perdita_Security::OPTION, $out );
 

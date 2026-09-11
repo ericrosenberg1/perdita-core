@@ -97,7 +97,7 @@ class Perdita_Pagespeed_Admin {
 		// through a text sanitizer (which can corrupt a token), and encrypt
 		// it immediately in Perdita_Pagespeed::sanitize().
 		$raw = array(
-			'api_key'        => isset( $_POST['api_key'] ) ? (string) wp_unslash( $_POST['api_key'] ) : '', // phpcs:ignore WordPress.Security.ValidationSanitization.InputNotSanitized -- opaque secret, encrypted in sanitize(), never echoed.
+			'api_key'        => isset( $_POST['api_key'] ) ? (string) wp_unslash( $_POST['api_key'] ) : '', // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- opaque secret, encrypted in sanitize(), never echoed.
 			'remove_api_key' => ! empty( $_POST['remove_api_key'] ),
 		);
 

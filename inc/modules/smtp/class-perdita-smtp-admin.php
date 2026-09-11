@@ -280,7 +280,7 @@ class Perdita_SMTP_Admin {
 		} else {
 			// Do not sanitize a password through text filters, that can corrupt it.
 			// It is treated as an opaque secret and encrypted immediately.
-			$typed = isset( $_POST['password'] ) ? (string) wp_unslash( $_POST['password'] ) : ''; // phpcs:ignore WordPress.Security.ValidationSanitization.InputNotSanitized -- opaque secret, encrypted below, never echoed.
+			$typed = isset( $_POST['password'] ) ? (string) wp_unslash( $_POST['password'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- opaque secret, encrypted below, never echoed.
 			if ( '' !== $typed ) {
 				$new['password'] = Perdita_Crypto::encrypt( $typed );
 			}
