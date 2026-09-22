@@ -78,11 +78,17 @@ class Perdita_SEO_Feeds {
 			'%%AUTHORLINK%%' => '',
 		);
 		if ( $post instanceof WP_Post ) {
-			$title                 = get_the_title( $post );
-			$map['%%POSTLINK%%']   = '<a href="' . esc_url( (string) get_permalink( $post ) ) . '">' . esc_html( $title ) . '</a>';
-			$map['%%POSTTITLE%%']  = esc_html( $title );
-			$author                = get_the_author_meta( 'display_name', (int) $post->post_author );
-			$map['%%AUTHORLINK%%'] = '<a href="' . esc_url( get_author_posts_url( (int) $post->post_author ) ) . '">' . esc_html( $author ) . '</a>';
+			$title                = get_the_title( $post );
+			$map['%%POSTLINK%%']  = '<a href="' . esc_url( (string) get_permalink( $post ) ) . '">' . esc_html( $title ) . '</a>';
+			$map['%%POSTTITLE%%'] = esc_html( $title );
+			// No user, or a blank display name, leaves the token empty instead
+			// of an empty link to /author/. User id 0 is skipped outright, since
+			// get_the_author_meta() reads the global $authordata when given 0.
+			$author_id = (int) $post->post_author;
+			$author    = $author_id > 0 ? trim( (string) get_the_author_meta( 'display_name', $author_id ) ) : '';
+			if ( '' !== $author ) {
+				$map['%%AUTHORLINK%%'] = '<a href="' . esc_url( get_author_posts_url( $author_id ) ) . '">' . esc_html( $author ) . '</a>';
+			}
 		}
 		return strtr( (string) $template, $map );
 	}

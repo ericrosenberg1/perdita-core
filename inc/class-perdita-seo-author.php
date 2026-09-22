@@ -160,7 +160,8 @@ class Perdita_SEO_Author {
 	}
 
 	/**
-	 * A full Person node for an author. Empty array when the user is gone.
+	 * A full Person node for an author. Empty array when the user is gone or
+	 * has a blank display name, since a Person with no name is invalid.
 	 *
 	 * @param int    $user_id     User id.
 	 * @param string $identity_id The site identity node @id, for worksFor.
@@ -168,7 +169,7 @@ class Perdita_SEO_Author {
 	 */
 	public static function person_node( $user_id, $identity_id = '' ) {
 		$user = get_userdata( (int) $user_id );
-		if ( ! $user instanceof WP_User ) {
+		if ( ! $user instanceof WP_User || '' === trim( (string) $user->display_name ) ) {
 			return array();
 		}
 		$node   = array(

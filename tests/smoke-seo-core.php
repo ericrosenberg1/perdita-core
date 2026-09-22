@@ -483,6 +483,90 @@ $ok( $seoc_llms === get_transient( Perdita_SEO_Llms::TRANSIENT ), 'llms: the bod
 $seoc->llms->invalidate();
 $ok( false === get_transient( Perdita_SEO_Llms::TRANSIENT ), 'llms: save_post-style invalidation clears it again' );
 
+/* ---------- 9. posts with no author ---------- */
+
+// post_author 0 (an import or a direct database write can leave it) printed
+// article:author as a bare /author/ URL and filled %%AUTHORLINK%% with an
+// empty link to it. The same data made the theme's entry meta read
+// "by Donations" on nonprofitmanager.app, 2026-09-22.
+$seoc_orphan_id = wp_insert_post(
+	array(
+		'post_type'    => 'perdita_probe',
+		'post_status'  => 'publish',
+		'post_title'   => 'Perdita SEO Probe Orphan',
+		'post_content' => 'Probe body copy for a post that has no author.',
+		'post_author'  => 0,
+	)
+);
+$ok( $seoc_orphan_id > 0 && 0 === (int) get_post_field( 'post_author', $seoc_orphan_id ), 'no author: a probe post with post_author 0 exists' );
+$seoc_orphan      = get_post( $seoc_orphan_id );
+$seoc_orphan_tags = null;
+$seoc_orphan_ld   = null;
+$seoc_orphan_og_f = function ( $tags ) use ( &$seoc_orphan_tags ) {
+	$seoc_orphan_tags = $tags;
+	return $tags;
+};
+$seoc_orphan_ld_f = function ( $graph ) use ( &$seoc_orphan_ld ) {
+	$seoc_orphan_ld = $graph;
+	return $graph;
+};
+add_filter( 'perdita_seo_og_tags', $seoc_orphan_og_f );
+add_filter( 'perdita_seo_json_ld', $seoc_orphan_ld_f );
+$seoc_use(
+	new WP_Query(
+		array(
+			'p'         => $seoc_orphan_id,
+			'post_type' => 'perdita_probe',
+		)
+	),
+	$seoc_orphan
+);
+ob_start();
+$seoc->head();
+$seoc_orphan_head = (string) ob_get_clean();
+remove_filter( 'perdita_seo_og_tags', $seoc_orphan_og_f );
+remove_filter( 'perdita_seo_json_ld', $seoc_orphan_ld_f );
+
+$seoc_orphan_article = $seoc_node( $seoc_orphan_ld, 'Article' );
+$seoc_orphan_authors = array_filter(
+	(array) $seoc_orphan_ld,
+	function ( $node ) {
+		return is_array( $node ) && '#author' === substr( (string) ( $node['@id'] ?? '' ), -7 );
+	}
+);
+$ok( is_array( $seoc_orphan_tags ) && ! isset( $seoc_orphan_tags['article:author'] ) && false === strpos( $seoc_orphan_head, 'article:author' ), 'no author: no article:author tag, rather than a bare /author/ URL' );
+$ok( is_array( $seoc_orphan_tags ) && ! empty( $seoc_orphan_tags['article:published_time'] ) && ! empty( $seoc_orphan_tags['article:modified_time'] ), 'no author: the other article tags still print' );
+$ok( is_array( $seoc_orphan_article ) && ! isset( $seoc_orphan_article['author'] ) && ! $seoc_orphan_authors, 'no author: the Article node has no author and the graph has no author Person' );
+$ok( '' === $seoc->feeds->fill( '%%AUTHORLINK%%', $seoc_orphan ), 'no author: %%AUTHORLINK%% in a feed footer stays empty instead of an empty link' );
+$ok( '<a href="' . esc_url( get_author_posts_url( $seoc_author_id ) ) . '">' . esc_html( get_the_author_meta( 'display_name', $seoc_author_id ) ) . '</a>' === $seoc->feeds->fill( '%%AUTHORLINK%%', $seoc_post ), 'feeds: %%AUTHORLINK%% links a real author\'s name to their archive' );
+
+// A user whose display name is blank is no better: a Person with no name is
+// invalid schema, and the feed token would be an empty link again.
+require_once ABSPATH . 'wp-admin/includes/user.php';
+$seoc_blank_id = wp_insert_user(
+	array(
+		'user_login'   => 'perdita_seo_probe_blank_' . wp_generate_password( 6, false ),
+		'user_pass'    => wp_generate_password( 24 ),
+		'display_name' => 'Perdita SEO Probe Blank',
+		'role'         => 'author',
+	)
+);
+$seoc_blank_id = is_wp_error( $seoc_blank_id ) ? 0 : (int) $seoc_blank_id;
+$ok( $seoc_blank_id > 0 && array() !== Perdita_SEO_Author::person_node( $seoc_blank_id ), 'no author: a probe user with a name gets a Person node' );
+global $wpdb; // wp eval-file runs this file inside a function, so $wpdb is not in scope by default.
+$wpdb->update( $wpdb->users, array( 'display_name' => ' ' ), array( 'ID' => $seoc_blank_id ) ); // phpcs:ignore WordPress.DB
+clean_user_cache( $seoc_blank_id );
+$seoc_blank_post              = clone $seoc_orphan;
+$seoc_blank_post->post_author = (string) $seoc_blank_id;
+$ok( array() === Perdita_SEO_Author::person_node( $seoc_blank_id ), 'no author: a user with a blank display name gets no Person node' );
+$ok( '' === $seoc->feeds->fill( '%%AUTHORLINK%%', $seoc_blank_post ), 'no author: %%AUTHORLINK%% stays empty for a blank display name too' );
+if ( $seoc_blank_id ) {
+	wp_delete_user( $seoc_blank_id );
+}
+if ( $seoc_orphan_id ) {
+	wp_delete_post( $seoc_orphan_id, true );
+}
+
 /* ---------- cleanup ---------- */
 
 foreach ( $seoc_meta_keys as $seoc_meta_key ) {

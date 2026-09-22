@@ -629,8 +629,12 @@ class Perdita_SEO {
 		if ( 'singular' === $ctx['type'] && $post && 'attachment' !== $post->post_type ) {
 			$tags['article:published_time'] = (string) get_the_date( 'c', $post );
 			$tags['article:modified_time']  = (string) get_the_modified_date( 'c', $post );
-			$tags['article:author']         = get_author_posts_url( (int) $post->post_author );
-			$section                        = Perdita_SEO_Variables::primary_term( $post );
+			// A post with no user (post_author 0) has no archive to point at,
+			// and get_author_posts_url( 0 ) is a bare /author/.
+			if ( get_userdata( (int) $post->post_author ) ) {
+				$tags['article:author'] = get_author_posts_url( (int) $post->post_author );
+			}
+			$section = Perdita_SEO_Variables::primary_term( $post );
 			if ( $section ) {
 				$tags['article:section'] = (string) $section->name;
 			}
