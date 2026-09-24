@@ -604,9 +604,9 @@ class Perdita_Subscriptions {
 		}
 		$dismiss = wp_nonce_url( add_query_arg( 'perdita_dismiss_proxy_ip_notice', 'subscriptions' ), 'perdita_dismiss_proxy_ip_notice' );
 		echo '<div class="notice notice-warning"><p><strong>';
-		esc_html_e( 'Perdita subscriptions: the per-visitor signup limit is switched off.', 'perdita-core' );
+		esc_html_e( 'Perdita subscriptions: signups are limited per proxy, not per visitor.', 'perdita-core' );
 		echo '</strong> ';
-		esc_html_e( 'This site is behind Cloudflare or another proxy, so every signup arrives from the same address and a per-IP limit would either throttle all visitors at once or nothing at all. The honeypot, nonce, and the per-address resend cooldown still apply. To switch the limit back on, hook the perdita_subscriptions_client_ip filter and return the real visitor IP your proxy sends.', 'perdita-core' );
+		esc_html_e( 'This site is behind Cloudflare or another proxy, so every signup arrives from the same address. The site accepts up to 100 signups an hour from that address in total, instead of 10 per visitor. The honeypot, nonce, and the per-address resend cooldown still apply. To limit each visitor separately, hook the perdita_subscriptions_client_ip filter and return the real visitor IP your proxy sends.', 'perdita-core' );
 		echo ' <a href="' . esc_url( $dismiss ) . '">' . esc_html__( 'Dismiss', 'perdita-core' ) . '</a>';
 		echo '</p></div>';
 	}
@@ -640,21 +640,28 @@ class Perdita_Subscriptions {
 		// owner wired the real client IP in through the filter. A forwarded
 		// header is still never trusted on its own: a value the client can
 		// set is a rate limit the client can erase.
-		if ( ! has_filter( 'perdita_subscriptions_client_ip' ) && self::behind_forwarding_proxy() ) {
+		//
+		// Skipping outright was a bypass, though: the "behind a proxy" test
+		// is only whether a forwarding header is present, and any client can
+		// send X-Forwarded-For, which turned signup into an unlimited
+		// confirmation-email cannon. A proxied request now counts in one
+		// bucket per REMOTE_ADDR with a much higher cap.
+		$ip      = $this->client_ip();
+		$proxied = ! has_filter( 'perdita_subscriptions_client_ip' ) && self::behind_forwarding_proxy();
+		if ( $proxied ) {
 			self::flag_proxy_ip_detected();
-			return false;
 		}
-
-		$ip = $this->client_ip();
 		if ( '' === $ip ) {
 			return false;
 		}
 		/** Max signup attempts per IP per hour. */
-		$max = (int) apply_filters( 'perdita_subscriptions_rate_limit', 10 );
+		$max = $proxied
+			? (int) apply_filters( 'perdita_subscriptions_proxied_rate_limit', 100 )
+			: (int) apply_filters( 'perdita_subscriptions_rate_limit', 10 );
 		if ( $max <= 0 ) {
 			return false;
 		}
-		$key   = 'perdita_subs_rl_' . md5( $ip );
+		$key   = 'perdita_subs_rl_' . ( $proxied ? 'px_' : '' ) . md5( $ip );
 		$count = (int) get_transient( $key );
 		if ( $count >= $max ) {
 			return true;

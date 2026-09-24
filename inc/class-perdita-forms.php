@@ -460,7 +460,16 @@ class Perdita_Forms {
 	 */
 	private function sanitize_value( $type, $val ) {
 		if ( is_array( $val ) ) {
+			// Only choice fields take several values. An array posted for a
+			// text or email field (fields[email][]=x) used to reach
+			// is_email() and fatal the request with a TypeError on PHP 8.
+			if ( ! in_array( $type, array( 'select', 'radio', 'checkbox' ), true ) ) {
+				return '';
+			}
 			return array_map( 'sanitize_text_field', array_map( 'wp_unslash', $val ) );
+		}
+		if ( ! is_scalar( $val ) ) {
+			return '';
 		}
 		$val = wp_unslash( $val );
 		switch ( $type ) {
@@ -609,9 +618,9 @@ class Perdita_Forms {
 		}
 		$dismiss = wp_nonce_url( add_query_arg( 'perdita_dismiss_proxy_ip_notice', 'forms' ), 'perdita_dismiss_proxy_ip_notice' );
 		echo '<div class="notice notice-warning"><p><strong>';
-		esc_html_e( 'Perdita Forms: the per-visitor submission limit is switched off.', 'perdita-core' );
+		esc_html_e( 'Perdita Forms: submissions are limited per proxy, not per visitor.', 'perdita-core' );
 		echo '</strong> ';
-		esc_html_e( 'This site is behind Cloudflare or another proxy, so every submission arrives from the same address and a per-IP limit would either throttle all visitors at once or nothing at all. Spam protection still runs (honeypot, nonce, and Turnstile if configured). To switch the limit back on, hook the perdita_form_client_ip filter and return the real visitor IP your proxy sends.', 'perdita-core' );
+		esc_html_e( 'This site is behind Cloudflare or another proxy, so every submission arrives from the same address. Each form accepts up to 200 submissions an hour from that address in total, instead of 15 per visitor. Spam protection still runs (honeypot, nonce, and Turnstile if configured). To limit each visitor separately, hook the perdita_form_client_ip filter and return the real visitor IP your proxy sends.', 'perdita-core' );
 		echo ' <a href="' . esc_url( $dismiss ) . '">' . esc_html__( 'Dismiss', 'perdita-core' ) . '</a>';
 		echo '</p></div>';
 	}
@@ -647,21 +656,29 @@ class Perdita_Forms {
 		// IP in through the filter (which is the only trustworthy source
 		// here, since a forwarded header a client can set is a rate limit a
 		// client can erase).
-		if ( ! has_filter( 'perdita_form_client_ip' ) && self::behind_forwarding_proxy() ) {
+		//
+		// Skipping outright was a bypass, though: the "behind a proxy" test
+		// is only whether a forwarding header is present, and any client can
+		// send X-Forwarded-For. So a proxied request still counts, in one
+		// bucket per REMOTE_ADDR with a much higher cap. Real visitors behind
+		// one proxy share it, and a direct attacker adding the header no
+		// longer escapes the limit.
+		$ip      = $this->client_ip();
+		$proxied = ! has_filter( 'perdita_form_client_ip' ) && self::behind_forwarding_proxy();
+		if ( $proxied ) {
 			self::flag_proxy_ip_detected();
-			return false;
 		}
-
-		$ip = $this->client_ip();
 		if ( '' === $ip ) {
 			return false;
 		}
 		/** Max submissions per form, per IP, per hour. */
-		$max   = (int) apply_filters( 'perdita_form_rate_limit', 15, $id );
+		$max = $proxied
+			? (int) apply_filters( 'perdita_form_proxied_rate_limit', 200, $id )
+			: (int) apply_filters( 'perdita_form_rate_limit', 15, $id );
 		if ( $max <= 0 ) {
 			return false;
 		}
-		$key   = 'perdita_fl_' . $id . '_' . md5( $ip );
+		$key   = 'perdita_fl_' . $id . '_' . ( $proxied ? 'px_' : '' ) . md5( $ip );
 		$count = (int) get_transient( $key );
 		if ( $count >= $max ) {
 			return true;

@@ -72,6 +72,11 @@ class Perdita_Section {
 					'description' => array(
 						'required'          => true,
 						'type'              => 'string',
+						// A section brief is a sentence or two. Without a cap a
+						// Contributor could send megabytes per request and spend
+						// the site's AI budget on input tokens, 30 times an hour.
+						'maxLength'         => 2000,
+						'validate_callback' => 'rest_validate_request_arg',
 						'sanitize_callback' => 'sanitize_textarea_field',
 					),
 				),
