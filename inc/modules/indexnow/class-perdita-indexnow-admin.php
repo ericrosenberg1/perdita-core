@@ -91,11 +91,11 @@ class Perdita_IndexNow_Admin {
 
 		echo '<div class="wrap"><h1>' . esc_html__( 'IndexNow', 'perdita-core' ) . '</h1>';
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display of a flash message set by our own redirect().
-		if ( isset( $_GET['perdita_msg'] ) ) {
+		if ( '' !== perdita_notice_text( 'perdita_msg' ) ) {
 			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- same flash message.
-			echo '<div class="notice notice-info is-dismissible"><p>' . esc_html( sanitize_text_field( wp_unslash( $_GET['perdita_msg'] ) ) ) . '</p></div>';
+			echo '<div class="notice notice-info is-dismissible"><p>' . esc_html( perdita_notice_text( 'perdita_msg' ) ) . '</p></div>';
 		}
-		echo '<p>' . esc_html__( 'IndexNow tells Bing, Yandex, Seznam, Naver, and Yep about a URL the moment it is published, updated, or removed. Google does not use IndexNow, so the sitemap is pinged on publish as well.', 'perdita-core' ) . '</p>';
+		echo '<p>' . esc_html__( 'IndexNow tells Bing, Yandex, Seznam, Naver, and Yep about a URL the moment it is published, updated, or removed. Google does not use IndexNow. It reads your sitemap from the Sitemap line in robots.txt.', 'perdita-core' ) . '</p>';
 
 		if ( 1 !== (int) get_option( 'blog_public' ) ) {
 			echo '<div class="notice notice-warning"><p>' . esc_html__( 'This site discourages search engines (Settings, Reading), so nothing is submitted until that is switched off.', 'perdita-core' ) . '</p></div>';

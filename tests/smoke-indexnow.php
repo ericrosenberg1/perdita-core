@@ -285,14 +285,11 @@ for ( $__in_i = 0; $__in_i < 70; $__in_i++ ) {
 Perdita_IndexNow::log( $__in_rows );
 $ok( Perdita_IndexNow::LOG_MAX === count( Perdita_IndexNow::settings()['log'] ), 'indexnow: the log is capped at ' . Perdita_IndexNow::LOG_MAX . ' rows however many land at once' );
 
-// Sitemap pings, and their throttle.
+// The retired Google and Bing sitemap pings make no request at all.
 $__in_requests = array();
-delete_transient( Perdita_IndexNow::PING_TRANSIENT );
-$__in_ping = Perdita_IndexNow::ping_sitemaps();
-$ok( isset( $__in_ping['google'], $__in_ping['bing'] ) && 2 === count( $__in_requests ), 'indexnow: publishing pings both classic sitemap endpoints' );
-$ok( false !== strpos( $__in_requests[0]['url'], rawurlencode( Perdita_IndexNow::sitemap_url() ) ), 'indexnow: the ping carries the sitemap URL' );
-$ok( array() === Perdita_IndexNow::ping_sitemaps() && 2 === count( $__in_requests ), 'indexnow: a second ping inside the throttle window makes no request' );
-$ok( array() !== Perdita_IndexNow::ping_sitemaps( true ) && 4 === count( $__in_requests ), 'indexnow: the throttle can be forced past when a caller means it' );
+$ok( array() === Perdita_IndexNow::ping_sitemaps( true ) && 0 === count( $__in_requests ), 'indexnow: the retired sitemap ping sends nothing' );
+( new ReflectionClass( 'Perdita_IndexNow' ) )->newInstanceWithoutConstructor()->run_scheduled( array(), true );
+$ok( 0 === count( $__in_requests ), 'indexnow: an old queued event that asked for a ping sends nothing' );
 
 remove_filter( 'pre_http_request', $__in_stub, 10 );
 

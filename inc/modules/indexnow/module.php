@@ -20,7 +20,7 @@ defined( 'ABSPATH' ) || exit;
 return array(
 	'id'          => 'indexnow',
 	'label'       => __( 'IndexNow', 'perdita-core' ),
-	'description' => __( 'Tell Bing, Yandex, and every other IndexNow search engine the moment a post is published, updated, or removed, and ping the sitemap on publish. Nothing to sign up for.', 'perdita-core' ),
+	'description' => __( 'Tell Bing, Yandex, and every other IndexNow search engine the moment a post is published, updated, or or removed. Nothing to sign up for.', 'perdita-core' ),
 	'group'       => 'seo',
 	'default'     => true,
 	'contexts'    => array( 'front', 'admin', 'rest', 'cron' ),

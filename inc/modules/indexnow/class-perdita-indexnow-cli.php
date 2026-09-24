@@ -85,8 +85,9 @@ class Perdita_IndexNow_CLI {
 	}
 
 	/**
-	 * Ping the classic Google and Bing sitemap endpoints now, ignoring the
-	 * 10 minute throttle.
+	 * Retired. Google and Bing switched their sitemap ping endpoints off
+	 * (404 and 410), so this makes no request. Kept so scripts that call it
+	 * do not break.
 	 *
 	 * ## EXAMPLES
 	 *
@@ -97,13 +98,7 @@ class Perdita_IndexNow_CLI {
 	 */
 	public function ping( $args, $assoc_args ) {
 		unset( $args, $assoc_args );
-		$results = Perdita_IndexNow::ping_sitemaps( true );
-		if ( empty( $results ) ) {
-			WP_CLI::error( __( 'No sitemap URL to ping.', 'perdita-core' ) );
-		}
-		foreach ( $results as $engine => $status ) {
-			WP_CLI::log( sprintf( '%1$s  %2$s', $engine, $status ? 'HTTP ' . (int) $status : 'error' ) );
-		}
+		WP_CLI::warning( __( 'Google and Bing retired their sitemap ping endpoints, so nothing was sent. IndexNow submissions and the Sitemap line in robots.txt cover this now.', 'perdita-core' ) );
 		WP_CLI::success( Perdita_IndexNow::sitemap_url() );
 	}
 }

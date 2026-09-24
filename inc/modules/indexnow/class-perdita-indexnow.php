@@ -59,12 +59,17 @@ class Perdita_IndexNow {
 	const MAX_URLS = 10000;
 
 	/**
-	 * Transient that throttles the sitemap pings.
+	 * Transient the retired sitemap pings used as a throttle. Kept so the
+	 * uninstaller and any code that named it still resolve.
+	 *
+	 * @deprecated 0.19.2-alpha
 	 */
 	const PING_TRANSIENT = 'perdita_indexnow_pinged';
 
 	/**
-	 * Minimum gap between sitemap pings.
+	 * Gap the retired sitemap pings kept between calls.
+	 *
+	 * @deprecated 0.19.2-alpha
 	 */
 	const PING_THROTTLE = 10 * MINUTE_IN_SECONDS;
 
@@ -72,16 +77,6 @@ class Perdita_IndexNow {
 	 * Post meta Perdita Pro writes when a post is set to noindex.
 	 */
 	const NOINDEX_META = '_perdita_seo_pro_noindex';
-
-	/**
-	 * The engines pinged with the sitemap URL when a post publishes.
-	 *
-	 * @var string[]
-	 */
-	const SITEMAP_PINGS = array(
-		'google' => 'https://www.google.com/ping?sitemap=',
-		'bing'   => 'https://www.bing.com/ping?sitemap=',
-	);
 
 	/**
 	 * The Perdita core.
@@ -661,11 +656,9 @@ class Perdita_IndexNow {
 	 * @param bool  $ping Whether to ping the sitemap endpoints too.
 	 */
 	public function run_scheduled( $urls, $ping = false ) {
+		unset( $ping ); // Events queued before 0.19.2-alpha still carry it. The pings are retired.
 		if ( is_array( $urls ) && $urls ) {
 			self::submit( $urls );
-		}
-		if ( $ping ) {
-			self::ping_sitemaps();
 		}
 	}
 
@@ -749,32 +742,23 @@ class Perdita_IndexNow {
 	}
 
 	/**
-	 * Ping the classic Google and Bing sitemap endpoints with the sitemap
-	 * URL, at most once per PING_THROTTLE.
+	 * Retired. Google turned its sitemap ping endpoint off in 2023 (it now
+	 * answers 404 "Sitemaps ping is deprecated") and Bing's answers 410
+	 * Gone, so every call was a wasted request on publish. Search engines
+	 * read the sitemap from robots.txt, and IndexNow covers Bing and the
+	 * rest. Kept as a no-op for any code that calls it.
 	 *
-	 * @param bool $force Ignore the throttle.
-	 * @return array Engine => HTTP status (0 on error), empty when throttled.
+	 * @deprecated 0.19.2-alpha
+	 * @param bool $force Ignored.
+	 * @return array Always empty.
 	 */
 	public static function ping_sitemaps( $force = false ) {
-		if ( ! $force && get_transient( self::PING_TRANSIENT ) ) {
-			return array();
-		}
-		set_transient( self::PING_TRANSIENT, time(), self::PING_THROTTLE );
-
-		$sitemap = self::sitemap_url();
-		if ( '' === $sitemap ) {
-			return array();
-		}
-		$out = array();
-		foreach ( self::SITEMAP_PINGS as $name => $endpoint ) {
-			$response     = wp_remote_get( $endpoint . rawurlencode( $sitemap ), array( 'timeout' => 5 ) );
-			$out[ $name ] = is_wp_error( $response ) ? 0 : (int) wp_remote_retrieve_response_code( $response );
-		}
-		return $out;
+		unset( $force );
+		return array();
 	}
 
 	/**
-	 * The sitemap URL to ping: core's index when core sitemaps are on, else
+	 * The site's sitemap URL: core's index when core sitemaps are on, else
 	 * /sitemap.xml for whatever serves it.
 	 *
 	 * @return string
@@ -786,7 +770,7 @@ class Perdita_IndexNow {
 		}
 
 		/**
-		 * The sitemap URL pinged on publish.
+		 * The site's sitemap URL.
 		 *
 		 * @param string $url Sitemap URL.
 		 */
