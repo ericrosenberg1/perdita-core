@@ -753,6 +753,10 @@ class Perdita_Sales {
 
 		update_post_meta( $order_id, '_perdita_sales_session_id', $session['id'] );
 		update_post_meta( $order_id, '_perdita_sales_gateway_ref', $session['id'] );
+		if ( ! empty( $reserved_stock ) ) {
+			// release_unpaid_order() gives this back if the buyer never pays.
+			update_post_meta( $order_id, '_perdita_sales_stock_reserved', '1' );
+		}
 
 		// Off to Stripe's hosted page. wp_redirect (not wp_safe_redirect) because
 		// the destination is an external Stripe URL by design.
@@ -866,6 +870,11 @@ class Perdita_Sales {
 			),
 			'client_reference_id' => (string) $order_id,
 			'customer_email'      => $email,
+			// Stock is reserved before the buyer reaches Stripe. An hour is
+			// plenty to pay, and when it runs out Stripe sends
+			// checkout.session.expired and the stock comes back. Stripe's
+			// own default is 24 hours.
+			'expires_at'          => (string) ( time() + (int) apply_filters( 'perdita_sales_checkout_ttl', HOUR_IN_SECONDS ) ),
 		);
 		$body['metadata']['order_id'] = (string) $order_id;
 
@@ -1093,15 +1102,26 @@ class Perdita_Sales {
 			return new WP_REST_Response( array( 'error' => 'bad_payload' ), 400 );
 		}
 
-		if ( 'checkout.session.completed' === $event['type'] ) {
-			$obj      = isset( $event['data']['object'] ) && is_array( $event['data']['object'] ) ? $event['data']['object'] : array();
-			$order_id = isset( $obj['client_reference_id'] ) ? (int) $obj['client_reference_id'] : 0;
-			if ( ! $order_id && isset( $obj['metadata']['order_id'] ) ) {
-				$order_id = (int) $obj['metadata']['order_id'];
-			}
-			$session_id = isset( $obj['id'] ) ? (string) $obj['id'] : '';
+		$type     = (string) $event['type'];
+		$obj      = isset( $event['data']['object'] ) && is_array( $event['data']['object'] ) ? $event['data']['object'] : array();
+		$order_id = isset( $obj['client_reference_id'] ) ? (int) $obj['client_reference_id'] : 0;
+		if ( ! $order_id && isset( $obj['metadata']['order_id'] ) ) {
+			$order_id = (int) $obj['metadata']['order_id'];
+		}
+		$session_id = isset( $obj['id'] ) ? (string) $obj['id'] : '';
 
-			$this->mark_order_paid( $order_id, $session_id );
+		if ( 'checkout.session.completed' === $type || 'checkout.session.async_payment_succeeded' === $type ) {
+			// A delayed payment method (ACH, SEPA, Boleto) completes the
+			// session while payment_status is still 'unpaid', and Stripe
+			// sends async_payment_succeeded once the money clears. Marking
+			// the order paid on 'completed' alone handed out the receipt and
+			// the download links for a payment that could still fail.
+			if ( isset( $obj['payment_status'] ) && 'paid' === $obj['payment_status'] ) {
+				$this->mark_order_paid( $order_id, $session_id );
+			}
+		} elseif ( 'checkout.session.expired' === $type || 'checkout.session.async_payment_failed' === $type ) {
+			// The buyer never paid: give the reserved stock back.
+			$this->release_unpaid_order( $order_id, $session_id, 'checkout.session.expired' === $type ? 'expired' : 'failed' );
 		}
 
 		// Ack every verified, handled event so Stripe does not retry-storm.
@@ -1153,6 +1173,58 @@ class Perdita_Sales {
 		 * @param int $order_id Order id.
 		 */
 		do_action( 'perdita_sales_order_paid', $order_id );
+	}
+
+	/**
+	 * Close out an order whose checkout was never paid (the session expired,
+	 * or a delayed payment failed) and return its reserved stock.
+	 * reserve_stock() claims stock before the buyer reaches Stripe, so
+	 * without this every abandoned checkout shrank stock for good, and anyone
+	 * could empty a product by starting checkouts and walking away.
+	 *
+	 * Requires the event's session to be the one stored on the order, and
+	 * flips the status from 'pending' in one conditional write, so a replayed
+	 * or duplicated event releases the stock at most once and a paid order is
+	 * never touched.
+	 *
+	 * @param int    $order_id   Order id.
+	 * @param string $session_id Stripe session id from the event.
+	 * @param string $status     New status: 'expired' or 'failed'.
+	 */
+	private function release_unpaid_order( $order_id, $session_id, $status ) {
+		$order_id = (int) $order_id;
+		$order    = $order_id ? get_post( $order_id ) : null;
+		if ( ! $order || self::CPT_ORDER !== $order->post_type || '' === $session_id ) {
+			return;
+		}
+		$stored_session = (string) get_post_meta( $order_id, '_perdita_sales_session_id', true );
+		if ( '' === $stored_session || ! hash_equals( $stored_session, $session_id ) ) {
+			return;
+		}
+		if ( ! update_post_meta( $order_id, '_perdita_sales_status', $status, 'pending' ) ) {
+			return; // Already paid, expired or failed.
+		}
+		// Only this module's checkout reserves stock. A Sales Pro order
+		// (it carries _perdita_sales_pro_user_id) never did, so releasing
+		// for it would invent stock. Orders placed before the marker
+		// existed are this module's own when they are not Pro orders.
+		$reserved = '1' === get_post_meta( $order_id, '_perdita_sales_stock_reserved', true )
+			|| ! metadata_exists( 'post', $order_id, '_perdita_sales_pro_user_id' );
+		delete_post_meta( $order_id, '_perdita_sales_stock_reserved' );
+		$items = $reserved ? get_post_meta( $order_id, '_perdita_sales_items', true ) : array();
+		foreach ( is_array( $items ) ? $items : array() as $line ) {
+			if ( is_array( $line ) && isset( $line['type'], $line['id'], $line['qty'] ) && 'physical' === $line['type'] ) {
+				$this->release_stock( (int) $line['id'], (int) $line['qty'] );
+			}
+		}
+
+		/**
+		 * Fires after an unpaid order is closed and its stock returned.
+		 *
+		 * @param int    $order_id Order id.
+		 * @param string $status   'expired' or 'failed'.
+		 */
+		do_action( 'perdita_sales_order_unpaid', $order_id, $status );
 	}
 
 	/**
@@ -1767,11 +1839,24 @@ class Perdita_Sales {
 	 * @return string
 	 */
 	private function render_success() {
-		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- order id is validated against paid status set by the verified webhook.
-		$order_id = isset( $_GET['order'] ) ? (int) $_GET['order'] : 0;
+		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- the Stripe session id is the bearer credential here, checked below.
+		$order_id   = isset( $_GET['order'] ) ? (int) $_GET['order'] : 0;
+		$session_id = isset( $_GET['session_id'] ) ? sanitize_text_field( wp_unslash( $_GET['session_id'] ) ) : '';
+		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 		$order    = $order_id ? get_post( $order_id ) : null;
+		$not_found = '<p class="perdita-sales-notice">' . esc_html__( 'Thank you. We could not find that order.', 'perdita-core' ) . '</p>';
 		if ( ! $order || self::CPT_ORDER !== $order->post_type ) {
-			return '<p class="perdita-sales-notice">' . esc_html__( 'Thank you. We could not find that order.', 'perdita-core' ) . '</p>';
+			return $not_found;
+		}
+
+		// Order ids are sequential post ids, so the id alone proves nothing.
+		// Stripe appends the session id to the success URL, and only the
+		// buyer's browser has it. Without this check anyone could walk the
+		// ids and collect fresh download links for every paid order, and
+		// burn each buyer's download limit doing it.
+		$stored_session = (string) get_post_meta( $order_id, '_perdita_sales_session_id', true );
+		if ( '' === $session_id || '' === $stored_session || ! hash_equals( $stored_session, $session_id ) ) {
+			return $not_found;
 		}
 
 		$status = get_post_meta( $order_id, '_perdita_sales_status', true );

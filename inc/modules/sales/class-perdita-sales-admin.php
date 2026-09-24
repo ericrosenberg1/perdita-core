@@ -545,7 +545,7 @@ class Perdita_Sales_Admin {
 			echo '<label style="margin-left:8px;"><input type="checkbox" name="remove_webhook_secret" value="1" /> ' . esc_html__( 'Remove', 'perdita-core' ) . '</label>';
 		}
 		echo '<p class="description">' . esc_html__( 'From your Stripe webhook endpoint. Encrypted before it is saved.', 'perdita-core' ) . '</p>';
-		echo '<p class="description">' . esc_html__( 'Point your Stripe webhook at this URL and subscribe to checkout.session.completed:', 'perdita-core' ) . '<br /><code>' . esc_html( $webhook_url ) . '</code></p>';
+		echo '<p class="description">' . esc_html__( 'Point your Stripe webhook at this URL and subscribe to checkout.session.completed, checkout.session.async_payment_succeeded, checkout.session.async_payment_failed, and checkout.session.expired:', 'perdita-core' ) . '<br /><code>' . esc_html( $webhook_url ) . '</code></p>';
 		echo '</td></tr>';
 
 		// Max downloads.
