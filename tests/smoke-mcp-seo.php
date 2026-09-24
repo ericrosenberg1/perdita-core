@@ -192,7 +192,13 @@ remove_action( 'perdita_seo_update_post_fields', $__ms_listener, 10 );
 /* ------------------------------------------------------------------ */
 
 $__ms_read = $__ms_get->invoke( $__ms_mcp, array( 'id' => $__ms_post_id ) );
-$ok( array() === ( $__ms_read['structuredContent']['seo'] ?? null ), 'mcp seo: get_post returns an empty seo array when nothing stores SEO fields' );
+if ( has_filter( 'perdita_seo_get_post_fields' ) ) {
+	// Perdita Pro's SEO module stores these fields, so "nothing stores
+	// them" is not true on this site. Its own suite covers that path.
+	$ok( is_array( $__ms_read['structuredContent']['seo'] ?? null ), 'mcp seo: get_post returns the seo array a storing module supplies' );
+} else {
+	$ok( array() === ( $__ms_read['structuredContent']['seo'] ?? null ), 'mcp seo: get_post returns an empty seo array when nothing stores SEO fields' );
+}
 
 $__ms_reader = function ( $fields, $post_id ) use ( $__ms_post_id ) {
 	if ( (int) $post_id !== (int) $__ms_post_id ) {
