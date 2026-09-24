@@ -276,8 +276,8 @@ class Perdita_Forms_Admin {
 		$has_secret = ! empty( $s['turnstile_secret_key'] );
 		echo '<div class="wrap"><h1>' . esc_html__( 'Spam Protection', 'perdita-core' ) . '</h1>';
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		if ( isset( $_GET['perdita_msg'] ) ) {
-			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( sanitize_text_field( wp_unslash( $_GET['perdita_msg'] ) ) ) . '</p></div>';
+		if ( '' !== perdita_notice_text( 'perdita_msg' ) ) {
+			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( perdita_notice_text( 'perdita_msg' ) ) . '</p></div>';
 		}
 		echo '<h2>' . esc_html__( 'Spam protection: Cloudflare Turnstile', 'perdita-core' ) . '</h2>';
 		echo '<p>' . esc_html__( 'Turnstile is a free, privacy-friendly CAPTCHA that stops bots without puzzles. Create a free widget at Cloudflare, then paste the two keys here. Leave both blank to turn it off. Your forms are always protected by a honeypot, a nonce, and rate limiting even without Turnstile.', 'perdita-core' ) . '</p>';

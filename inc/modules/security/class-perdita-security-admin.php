@@ -82,8 +82,8 @@ class Perdita_Security_Admin {
 		echo '<p>' . esc_html__( 'Each protection is off until you turn it on, so nothing changes on your site until you choose it. The two that can lock people out or break a page have safety notes below.', 'perdita-core' ) . '</p>';
 
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only notice, no state change.
-		if ( isset( $_GET['perdita_msg'] ) ) {
-			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( sanitize_text_field( wp_unslash( $_GET['perdita_msg'] ) ) ) . '</p></div>';
+		if ( '' !== perdita_notice_text( 'perdita_msg' ) ) {
+			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( perdita_notice_text( 'perdita_msg' ) ) . '</p></div>';
 		}
 
 		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';

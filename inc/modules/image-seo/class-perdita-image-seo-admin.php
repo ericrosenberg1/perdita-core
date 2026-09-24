@@ -93,9 +93,9 @@ class Perdita_Image_SEO_Admin {
 
 		echo '<div class="wrap"><h1>' . esc_html__( 'Image SEO', 'perdita-core' ) . '</h1>';
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display of a flash message set by our own redirect().
-		if ( isset( $_GET['perdita_msg'] ) ) {
+		if ( '' !== perdita_notice_text( 'perdita_msg' ) ) {
 			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- same flash message.
-			echo '<div class="notice notice-info is-dismissible"><p>' . esc_html( sanitize_text_field( wp_unslash( $_GET['perdita_msg'] ) ) ) . '</p></div>';
+			echo '<div class="notice notice-info is-dismissible"><p>' . esc_html( perdita_notice_text( 'perdita_msg' ) ) . '</p></div>';
 		}
 		echo '<p>' . esc_html__( 'Generated alt text is a floor, not a ceiling. It beats an empty alt attribute for a screen reader and for image search, and a written description beats both.', 'perdita-core' ) . '</p>';
 

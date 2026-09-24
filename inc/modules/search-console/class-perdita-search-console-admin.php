@@ -133,7 +133,7 @@ class Perdita_Search_Console_Admin {
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only status flags on a redirect, no state change.
 		$status = isset( $_GET['perdita_sc_status'] ) ? sanitize_key( wp_unslash( $_GET['perdita_sc_status'] ) ) : '';
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only status message on a redirect, no state change.
-		$msg = isset( $_GET['perdita_sc_msg'] ) ? sanitize_text_field( wp_unslash( $_GET['perdita_sc_msg'] ) ) : '';
+		$msg = perdita_notice_text( 'perdita_sc_msg' );
 
 		if ( '' === $status && '' === $msg ) {
 			return;

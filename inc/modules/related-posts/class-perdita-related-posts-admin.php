@@ -46,8 +46,8 @@ class Perdita_Related_Posts_Admin {
 		$s = Perdita_Related_Posts::settings();
 		echo '<div class="wrap"><h1>' . esc_html__( 'Related Posts', 'perdita-core' ) . '</h1>';
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		if ( isset( $_GET['perdita_msg'] ) ) {
-			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( sanitize_text_field( wp_unslash( $_GET['perdita_msg'] ) ) ) . '</p></div>';
+		if ( '' !== perdita_notice_text( 'perdita_msg' ) ) {
+			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( perdita_notice_text( 'perdita_msg' ) ) . '</p></div>';
 		}
 		echo '<p>' . esc_html__( 'Shown automatically after every published post. Matched by shared categories and tags, computed on your own site, nothing sent to a third party.', 'perdita-core' ) . '</p>';
 		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';

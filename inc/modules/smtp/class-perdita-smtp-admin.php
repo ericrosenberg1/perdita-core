@@ -184,7 +184,7 @@ class Perdita_SMTP_Admin {
 			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'Test email sent. Check your inbox.', 'perdita-core' ) . '</p></div>';
 		} elseif ( 'test_failed' === $status ) {
 			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display of an error string on a redirect.
-			$detail = isset( $_GET['perdita_smtp_err'] ) ? sanitize_text_field( wp_unslash( $_GET['perdita_smtp_err'] ) ) : '';
+			$detail = perdita_notice_text( 'perdita_smtp_err' );
 			$line   = __( 'Test email failed to send.', 'perdita-core' );
 			if ( '' !== $detail ) {
 				$line .= ' ' . $detail;

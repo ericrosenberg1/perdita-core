@@ -147,12 +147,12 @@ class Perdita_MCP_Admin {
 	 */
 	private function render_notices() {
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only status message on a redirect, no state change.
-		$msg = isset( $_GET['perdita_mcp_msg'] ) ? sanitize_text_field( wp_unslash( $_GET['perdita_mcp_msg'] ) ) : '';
+		$msg = perdita_notice_text( 'perdita_mcp_msg' );
 		if ( '' !== $msg ) {
 			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( $msg ) . '</p></div>';
 		}
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- same as above, the failure variant.
-		$err = isset( $_GET['perdita_mcp_err'] ) ? sanitize_text_field( wp_unslash( $_GET['perdita_mcp_err'] ) ) : '';
+		$err = perdita_notice_text( 'perdita_mcp_err' );
 		if ( '' !== $err ) {
 			echo '<div class="notice notice-error is-dismissible"><p>' . esc_html( $err ) . '</p></div>';
 		}

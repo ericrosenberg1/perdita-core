@@ -874,7 +874,7 @@ class Perdita_Sales {
 			// plenty to pay, and when it runs out Stripe sends
 			// checkout.session.expired and the stock comes back. Stripe's
 			// own default is 24 hours.
-			'expires_at'          => (string) ( time() + (int) apply_filters( 'perdita_sales_checkout_ttl', HOUR_IN_SECONDS ) ),
+			'expires_at'          => (string) ( time() + max( 30 * MINUTE_IN_SECONDS, min( DAY_IN_SECONDS - MINUTE_IN_SECONDS, (int) apply_filters( 'perdita_sales_checkout_ttl', HOUR_IN_SECONDS ) ) ) ), // Stripe accepts 30 minutes to 24 hours.
 		);
 		$body['metadata']['order_id'] = (string) $order_id;
 

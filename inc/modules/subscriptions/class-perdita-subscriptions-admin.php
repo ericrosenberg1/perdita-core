@@ -91,8 +91,8 @@ class Perdita_Subscriptions_Admin {
 		echo '<h1>' . esc_html__( 'Subscriptions', 'perdita-core' ) . '</h1>';
 
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		if ( isset( $_GET['perdita_msg'] ) ) {
-			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( sanitize_text_field( wp_unslash( $_GET['perdita_msg'] ) ) ) . '</p></div>';
+		if ( '' !== perdita_notice_text( 'perdita_msg' ) ) {
+			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( perdita_notice_text( 'perdita_msg' ) ) . '</p></div>';
 		}
 
 		$this->box_shortcode();

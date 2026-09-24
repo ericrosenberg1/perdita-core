@@ -104,8 +104,8 @@ class Perdita_SEO_Admin {
 		echo '<div class="wrap"><h1>' . esc_html( $title ) . '</h1>';
 		$this->nav();
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- a redirect notice, not form data.
-		if ( isset( $_GET['perdita_msg'] ) ) {
-			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( sanitize_text_field( wp_unslash( $_GET['perdita_msg'] ) ) ) . '</p></div>'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- a redirect notice, not form data.
+		if ( '' !== perdita_notice_text( 'perdita_msg' ) ) {
+			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( perdita_notice_text( 'perdita_msg' ) ) . '</p></div>'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- a redirect notice, not form data.
 		}
 		if ( Perdita_SEO::other_seo_active() ) {
 			echo '<div class="notice notice-warning"><p>' . esc_html__( 'Another SEO plugin (Yoast, AIOSEO, or Rank Math) is active, so Perdita SEO is not outputting tags to avoid duplicates. Import its settings under Import, then deactivate it to let Perdita manage SEO.', 'perdita-core' ) . '</p></div>';

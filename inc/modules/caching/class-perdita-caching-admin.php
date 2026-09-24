@@ -163,8 +163,8 @@ class Perdita_Caching_Admin {
 
 			<?php
 			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only status message echoed after a redirect.
-			if ( isset( $_GET['perdita_msg'] ) ) {
-				echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( sanitize_text_field( wp_unslash( $_GET['perdita_msg'] ) ) ) . '</p></div>';
+			if ( '' !== perdita_notice_text( 'perdita_msg' ) ) {
+				echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( perdita_notice_text( 'perdita_msg' ) ) . '</p></div>';
 			}
 			?>
 

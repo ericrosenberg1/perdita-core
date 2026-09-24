@@ -86,9 +86,9 @@ class Perdita_Breadcrumbs_Admin {
 
 		echo '<div class="wrap"><h1>' . esc_html__( 'Breadcrumbs', 'perdita-core' ) . '</h1>';
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display of a flash message set by our own redirect().
-		if ( isset( $_GET['perdita_msg'] ) ) {
+		if ( '' !== perdita_notice_text( 'perdita_msg' ) ) {
 			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- same flash message.
-			echo '<div class="notice notice-info is-dismissible"><p>' . esc_html( sanitize_text_field( wp_unslash( $_GET['perdita_msg'] ) ) ) . '</p></div>';
+			echo '<div class="notice notice-info is-dismissible"><p>' . esc_html( perdita_notice_text( 'perdita_msg' ) ) . '</p></div>';
 		}
 		echo '<p>' . esc_html__( 'Add the trail with the Breadcrumbs block, the [perdita_breadcrumbs] shortcode, or the perdita_breadcrumbs() template tag. The setting below can also place it above the content on every post and page.', 'perdita-core' ) . '</p>';
 
