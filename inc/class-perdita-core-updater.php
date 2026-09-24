@@ -24,12 +24,20 @@
  * bin/build-release.sh only ever emits perdita-core-<version>.zip.
  *
  * HTTPS-only plus host pinning stop a tampered manifest from pointing
- * WordPress at an attacker's zip, but they only protect the network path, not
- * the update server itself. The "checksum" field, verified in
- * verify_download(), closes that gap by rejecting a downloaded package that
- * does not match the digest the manifest declared. It is optional, so an
- * older manifest without it still installs; publish a checksum to get the
- * protection.
+ * WordPress at an attacker's zip, but they only protect the network path. The
+ * manifest and the zip live on the same server, so a checksum published next
+ * to the zip proves nothing if that server is compromised: whoever can
+ * replace the zip can replace the checksum too. Since 0.19.1-alpha the
+ * manifest also carries "signature", an Ed25519 signature over
+ *
+ *   perdita-release-v1 \n perdita-core \n <version> \n <sha256 of the zip>
+ *
+ * made at build time with a key that never leaves the release machine. The
+ * public half is SIGNING_KEY below. verify_download() refuses our package
+ * unless the checksum matches AND the signature verifies, so a compromised
+ * update server can no longer push code to every site. The slug and version
+ * are inside the signed message, so a signed zip cannot be relabelled as a
+ * newer version or as another Perdita package.
  *
  * This whole file is absent from a wordpress.org build (bin/build-release.sh
  * --wporg removes it), and Perdita_Core::init() only requires it when it
@@ -44,6 +52,24 @@ class Perdita_Core_Updater {
 
 	const MANIFEST = 'https://perdita.ericrosenberg.com/updates/perdita-core.json';
 	const CACHE    = 'perdita_core_update_manifest';
+
+	/**
+	 * Ed25519 public key (base64) that signs every Perdita release. The
+	 * secret half lives only on the release machine; bin/build-release.sh
+	 * signs with it. Same key for the theme, Core, and Pro.
+	 */
+	const SIGNING_KEY = 'qyIk/wCucadP76dYQ8cTt6djiPcpocCPqO2lYCnVQ8k=';
+
+	/**
+	 * First line of every signed message, so a signature made for anything
+	 * else can never verify here.
+	 */
+	const SIGNATURE_CONTEXT = 'perdita-release-v1';
+
+	/**
+	 * The slug inside the signed message.
+	 */
+	const SIGNATURE_SLUG = 'perdita-core';
 
 	/**
 	 * Plugin basename, e.g. perdita-core/perdita-core.php. This is the key
@@ -142,6 +168,13 @@ class Perdita_Core_Updater {
 			return $transient;
 		}
 
+		// Never offer an update that verify_download() is bound to refuse.
+		// An unsigned manifest is either a publishing mistake or a tampered
+		// server, and in both cases the site is better off not seeing it.
+		if ( ! static::manifest_is_signed( $m ) ) {
+			return $transient;
+		}
+
 		$current = isset( $transient->checked[ $this->basename ] ) ? $transient->checked[ $this->basename ] : PERDITA_CORE_VERSION;
 		$row     = $this->row( $m );
 
@@ -227,6 +260,91 @@ class Perdita_Core_Updater {
 	}
 
 	/**
+	 * Public keys a release signature may verify against. A method rather
+	 * than the constant so the test suite can substitute its own key pair;
+	 * nothing on a live site overrides it.
+	 *
+	 * @return string[] Base64 Ed25519 public keys.
+	 */
+	protected static function trusted_keys() {
+		return array( self::SIGNING_KEY );
+	}
+
+	/**
+	 * The exact bytes a release signature covers.
+	 *
+	 * @param string $version Version the manifest advertises.
+	 * @param string $sha256  Lowercase hex sha256 of the zip.
+	 * @return string
+	 */
+	public static function signature_message( $version, $sha256 ) {
+		return self::SIGNATURE_CONTEXT . "\n" . self::SIGNATURE_SLUG . "\n" . $version . "\n" . $sha256;
+	}
+
+	/**
+	 * Whether the manifest carries a version, a usable checksum, and a
+	 * signature over them from a trusted key. Says nothing about the zip
+	 * itself: verify_download() hashes the bytes it actually downloaded.
+	 *
+	 * @param array $m Decoded manifest.
+	 * @return bool
+	 */
+	protected static function manifest_is_signed( array $m ) {
+		$checksum = self::manifest_checksum( $m );
+		if ( '' === $checksum || empty( $m['version'] ) || ! is_string( $m['version'] ) || empty( $m['signature'] ) || ! is_string( $m['signature'] ) ) {
+			return false;
+		}
+		return static::signature_is_valid( self::signature_message( $m['version'], $checksum ), $m['signature'] );
+	}
+
+	/**
+	 * Verify a detached Ed25519 signature against the trusted keys. WordPress
+	 * ships sodium_compat, so this works on hosts without ext-sodium.
+	 *
+	 * @param string $message   Signed message.
+	 * @param string $signature Base64 signature.
+	 * @return bool
+	 */
+	protected static function signature_is_valid( $message, $signature ) {
+		if ( ! function_exists( 'sodium_crypto_sign_verify_detached' ) ) {
+			return false;
+		}
+		$sig = base64_decode( trim( (string) $signature ), true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- decoding a published signature, not obfuscated code.
+		if ( false === $sig || SODIUM_CRYPTO_SIGN_BYTES !== strlen( $sig ) ) {
+			return false;
+		}
+		foreach ( static::trusted_keys() as $b64 ) {
+			$key = base64_decode( (string) $b64, true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- decoding a public key.
+			if ( false === $key || SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES !== strlen( $key ) ) {
+				continue;
+			}
+			try {
+				if ( sodium_crypto_sign_verify_detached( $sig, $message, $key ) ) {
+					return true;
+				}
+			} catch ( Throwable $e ) {
+				continue;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Whether a URL names one of our release zips on the update host
+	 * (perdita-core-<version>.zip), whatever the manifest currently says.
+	 *
+	 * @param string $url Package URL.
+	 * @return bool
+	 */
+	private static function is_our_package( $url ) {
+		if ( ! self::package_url_is_pinned( $url ) ) {
+			return false;
+		}
+		$path = (string) wp_parse_url( $url, PHP_URL_PATH );
+		return (bool) preg_match( '#/perdita-core-[0-9][^/]*\.zip$#', $path );
+	}
+
+	/**
 	 * Background auto-updates are OFF by default here, the opposite of the
 	 * theme's default.
 	 *
@@ -300,20 +418,41 @@ class Perdita_Core_Updater {
 
 		// Same pin check as check(): a manifest that has been tampered with
 		// to point somewhere else is not something we verify a checksum for,
-		// it is something we decline to recognize as our package.
+		// it is something we decline to recognize as our package. Our own
+		// zip still cannot be installed against such a manifest, though.
 		if ( ! self::package_url_is_pinned( $m['download_url'] ) ) {
+			if ( self::is_our_package( $package ) ) {
+				return new WP_Error(
+					'perdita_core_signature_invalid',
+					__( 'The Perdita Core update is not signed with the Perdita release key, so it was not installed. Please try again later. If it keeps happening, check perdita.ericrosenberg.com directly before updating.', 'perdita-core' )
+				);
+			}
 			return $reply;
 		}
 
 		// Only ever intercept our own package. Every other plugin and theme
 		// update running in this same request must fall through to core.
+		// One of our own zips that is NOT the one the manifest names now
+		// (an update offered before a newer release, or a stored offer that
+		// was tampered with) cannot be verified, so it is refused.
 		if ( $package !== $m['download_url'] ) {
+			if ( self::is_our_package( $package ) ) {
+				return new WP_Error(
+					'perdita_core_package_superseded',
+					__( 'This Perdita Core update is no longer the one the update server offers, so it could not be verified. Nothing was installed. Check for updates again, then retry.', 'perdita-core' )
+				);
+			}
 			return $reply;
 		}
 
+		// Fail closed without a signed manifest. An unsigned manifest for
+		// our own package means a publishing mistake or a tampered server.
 		$checksum = self::manifest_checksum( $m );
-		if ( '' === $checksum ) {
-			return $reply; // Manifest published no usable checksum; nothing to verify against.
+		if ( ! static::manifest_is_signed( $m ) ) {
+			return new WP_Error(
+				'perdita_core_signature_invalid',
+				__( 'The Perdita Core update is not signed with the Perdita release key, so it was not installed. Please try again later. If it keeps happening, check perdita.ericrosenberg.com directly before updating.', 'perdita-core' )
+			);
 		}
 
 		if ( ! function_exists( 'download_url' ) ) {

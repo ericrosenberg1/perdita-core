@@ -222,7 +222,8 @@ $wpdb->delete( $wpdb->options, array( 'option_name' => Perdita_MCP_OAuth::OPTION
 
 
 /* =============================================================
- * Updater: the checksum is verified in the real upgrade path.
+ * Updater: the checksum and the release signature are verified in the
+ * real upgrade path.
  *
  * The theme's updater shipped with verify_download() comparing against
  * request-scoped properties that only check() ever set. check() does not run
@@ -240,18 +241,49 @@ if ( ! file_exists( PERDITA_CORE_DIR . 'inc/class-perdita-core-updater.php' ) ) 
 } else {
 	require_once PERDITA_CORE_DIR . 'inc/class-perdita-core-updater.php';
 
-	$psx_updater = new Perdita_Core_Updater();
-	remove_filter( 'pre_set_site_transient_update_plugins', array( $psx_updater, 'check' ) );
-	remove_filter( 'plugins_api', array( $psx_updater, 'details' ) );
-	remove_filter( 'auto_update_plugin', array( $psx_updater, 'auto_update' ) );
-	remove_filter( 'upgrader_pre_download', array( $psx_updater, 'verify_download' ) );
-	remove_action( 'upgrader_process_complete', array( $psx_updater, 'flush' ) );
+	// A throwaway key pair stands in for the release key, so the suite can
+	// sign manifests. The subclass only swaps trusted_keys(); every check the
+	// live updater runs is the same code.
+	$psx_kp      = sodium_crypto_sign_keypair();
+	$psx_sk      = sodium_crypto_sign_secretkey( $psx_kp );
+	$psx_updater = new class() extends Perdita_Core_Updater {
+		/**
+		 * Test keys.
+		 *
+		 * @var string[]
+		 */
+		public static $test_keys = array();
+
+		/**
+		 * The test key instead of the release key.
+		 *
+		 * @return string[]
+		 */
+		protected static function trusted_keys() {
+			return self::$test_keys;
+		}
+	};
+	$psx_updater::$test_keys = array( base64_encode( sodium_crypto_sign_publickey( $psx_kp ) ) );
+	$psx_sign                = function ( $version, $sum, $slug = 'perdita-core', $sk = null ) use ( $psx_sk ) {
+		return base64_encode( sodium_crypto_sign_detached( "perdita-release-v1\n{$slug}\n{$version}\n{$sum}", $sk ? $sk : $psx_sk ) );
+	};
+	$psx_unhook = function ( $u ) {
+		remove_filter( 'pre_set_site_transient_update_plugins', array( $u, 'check' ) );
+		remove_filter( 'plugins_api', array( $u, 'details' ) );
+		remove_filter( 'auto_update_plugin', array( $u, 'auto_update' ) );
+		remove_filter( 'upgrader_pre_download', array( $u, 'verify_download' ) );
+		remove_action( 'upgrader_process_complete', array( $u, 'flush' ) );
+	};
+	$psx_unhook( $psx_updater );
 
 	$psx_orig_manifest = get_transient( Perdita_Core_Updater::CACHE );
 	$psx_pkg           = 'https://perdita.ericrosenberg.com/updates/perdita-core-99.9.9-smoke.zip';
 	$psx_pkg_bytes     = 'perdita-core-smoke-package-bytes';
 	$psx_good_sum      = hash( 'sha256', $psx_pkg_bytes );
 	$psx_bad_sum       = str_repeat( 'a', 64 );
+	$psx_set           = function ( array $m ) {
+		set_transient( Perdita_Core_Updater::CACHE, $m, MINUTE_IN_SECONDS );
+	};
 
 	// Serve the "download" from memory so the test never touches the network.
 	// If the environment blocks the request before this filter runs (no DNS,
@@ -279,16 +311,15 @@ if ( ! file_exists( PERDITA_CORE_DIR . 'inc/class-perdita-core-updater.php' ) ) 
 	};
 	add_filter( 'pre_http_request', $psx_http, 10, 3 );
 
-	set_transient(
-		Perdita_Core_Updater::CACHE,
+	// A correctly signed manifest whose checksum does not match the bytes.
+	$psx_set(
 		array(
 			'version'      => '99.9.9',
 			'download_url' => $psx_pkg,
 			'checksum'     => $psx_bad_sum,
-		),
-		MINUTE_IN_SECONDS
+			'signature'    => $psx_sign( '99.9.9', $psx_bad_sum ),
+		)
 	);
-
 	$psx_verify = $psx_updater->verify_download( false, $psx_pkg, null );
 	$ok( is_wp_error( $psx_verify ), 'updater: verify_download() re-reads the manifest and actually verifies our package' );
 	$ok(
@@ -298,49 +329,113 @@ if ( ! file_exists( PERDITA_CORE_DIR . 'inc/class-perdita-core-updater.php' ) ) 
 
 	// A package that is not ours falls straight through to core.
 	$ok( false === $psx_updater->verify_download( false, 'https://example.com/some-other-plugin.zip', null ), 'updater: verify_download() ignores another plugin or theme package in the same request' );
+	$ok( false === $psx_updater->verify_download( false, 'https://perdita.ericrosenberg.com/updates/perdita-99.9.9.zip', null ), 'updater: the theme\'s zip on the same host is left to the theme\'s updater' );
 
-	// A manifest pointing off-host is not our package, however it is signed.
-	set_transient(
-		Perdita_Core_Updater::CACHE,
+	// A manifest pointing off-host is not our package, however it is signed,
+	// and our own zip cannot be installed against it either.
+	$psx_set(
 		array(
 			'version'      => '99.9.9',
 			'download_url' => 'https://example.com/perdita-core-99.9.9.zip',
 			'checksum'     => $psx_good_sum,
-		),
-		MINUTE_IN_SECONDS
+			'signature'    => $psx_sign( '99.9.9', $psx_good_sum ),
+		)
 	);
 	$ok( false === $psx_updater->verify_download( false, 'https://example.com/perdita-core-99.9.9.zip', null ), 'updater: a manifest whose download_url is off-host is declined, not verified' );
+	$psx_off = $psx_updater->verify_download( false, $psx_pkg, null );
+	$ok( is_wp_error( $psx_off ) && 'perdita_core_signature_invalid' === $psx_off->get_error_code(), 'updater: our own zip is refused while the manifest points off-host' );
 
-	// A manifest with no usable checksum still installs (the field is optional).
-	set_transient(
-		Perdita_Core_Updater::CACHE,
+	// No checksum or no signature: fail closed, never install unverified.
+	$psx_set(
 		array(
 			'version'      => '99.9.9',
 			'download_url' => $psx_pkg,
-		),
-		MINUTE_IN_SECONDS
+		)
 	);
-	$ok( false === $psx_updater->verify_download( false, $psx_pkg, null ), 'updater: a manifest without a checksum defers to core rather than blocking the update' );
-
-	// The matching digest returns the downloaded file for core to install.
-	set_transient(
-		Perdita_Core_Updater::CACHE,
+	$psx_nosum = $psx_updater->verify_download( false, $psx_pkg, null );
+	$ok( is_wp_error( $psx_nosum ) && 'perdita_core_signature_invalid' === $psx_nosum->get_error_code(), 'updater: a manifest without a checksum is refused, not installed unverified' );
+	$psx_set(
 		array(
 			'version'      => '99.9.9',
 			'download_url' => $psx_pkg,
 			'checksum'     => $psx_good_sum,
-		),
-		MINUTE_IN_SECONDS
+		)
 	);
+	$psx_downloaded = false;
+	$psx_nosig      = $psx_updater->verify_download( false, $psx_pkg, null );
+	$ok( is_wp_error( $psx_nosig ) && 'perdita_core_signature_invalid' === $psx_nosig->get_error_code(), 'updater: a manifest with a checksum but no signature is refused' );
+	$ok( ! $psx_downloaded, 'updater: an unsigned manifest is refused before anything is downloaded' );
+
+	// Signatures that do not cover exactly this slug, version and digest.
+	$psx_other_kp = sodium_crypto_sign_keypair();
+	$psx_bad_sigs = array(
+		'a key other than the release key' => $psx_sign( '99.9.9', $psx_good_sum, 'perdita-core', sodium_crypto_sign_secretkey( $psx_other_kp ) ),
+		'another Perdita package'          => $psx_sign( '99.9.9', $psx_good_sum, 'perdita' ),
+		'an older version relabelled'      => $psx_sign( '99.9.8', $psx_good_sum ),
+		'a different zip'                  => $psx_sign( '99.9.9', $psx_bad_sum ),
+		'garbage'                          => 'not-base64!!',
+	);
+	foreach ( $psx_bad_sigs as $psx_label => $psx_sig ) {
+		$psx_set(
+			array(
+				'version'      => '99.9.9',
+				'download_url' => $psx_pkg,
+				'checksum'     => $psx_good_sum,
+				'signature'    => $psx_sig,
+			)
+		);
+		$psx_r = $psx_updater->verify_download( false, $psx_pkg, null );
+		$ok( is_wp_error( $psx_r ) && 'perdita_core_signature_invalid' === $psx_r->get_error_code(), "updater: a signature made for {$psx_label} is refused" );
+	}
+
+	// The shipped updater trusts only the release key, not the test key.
+	$psx_live = new Perdita_Core_Updater();
+	$psx_unhook( $psx_live );
+	$psx_set(
+		array(
+			'version'      => '99.9.9',
+			'download_url' => $psx_pkg,
+			'checksum'     => $psx_good_sum,
+			'signature'    => $psx_sign( '99.9.9', $psx_good_sum ),
+		)
+	);
+	$psx_r = $psx_live->verify_download( false, $psx_pkg, null );
+	$ok( is_wp_error( $psx_r ) && 'perdita_core_signature_invalid' === $psx_r->get_error_code(), 'updater: the shipped updater refuses a signature from any key but the release key' );
+	$psx_rk = base64_decode( Perdita_Core_Updater::SIGNING_KEY, true );
+	$ok( is_string( $psx_rk ) && SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES === strlen( $psx_rk ), 'updater: SIGNING_KEY is a 32-byte Ed25519 public key' );
+
+	// One of our zips that the manifest no longer names is refused.
+	$psx_old = $psx_updater->verify_download( false, 'https://perdita.ericrosenberg.com/updates/perdita-core-99.9.8.zip', null );
+	$ok( is_wp_error( $psx_old ) && 'perdita_core_package_superseded' === $psx_old->get_error_code(), 'updater: a stale offer for an older Core zip is refused, not installed unverified' );
+
+	// The matching digest under a valid signature returns the file to install.
 	$psx_downloaded = false;
 	$psx_verify_ok  = $psx_updater->verify_download( false, $psx_pkg, null );
 	$ok(
 		! $psx_downloaded || ( is_string( $psx_verify_ok ) && file_exists( $psx_verify_ok ) ),
-		'updater: a package whose sha256 matches the manifest is accepted and handed to the installer'
+		'updater: a signed package whose sha256 matches the manifest is accepted and handed to the installer'
 	);
 	if ( is_string( $psx_verify_ok ) && file_exists( $psx_verify_ok ) ) {
 		wp_delete_file( $psx_verify_ok );
 	}
+
+	// check() only offers a signed manifest.
+	$psx_base          = plugin_basename( PERDITA_CORE_FILE );
+	$psx_tr            = new stdClass();
+	$psx_tr->checked   = array( $psx_base => '0.0.1' );
+	$psx_tr->response  = array();
+	$psx_tr->no_update = array();
+	$psx_offered       = $psx_updater->check( clone $psx_tr );
+	$ok( isset( $psx_offered->response[ $psx_base ] ) && $psx_pkg === $psx_offered->response[ $psx_base ]->package, 'updater: check() offers an update whose manifest is signed' );
+	$psx_set(
+		array(
+			'version'      => '99.9.9',
+			'download_url' => $psx_pkg,
+			'checksum'     => $psx_good_sum,
+		)
+	);
+	$psx_offered = $psx_updater->check( clone $psx_tr );
+	$ok( empty( $psx_offered->response[ $psx_base ] ), 'updater: check() does not offer an update whose manifest is unsigned' );
 
 	// Background auto-updates are off by default for the plugin, unlike the
 	// theme: an update here can change what runs on a login form or an MCP

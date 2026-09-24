@@ -52,6 +52,35 @@ EXCLUDE_DIRS=(bin tests dist)
 die() { printf '\033[31merror:\033[0m %s\n' "$1" >&2; exit 1; }
 ok()  { printf '\033[32m  ok\033[0m %s\n' "$1"; }
 
+# --- sign the release ----------------------------------------------------------
+# Every self-hosted updater (theme, Core, Pro) refuses a package unless the
+# manifest carries an Ed25519 signature over
+#   perdita-release-v1 \n <slug> \n <version> \n <sha256 of the zip>
+# from the key whose public half is SIGNING_KEY in the shipped updater. The
+# manifest and the zip sit on the same server, so this is what stops a
+# compromised update server from pushing code to every site. The secret key
+# never leaves this machine (backup: Seafile "App Signing Keys/perdita").
+# The signature is checked against the packaged updater's SIGNING_KEY before
+# anything is written, so a build can never carry a manifest its own code
+# would refuse. The key value is never printed.
+sign_release() { # slug version checksum updater-file
+	signing_key="${PERDITA_SIGNING_KEY_FILE:-$HOME/.perdita-secrets/release-signing.key}"
+	[ -r "$signing_key" ] || die "no release signing key at $signing_key (set PERDITA_SIGNING_KEY_FILE). Every updater since 0.19.1-alpha refuses unsigned releases."
+	command -v php >/dev/null 2>&1 || die "php is needed to sign the release"
+	pubkey="$(sed -n "s/.*const SIGNING_KEY = '\([^']*\)'.*/\1/p" "$4" | head -1)"
+	[ -n "$pubkey" ] || die "could not read SIGNING_KEY from $4"
+	php -r '
+		$sk = base64_decode( trim( (string) file_get_contents( $argv[1] ) ), true );
+		if ( false === $sk || SODIUM_CRYPTO_SIGN_SECRETKEYBYTES !== strlen( $sk ) ) { fwrite( STDERR, "signing key file is not a base64 Ed25519 secret key\n" ); exit( 1 ); }
+		$msg = "perdita-release-v1\n" . $argv[2] . "\n" . $argv[3] . "\n" . $argv[4];
+		$sig = sodium_crypto_sign_detached( $msg, $sk );
+		sodium_memzero( $sk );
+		$pk = base64_decode( $argv[5], true );
+		if ( false === $pk || ! sodium_crypto_sign_verify_detached( $sig, $msg, $pk ) ) { fwrite( STDERR, "signature does not verify against the packaged SIGNING_KEY\n" ); exit( 1 ); }
+		echo base64_encode( $sig );
+	' "$signing_key" "$1" "$2" "$3" "$pubkey" || die "release signing failed"
+}
+
 # Clear any previous artifacts BEFORE the gates run. Publishing is a separate
 # step, so a failed build that left last run's zip and manifest sitting in
 # dist/ under the same version name is a loaded gun: both files are internally
@@ -295,11 +324,15 @@ requires="$(hdr 'Requires at least')"; requires_php="$(hdr 'Requires PHP')"; tes
 [ -n "$requires" ] && [ -n "$requires_php" ] && [ -n "$tested" ] \
 	|| die "readme.txt is missing a Requires at least / Requires PHP / Tested up to header"
 
+signature="$(sign_release perdita-core "$version" "$checksum" "$work/$slug/inc/class-perdita-core-updater.php")"
+ok "signed with the release key"
+
 cat > "$out_dir/${slug}.json" <<EOF
 {
   "name": "Perdita Core", "version": "${version}",
   "download_url": "https://${update_host}/updates/${zip_name}",
   "checksum": "${checksum}",
+  "signature": "${signature}",
   "requires": "${requires}", "requires_php": "${requires_php}", "tested": "${tested}",
   "url": "https://${update_host}", "last_updated": "$(git show -s --format=%cd --date=short HEAD)"
 }
