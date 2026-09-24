@@ -4,7 +4,7 @@ Tags: forms, seo, caching, security, newsletter
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.19.0-alpha
+Stable tag: 0.19.1-alpha
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -76,6 +76,18 @@ Form entries, subscribers, orders, products, form definitions, the SMTP log, you
 Yes, that's what Pro is built on. Pro registers its own modules into this plugin's registry, so they appear on the same Modules screen and behave the same way.
 
 == Changelog ==
+
+= 0.19.1-alpha =
+* Security: self-hosted updates install only when signed with the Perdita release key and when the download matches its checksum.
+* Security: password-protected posts stay out of the page cache, the meta description, social tags, structured data and the image sitemap.
+* Security: the store's order confirmation page needs the buyer's own checkout session, so order numbers cannot be guessed for download links.
+* Security: form and newsletter signup limits can no longer be switched off by a request header.
+* Security: MCP connections cannot read password-protected posts, and a user who loses the right to connect loses access right away.
+* Fix: store orders paid by bank debit wait for the money to arrive, and abandoned checkouts give their reserved stock back.
+* Fix: a post with no author no longer prints article:author as a bare /author/ URL or an empty %%AUTHORLINK%% link in feed footers, and an author with a blank display name no longer gets a nameless Person in the schema.
+* Fix: a robots.txt override no longer opens a site that is set to discourage search engines.
+* Fix: IndexNow submissions no longer empty the page cache after every publish.
+* Fix: MCP post writes keep backslashes, and the profile screen's Revoke button works.
 
 = 0.19.0-alpha =
 * SEO: title and description templates per post type and per taxonomy, with 18 variables (%title%, %sitename%, %sep%, %tagline%, %excerpt%, %category%, %tag%, %author%, %currentyear%, %currentmonth%, %currentdate%, %archive_title%, %term_title%, %term_description%, %post_type_singular%, %post_type_plural%, %page%, %search_term%) and a perdita_seo_variables filter. Category, tag, and custom taxonomy terms get their own SEO title and description fields.

@@ -3,7 +3,7 @@
  * Plugin Name:       Perdita Core
  * Plugin URI:        https://perdita.ericrosenberg.com
  * Description:       The free companion plugin for the Perdita theme. Adds SEO, forms, caching, security, analytics, email, and more as modules you turn on one at a time.
- * Version:           0.19.0-alpha
+ * Version:           0.19.1-alpha
  * Requires at least: 6.4
  * Requires PHP:      8.0
  * Author:            Eric Rosenberg
@@ -26,7 +26,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'PERDITA_CORE_VERSION', '0.19.0-alpha' );
+define( 'PERDITA_CORE_VERSION', '0.19.1-alpha' );
 define( 'PERDITA_CORE_FILE', __FILE__ );
 define( 'PERDITA_CORE_DIR', plugin_dir_path( __FILE__ ) );
 define( 'PERDITA_CORE_URL', plugin_dir_url( __FILE__ ) );
