@@ -688,8 +688,13 @@ class Perdita_Caching {
 		if ( is_404() || is_search() || is_feed() || is_preview() || is_customize_preview() || is_trackback() || is_robots() ) {
 			return false;
 		}
-		// Password-protected posts vary by cookie; skip them.
-		if ( is_singular() && post_password_required() ) {
+		// Password-protected posts vary by cookie; skip them. Not only when
+		// post_password_required() is true: once a visitor has entered the
+		// password it turns false, and the unlocked page would then be
+		// cached and served to everyone. The wp-postpass_ cookie check in
+		// has_no_cache_cookie() covers the other pages that visitor loads.
+		$queried = get_queried_object();
+		if ( ( is_singular() && post_password_required() ) || ( $queried instanceof WP_Post && '' !== (string) $queried->post_password ) ) {
 			return false;
 		}
 		// A query string outside the whitelist means the URL varies output.
@@ -759,6 +764,10 @@ class Perdita_Caching {
 		}
 		$needles = array(
 			'wordpress_logged_in',
+			// A visitor who entered a post password sees that post (and any
+			// archive listing it) unlocked, so nothing they load is safe to
+			// store or to serve them from the shared cache.
+			'wp-postpass_',
 			'comment_author',
 			'woocommerce_',
 			'wp_woocommerce_session',
@@ -926,13 +935,16 @@ class Perdita_Caching {
 	 * claim rows, the connected-apps list). Those options are written on
 	 * every token issue, refresh, and expiry, and nothing on a rendered page
 	 * depends on any of them, so without the carve-out every AI client
-	 * connecting would empty the page cache for every visitor.
+	 * connecting would empty the page cache for every visitor. IndexNow's
+	 * submission log (`perdita_indexnow*`) is the same: it is written after
+	 * every post save and renders nothing, and it was emptying the whole
+	 * cache a minute after each publish.
 	 *
 	 * @param string $option Option name being added, updated, or deleted.
 	 */
 	public function purge_on_option_change( $option ) {
 		$option = (string) $option;
-		if ( 0 !== strpos( $option, 'perdita_' ) || 0 === strpos( $option, 'perdita_mcp_oauth_' ) ) {
+		if ( 0 !== strpos( $option, 'perdita_' ) || 0 === strpos( $option, 'perdita_mcp_oauth_' ) || 0 === strpos( $option, 'perdita_indexnow' ) ) {
 			return;
 		}
 		$this->purge_all();

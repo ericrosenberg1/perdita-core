@@ -508,6 +508,7 @@ class Perdita_Image_SEO {
 			array(
 				'post_type'              => $types ? $types : array( 'post', 'page' ),
 				'post_status'            => 'publish',
+				'has_password'           => false, // Images inside a protected post are not public.
 				'posts_per_page'         => self::SITEMAP_MAX_URLS,
 				'ignore_sticky_posts'    => true,
 				'no_found_rows'          => true,

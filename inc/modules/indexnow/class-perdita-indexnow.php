@@ -702,7 +702,10 @@ class Perdita_IndexNow {
 					'keyLocation' => $key_url,
 					'urlList'     => array_values( $chunk ),
 				);
-				$response = wp_remote_post(
+				// Engine hosts come from settings. wp_safe_remote_post()
+				// refuses localhost, private ranges and the cloud metadata
+				// address, which the host sanitizer lets through.
+				$response = wp_safe_remote_post(
 					'https://' . $engine . '/indexnow',
 					array(
 						'timeout'    => self::TIMEOUT,

@@ -487,9 +487,11 @@ class Perdita_SEO {
 	 * @return string
 	 */
 	public function robots_txt( $output, $public ) {
-		unset( $public );
 		$custom = trim( (string) $this->store->get( 'robots_txt' ) );
-		if ( '' === $custom ) {
+		// "Discourage search engines" (blog_public off) makes core answer
+		// Disallow: /. A stored override replaced that, so a staging copy or
+		// a site hidden on purpose was opened to crawlers.
+		if ( '' === $custom || ! $public ) {
 			return $output;
 		}
 		$custom = str_replace( "\r\n", "\n", $custom );
@@ -867,7 +869,7 @@ class Perdita_SEO {
 				if ( '' !== $image['url'] ) {
 					$article['image'] = array( '@id' => $image_id );
 				}
-				$words = Perdita_SEO_Variables::plain( (string) $post->post_content );
+				$words = '' === (string) $post->post_password ? Perdita_SEO_Variables::plain( (string) $post->post_content ) : '';
 				if ( '' !== $words ) {
 					$article['wordCount'] = count( preg_split( '/\s+/u', $words, -1, PREG_SPLIT_NO_EMPTY ) );
 				}

@@ -153,6 +153,13 @@ class Perdita_SEO_Variables {
 		if ( ! $post ) {
 			return '';
 		}
+		// A password-protected post shows no excerpt anywhere in core. %excerpt%
+		// is the default description, so without this the first 155
+		// characters of the protected body went out in the meta description,
+		// Open Graph, Twitter card and JSON-LD to anyone, search engines too.
+		if ( '' !== (string) $post->post_password ) {
+			return '';
+		}
 		$text = '' !== trim( (string) $post->post_excerpt ) ? $post->post_excerpt : $post->post_content;
 		return self::trim_chars( self::plain( (string) $text ), self::EXCERPT_LENGTH );
 	}
