@@ -454,7 +454,9 @@ class Perdita_MCP_Admin {
 			wp_die( esc_html__( 'You do not have permission to do this.', 'perdita-core' ) );
 		}
 
-		$client_id = isset( $_POST['client_id'] ) ? sanitize_text_field( wp_unslash( $_POST['client_id'] ) ) : '';
+		// POST from the MCP settings screen, GET (a nonce link) from the
+		// profile screen, which cannot hold a form of its own.
+		$client_id = isset( $_REQUEST['client_id'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['client_id'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- verified on the next line, the nonce action includes the client id.
 		check_admin_referer( self::ACTION_REVOKE_CONNECTION . '_' . $client_id );
 
 		$user_id = get_current_user_id();
@@ -523,21 +525,24 @@ class Perdita_MCP_Admin {
 					date_i18n( get_option( 'date_format' ), (int) $conn['last_used'] )
 				)
 			);
-			echo ' <form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="display:inline-block;margin-left:8px;" onsubmit="return confirm(' . esc_attr( wp_json_encode( __( 'Revoke this app\'s access? It will stop working immediately.', 'perdita-core' ) ) ) . ');">';
-			echo '<input type="hidden" name="action" value="' . esc_attr( self::ACTION_REVOKE_CONNECTION ) . '" />';
-			echo '<input type="hidden" name="client_id" value="' . esc_attr( $client_id ) . '" />';
-			wp_nonce_field( self::ACTION_REVOKE_CONNECTION . '_' . $client_id );
-			submit_button(
-				__( 'Revoke', 'perdita-core' ),
-				'delete small',
-				'submit',
-				false,
-				array(
-					/* translators: %s: the connected app's client name, so multiple Revoke buttons on the same screen each have a distinct accessible name. */
-					'aria-label' => sprintf( __( 'Revoke access for %s', 'perdita-core' ), $client_name ),
-				)
+			// A link, not a <form>: this renders inside profile.php's own
+			// <form id="your-profile">, and a nested form closed that outer
+			// form early, which broke "Update Profile" for anyone with a
+			// connected app and made this button post to profile.php, where
+			// nothing handled it.
+			$revoke_url = wp_nonce_url(
+				add_query_arg(
+					array(
+						'action'    => self::ACTION_REVOKE_CONNECTION,
+						'client_id' => rawurlencode( $client_id ),
+					),
+					admin_url( 'admin-post.php' )
+				),
+				self::ACTION_REVOKE_CONNECTION . '_' . $client_id
 			);
-			echo '</form>';
+			/* translators: %s: the connected app's client name, so multiple Revoke buttons on the same screen each have a distinct accessible name. */
+			$revoke_label = sprintf( __( 'Revoke access for %s', 'perdita-core' ), $client_name );
+			echo ' <a class="button button-small button-link-delete" style="margin-left:8px;" href="' . esc_url( $revoke_url ) . '" onclick="return confirm(' . esc_attr( wp_json_encode( __( 'Revoke this app\'s access? It will stop working immediately.', 'perdita-core' ) ) ) . ');" aria-label="' . esc_attr( $revoke_label ) . '">' . esc_html__( 'Revoke', 'perdita-core' ) . '</a>';
 			echo '</td></tr>';
 		}
 		echo '</table>';

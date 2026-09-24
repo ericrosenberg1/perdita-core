@@ -635,7 +635,9 @@ class Perdita_MCP_OAuth {
 			$response['client_secret'] = $secret;
 		}
 
-		return new WP_REST_Response( $response, 201 );
+		$registered = new WP_REST_Response( $response, 201 );
+		$registered->header( 'Cache-Control', 'no-store' );
+		return $registered;
 	}
 
 	/**
@@ -1262,7 +1264,7 @@ class Perdita_MCP_OAuth {
 		if ( null === $pair ) {
 			return $this->storage_busy_response();
 		}
-		return new WP_REST_Response( $pair, 200 );
+		return self::token_response( $pair );
 	}
 
 	/**
@@ -1328,13 +1330,34 @@ class Perdita_MCP_OAuth {
 		}
 
 		// Rotate: this exact refresh token is consumed, a new one is issued
-		// alongside the new access token.
-		if ( ! $this->delete_grant( $refresh_token ) ) {
+		// alongside the new access token. Whether the grant still existed is
+		// decided inside the storage lock: a second request that read the
+		// grant before the first one removed it can still win the claim row
+		// once that row is deleted below, and must not mint a second pair.
+		$refresh_key = self::hash_token( $refresh_token );
+		$removed     = false;
+		$done        = self::mutate_grants(
+			static function ( array $grants ) use ( $refresh_key, &$removed ) {
+				if ( isset( $grants[ $refresh_key ]['type'] ) && 'refresh' === $grants[ $refresh_key ]['type'] ) {
+					unset( $grants[ $refresh_key ] );
+					$removed = true;
+				}
+				return $grants;
+			}
+		);
+		if ( ! $done ) {
 			// The storage lock could not be taken, so nothing was rotated
 			// and nothing was issued. Release the claim so the client's
 			// retry can go through, and tell it to retry.
-			delete_option( self::refresh_claim_option_name( self::hash_token( $refresh_token ) ) );
+			delete_option( self::refresh_claim_option_name( $refresh_key ) );
 			return $this->storage_busy_response();
+		}
+		if ( ! $removed ) {
+			delete_option( self::refresh_claim_option_name( $refresh_key ) );
+			return $this->oauth_error_response( 400, 'invalid_grant', __( 'This refresh token has already been used.', 'perdita-core' ) );
+		}
+		if ( ! user_can( (int) $grant['user_id'], self::required_capability() ) ) {
+			return $this->oauth_error_response( 400, 'invalid_grant', __( 'The account that approved this connection can no longer use it.', 'perdita-core' ) );
 		}
 		// The grant is gone now, so a later request presenting this same
 		// token fails the get_grant() check above instead; the claim row
@@ -1347,7 +1370,7 @@ class Perdita_MCP_OAuth {
 		if ( null === $pair ) {
 			return $this->storage_busy_response();
 		}
-		return new WP_REST_Response( $pair, 200 );
+		return self::token_response( $pair );
 	}
 
 	/**
@@ -1522,6 +1545,20 @@ class Perdita_MCP_OAuth {
 	}
 
 	/**
+	 * A successful token response, marked uncacheable.
+	 *
+	 * @param array $pair Issued token pair.
+	 * @return WP_REST_Response
+	 */
+	private static function token_response( array $pair ) {
+		// RFC 6749 section 5.1: a response carrying tokens must not be cached.
+		$response = new WP_REST_Response( $pair, 200 );
+		$response->header( 'Cache-Control', 'no-store' );
+		$response->header( 'Pragma', 'no-cache' );
+		return $response;
+	}
+
+	/**
 	 * Build an RFC6749 Section 5.2 OAuth error response.
 	 *
 	 * @param int    $status HTTP status.
@@ -1595,8 +1632,13 @@ class Perdita_MCP_OAuth {
 			return $default;
 		}
 
+		// A user demoted since the grant was issued (or deleted) loses access
+		// now, not when the refresh token runs out.
 		$user_id = (int) $grant['user_id'];
-		return $user_id > 0 ? $user_id : $default;
+		if ( $user_id <= 0 || ! user_can( $user_id, self::required_capability() ) ) {
+			return $default;
+		}
+		return $user_id;
 	}
 
 	/* ==========================================================

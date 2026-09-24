@@ -1153,7 +1153,7 @@ class Perdita_MCP {
 			if ( ! is_scalar( $value ) ) {
 				continue;
 			}
-			$value          = wp_unslash( (string) $value );
+			$value          = (string) $value; // JSON arguments are not slashed, so nothing to unslash.
 			$fields[ $key ] = 'canonical' === $key ? esc_url_raw( $value ) : sanitize_text_field( $value );
 		}
 		return $fields;
@@ -1361,6 +1361,14 @@ class Perdita_MCP {
 		if ( 'publish' !== $post->post_status && ! current_user_can( 'read_post', $id ) ) {
 			return $this->tool_error( __( 'You do not have permission to read this post. It may be a draft or private post owned by another user.', 'perdita-core' ) );
 		}
+		// A password-protected post is published, so the check above passes,
+		// but its body is meant only for visitors who know the password. A
+		// bearer request never carries the password cookie, and core's REST
+		// API hides such content unless the user can edit the post. Same
+		// rule here, or any Contributor with a token could read them all.
+		if ( post_password_required( $post ) && ! current_user_can( 'edit_post', $id ) ) {
+			return $this->tool_error( __( 'This post is password protected.', 'perdita-core' ) );
+		}
 
 		$max_chars = self::get_post_max_chars( $args );
 		$raw       = (string) $post->post_content;
@@ -1489,13 +1497,18 @@ class Perdita_MCP {
 		}
 		list( $status, $forced_to_draft ) = $this->resolve_requested_status( $args );
 
+		// wp_insert_post() unslashes what it is given, and MCP arguments come
+		// from JSON, which is never slashed. Without wp_slash() a backslash in
+		// the content (a Windows path, LaTeX, a JSON sample) was dropped.
 		$post_id = wp_insert_post(
-			array(
-				'post_title'   => sanitize_text_field( $title ),
-				'post_content' => wp_kses_post( $content ),
-				'post_type'    => $post_type,
-				'post_status'  => $status,
-				'post_author'  => get_current_user_id(),
+			wp_slash(
+				array(
+					'post_title'   => sanitize_text_field( $title ),
+					'post_content' => wp_kses_post( $content ),
+					'post_type'    => $post_type,
+					'post_status'  => $status,
+					'post_author'  => get_current_user_id(),
+				)
 			),
 			true
 		);
@@ -1591,7 +1604,7 @@ class Perdita_MCP {
 		// skips the post write entirely rather than saving a revision and
 		// bumping post_modified for a change that never touched the post row.
 		if ( count( $update ) > 1 ) {
-			$result = wp_update_post( $update, true );
+			$result = wp_update_post( wp_slash( $update ), true ); // Unslashed JSON in, see create_post.
 			if ( is_wp_error( $result ) ) {
 				return $this->tool_error( sprintf(
 					/* translators: %s: underlying WordPress error message. */
