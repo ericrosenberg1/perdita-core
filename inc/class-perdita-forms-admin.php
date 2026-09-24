@@ -197,7 +197,7 @@ class Perdita_Forms_Admin {
 		if ( ! current_user_can( 'edit_post', $post_id ) ) {
 			return;
 		}
-		$in     = isset( $_POST['df'] ) ? wp_unslash( $_POST['df'] ) : array(); // phpcs:ignore WordPress.Security.ValidationSanitization.InputNotSanitized -- sanitized field by field below.
+		$in     = isset( $_POST['df'] ) ? wp_unslash( $_POST['df'] ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- sanitized field by field below.
 		$fields = array();
 		$used   = array();
 		if ( ! empty( $in['fields'] ) && is_array( $in['fields'] ) ) {

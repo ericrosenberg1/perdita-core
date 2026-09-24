@@ -463,8 +463,8 @@ class Perdita_Search_Console_Admin {
 		check_admin_referer( self::ACTION_SAVE_CLIENT );
 
 		$raw   = array(
-			'client_id'     => isset( $_POST['client_id'] ) ? wp_unslash( $_POST['client_id'] ) : '', // phpcs:ignore WordPress.Security.ValidationSanitization.InputNotSanitized -- sanitized in Perdita_Search_Console::sanitize_client().
-			'client_secret' => isset( $_POST['client_secret'] ) ? (string) wp_unslash( $_POST['client_secret'] ) : '', // phpcs:ignore WordPress.Security.ValidationSanitization.InputNotSanitized -- opaque secret, encrypted in sanitize_client(), never echoed.
+			'client_id'     => isset( $_POST['client_id'] ) ? wp_unslash( $_POST['client_id'] ) : '', // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- sanitized in Perdita_Search_Console::sanitize_client().
+			'client_secret' => isset( $_POST['client_secret'] ) ? (string) wp_unslash( $_POST['client_secret'] ) : '', // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- opaque secret, encrypted in sanitize_client(), never echoed.
 			'remove_secret' => ! empty( $_POST['remove_secret'] ),
 		);
 		$clean = Perdita_Search_Console::sanitize_client( $raw );

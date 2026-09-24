@@ -646,7 +646,7 @@ class Perdita_Sales_Admin {
 			$new['secret_key'] = '';
 		} else {
 			// Opaque secret: do not run it through text sanitizers. Encrypt immediately.
-			$typed = isset( $_POST['secret_key'] ) ? trim( (string) wp_unslash( $_POST['secret_key'] ) ) : ''; // phpcs:ignore WordPress.Security.ValidationSanitization.InputNotSanitized -- opaque secret, encrypted below, never echoed.
+			$typed = isset( $_POST['secret_key'] ) ? trim( (string) wp_unslash( $_POST['secret_key'] ) ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- opaque secret, encrypted below, never echoed.
 			if ( '' !== $typed ) {
 				$new['secret_key'] = Perdita_Crypto::encrypt( $typed );
 			}
@@ -656,7 +656,7 @@ class Perdita_Sales_Admin {
 		if ( ! empty( $_POST['remove_webhook_secret'] ) ) {
 			$new['webhook_secret'] = '';
 		} else {
-			$typed = isset( $_POST['webhook_secret'] ) ? trim( (string) wp_unslash( $_POST['webhook_secret'] ) ) : ''; // phpcs:ignore WordPress.Security.ValidationSanitization.InputNotSanitized -- opaque secret, encrypted below, never echoed.
+			$typed = isset( $_POST['webhook_secret'] ) ? trim( (string) wp_unslash( $_POST['webhook_secret'] ) ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- opaque secret, encrypted below, never echoed.
 			if ( '' !== $typed ) {
 				$new['webhook_secret'] = Perdita_Crypto::encrypt( $typed );
 			}

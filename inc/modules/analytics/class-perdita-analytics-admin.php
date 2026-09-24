@@ -75,7 +75,7 @@ class Perdita_Analytics_Admin {
 		}
 		check_admin_referer( self::ACTION );
 
-		$raw = isset( $_POST['perdita_analytics'] ) ? wp_unslash( $_POST['perdita_analytics'] ) : array(); // phpcs:ignore WordPress.Security.ValidationSanitization.InputNotSanitized -- sanitized in Perdita_Analytics::sanitize().
+		$raw = isset( $_POST['perdita_analytics'] ) ? wp_unslash( $_POST['perdita_analytics'] ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- sanitized in Perdita_Analytics::sanitize().
 		$clean = Perdita_Analytics::sanitize( $raw );
 		update_option( Perdita_Analytics::OPTION, $clean );
 

@@ -998,7 +998,7 @@ class Perdita_Backups {
 		}
 		check_admin_referer( 'perdita_backups_settings' );
 
-		$raw   = isset( $_POST['perdita_backups'] ) ? wp_unslash( $_POST['perdita_backups'] ) : array(); // phpcs:ignore WordPress.Security.ValidationSanitization.InputNotSanitized -- sanitized in sanitize().
+		$raw   = isset( $_POST['perdita_backups'] ) ? wp_unslash( $_POST['perdita_backups'] ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- sanitized in sanitize().
 		$clean = self::sanitize( $raw );
 		update_option( self::OPTION, $clean );
 		self::sync_schedule( $clean['schedule'] );

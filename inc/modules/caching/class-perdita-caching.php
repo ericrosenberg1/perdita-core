@@ -250,7 +250,7 @@ class Perdita_Caching {
 		// is_cacheable() separately refuses a request whose Host does not match
 		// this one, so the two together keep one page to one file.
 		$host = self::site_host();
-		$uri  = isset( $_SERVER['REQUEST_URI'] ) ? wp_unslash( $_SERVER['REQUEST_URI'] ) : '/'; // phpcs:ignore WordPress.Security.ValidationSanitization.InputNotSanitized -- path taken and normalized below.
+		$uri  = isset( $_SERVER['REQUEST_URI'] ) ? wp_unslash( $_SERVER['REQUEST_URI'] ) : '/'; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- path taken and normalized below.
 		$path = (string) wp_parse_url( $uri, PHP_URL_PATH );
 		$path = '' === $path ? '/' : $path;
 
@@ -792,7 +792,7 @@ class Perdita_Caching {
 		if ( '' !== (string) get_query_var( 'sitemap' ) || '' !== (string) get_query_var( 'sitemap-subtype' ) || '' !== (string) get_query_var( 'sitemap-stylesheet' ) ) {
 			return true;
 		}
-		$uri  = isset( $_SERVER['REQUEST_URI'] ) ? wp_unslash( $_SERVER['REQUEST_URI'] ) : ''; // phpcs:ignore WordPress.Security.ValidationSanitization.InputNotSanitized -- normalized to a path immediately.
+		$uri  = isset( $_SERVER['REQUEST_URI'] ) ? wp_unslash( $_SERVER['REQUEST_URI'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- normalized to a path immediately.
 		$path = (string) wp_parse_url( $uri, PHP_URL_PATH );
 		return (bool) preg_match( '#(?:^|/)(?:wp-sitemap[^/]*\.xml|sitemap[^/]*\.xml|sitemap[^/]*\.xsl)$#i', $path );
 	}
@@ -809,7 +809,7 @@ class Perdita_Caching {
 		if ( empty( $paths ) ) {
 			return false;
 		}
-		$uri  = isset( $_SERVER['REQUEST_URI'] ) ? wp_unslash( $_SERVER['REQUEST_URI'] ) : '/'; // phpcs:ignore WordPress.Security.ValidationSanitization.InputNotSanitized -- normalized to a path immediately.
+		$uri  = isset( $_SERVER['REQUEST_URI'] ) ? wp_unslash( $_SERVER['REQUEST_URI'] ) : '/'; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- normalized to a path immediately.
 		$path = (string) wp_parse_url( $uri, PHP_URL_PATH );
 		$path = '' === $path ? '/' : rtrim( $path, '/' );
 		$path = '' === $path ? '/' : $path;
