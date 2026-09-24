@@ -167,6 +167,17 @@ class Perdita_MCP_OAuth {
 	 */
 	const REGISTER_RATE_LIMIT_PREFIX = 'perdita_mcp_oauth_register_';
 	const REGISTER_RATE_LIMIT_MAX    = 10;
+
+	/**
+	 * Registration bounds. Registration is open to anyone (RFC 7591) and
+	 * every authorize, token and admin request loads the whole clients
+	 * option, so no single registration, and no pile of them, may grow it
+	 * without limit.
+	 */
+	const MAX_REDIRECT_URIS   = 10;
+	const MAX_REDIRECT_LENGTH = 2048;
+	const MAX_CLIENT_NAME     = 100;
+	const MAX_CLIENTS         = 500;
 	const TOKEN_RATE_LIMIT_PREFIX    = 'perdita_mcp_oauth_tokenfail_';
 	const TOKEN_RATE_LIMIT_MAX       = 20;
 	const OAUTH_RATE_LIMIT_WINDOW    = HOUR_IN_SECONDS;
@@ -551,6 +562,14 @@ class Perdita_MCP_OAuth {
 		if ( empty( $redirect_uris ) ) {
 			return $this->oauth_error_response( 400, 'invalid_redirect_uri', __( 'At least one redirect_uris entry is required.', 'perdita-core' ) );
 		}
+		if ( count( $redirect_uris ) > self::MAX_REDIRECT_URIS ) {
+			return $this->oauth_error_response( 400, 'invalid_redirect_uri', __( 'Too many redirect_uris entries.', 'perdita-core' ) );
+		}
+		foreach ( $redirect_uris as $uri ) {
+			if ( is_string( $uri ) && strlen( $uri ) > self::MAX_REDIRECT_LENGTH ) {
+				return $this->oauth_error_response( 400, 'invalid_redirect_uri', __( 'A redirect_uris entry is too long.', 'perdita-core' ) );
+			}
+		}
 
 		foreach ( $redirect_uris as $uri ) {
 			if ( ! is_string( $uri ) || ! $this->is_allowed_redirect_uri( $uri ) ) {
@@ -567,8 +586,11 @@ class Perdita_MCP_OAuth {
 		}
 
 		$client_name = isset( $body['client_name'] ) && is_string( $body['client_name'] )
-			? sanitize_text_field( $body['client_name'] )
+			? mb_substr( sanitize_text_field( $body['client_name'] ), 0, self::MAX_CLIENT_NAME )
 			: __( '(unnamed MCP client)', 'perdita-core' );
+		if ( '' === $client_name ) {
+			$client_name = __( '(unnamed MCP client)', 'perdita-core' );
+		}
 
 		$grant_types = isset( $body['grant_types'] ) && is_array( $body['grant_types'] )
 			? array_values( array_intersect( $body['grant_types'], array( 'authorization_code', 'refresh_token' ) ) )
@@ -606,16 +628,24 @@ class Perdita_MCP_OAuth {
 			'secret_hash'   => $secret_hash,
 			'created'       => time(),
 		);
+		$full    = false;
 		$clients = self::mutate_option(
 			self::OPTION_CLIENTS,
-			static function ( array $clients ) use ( $client_id, $record ) {
-				$clients               = self::prune_stale_clients( $clients );
+			static function ( array $clients ) use ( $client_id, $record, &$full ) {
+				$clients = self::prune_stale_clients( $clients );
+				if ( count( $clients ) >= self::MAX_CLIENTS ) {
+					$full = true;
+					return $clients;
+				}
 				$clients[ $client_id ] = $record;
 				return $clients;
 			}
 		);
 		if ( null === $clients ) {
 			return $this->storage_busy_response();
+		}
+		if ( $full ) {
+			return $this->oauth_error_response( 503, 'temporarily_unavailable', __( 'This site has reached its limit of registered applications. Ask the site owner to remove unused connections.', 'perdita-core' ) );
 		}
 
 		$response = array(
@@ -665,7 +695,9 @@ class Perdita_MCP_OAuth {
 		if ( 'https' === $parts['scheme'] ) {
 			return false !== filter_var( $uri, FILTER_VALIDATE_URL );
 		}
-		if ( 'http' === $parts['scheme'] && in_array( $parts['host'], array( 'localhost', '127.0.0.1', '::1' ), true ) ) {
+		// wp_parse_url() keeps the brackets on an IPv6 literal, so '::1' alone
+		// never matched http://[::1]/.
+		if ( 'http' === $parts['scheme'] && in_array( $parts['host'], array( 'localhost', '127.0.0.1', '::1', '[::1]' ), true ) ) {
 			return false !== filter_var( $uri, FILTER_VALIDATE_URL );
 		}
 		return false;
@@ -718,12 +750,18 @@ class Perdita_MCP_OAuth {
 		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- this is the OAuth authorization request itself, arriving as a GET from the MCP client's browser redirect, not a WP admin action; there is no prior nonce to check. The Allow/Deny POST below is what carries a real nonce.
 		$client_id            = isset( $_GET['client_id'] ) ? sanitize_text_field( wp_unslash( $_GET['client_id'] ) ) : '';
 		$redirect_uri         = isset( $_GET['redirect_uri'] ) ? esc_url_raw( wp_unslash( $_GET['redirect_uri'] ) ) : '';
-		$state                = isset( $_GET['state'] ) ? sanitize_text_field( wp_unslash( $_GET['state'] ) ) : '';
+		// state goes back to the client untouched (RFC 6749 4.1.2), so it is
+		// not run through sanitize_text_field(), which strips %XX sequences
+		// and breaks a client's own CSRF check. It is only ever placed in the
+		// redirect URL, encoded, so printable ASCII up to 1 KB is accepted.
+		$state                = isset( $_GET['state'] ) && is_string( $_GET['state'] ) && preg_match( '/^[\x20-\x7E]{0,1024}$/', wp_unslash( $_GET['state'] ) ) ? wp_unslash( $_GET['state'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- validated to printable ASCII on this line.
 		$code_challenge       = isset( $_GET['code_challenge'] ) ? sanitize_text_field( wp_unslash( $_GET['code_challenge'] ) ) : '';
 		$code_challenge_method = isset( $_GET['code_challenge_method'] ) ? sanitize_text_field( wp_unslash( $_GET['code_challenge_method'] ) ) : '';
 		$resource             = isset( $_GET['resource'] ) ? esc_url_raw( wp_unslash( $_GET['resource'] ) ) : '';
 		$response_type        = isset( $_GET['response_type'] ) ? sanitize_text_field( wp_unslash( $_GET['response_type'] ) ) : '';
-		$scope                = isset( $_GET['scope'] ) ? sanitize_text_field( wp_unslash( $_GET['scope'] ) ) : 'mcp';
+		// One scope exists. Whatever a client asks for, the grant is 'mcp',
+		// so nothing caller-supplied is stored or echoed back as a scope.
+		$scope                = 'mcp';
 		// phpcs:enable
 
 		$client = $this->get_client( $client_id );
@@ -778,7 +816,10 @@ class Perdita_MCP_OAuth {
 		// string preserved), so the consent screen renders immediately after
 		// a successful login with no separate "resume" step needed.
 		if ( ! is_user_logged_in() ) {
-			$current_url = home_url( add_query_arg( null, null ) );
+			// Rebuilt from the authorize URL, not home_url( REQUEST_URI ),
+			// which doubled the path on a subdirectory install and sent the
+			// user to a 404 after login.
+			$current_url = add_query_arg( urlencode_deep( wp_unslash( $_GET ) ), $this->authorize_url() ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- the OAuth request itself, passed back through login unchanged.
 			wp_safe_redirect( wp_login_url( $current_url ) );
 			exit;
 		}
@@ -1166,7 +1207,9 @@ class Perdita_MCP_OAuth {
 	 */
 	private function token_exchange_code( array $params ) {
 		$code          = isset( $params['code'] ) ? (string) $params['code'] : '';
-		$redirect_uri  = isset( $params['redirect_uri'] ) ? (string) $params['redirect_uri'] : '';
+		// Normalized the same way the authorize step normalized the value it
+		// stored, or a URI that esc_url_raw() changes could never redeem.
+		$redirect_uri  = isset( $params['redirect_uri'] ) && is_string( $params['redirect_uri'] ) ? esc_url_raw( $params['redirect_uri'] ) : '';
 		$code_verifier = isset( $params['code_verifier'] ) ? (string) $params['code_verifier'] : '';
 		$resource      = isset( $params['resource'] ) ? untrailingslashit( (string) $params['resource'] ) : '';
 

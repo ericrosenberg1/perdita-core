@@ -139,3 +139,40 @@ $ok( 'no-store' === ( $mh_headers['Cache-Control'] ?? '' ), 'mcp-oauth: token re
 
 wp_delete_post( $mh_post, true );
 wp_delete_user( $mh_contrib );
+
+// OAuth registration bounds (RFC 7591 registration is open to anyone).
+if ( isset( $oauth_smoke ) ) {
+	delete_transient( Perdita_MCP::rate_limit_key( Perdita_MCP_OAuth::REGISTER_RATE_LIMIT_PREFIX, Perdita_MCP::client_ip() ) );
+	$mh_reg = function ( array $body ) use ( $oauth_smoke ) {
+		$r = new WP_REST_Request( 'POST', '/perdita/v1/oauth/register' );
+		$r->set_body( wp_json_encode( $body ) );
+		return $oauth_smoke->handle_register( $r );
+	};
+	$mh_many = $mh_reg( array( 'redirect_uris' => array_fill( 0, 11, 'https://example.test/cb' ), 'token_endpoint_auth_method' => 'none' ) );
+	$ok( 400 === $mh_many->get_status(), 'mcp-oauth: registration refuses more than 10 redirect URIs' );
+	$mh_long = $mh_reg( array( 'redirect_uris' => array( 'https://example.test/' . str_repeat( 'a', 2100 ) ), 'token_endpoint_auth_method' => 'none' ) );
+	$ok( 400 === $mh_long->get_status(), 'mcp-oauth: registration refuses a redirect URI over 2,048 characters' );
+	$mh_name = $mh_reg( array( 'redirect_uris' => array( 'http://[::1]:8080/cb' ), 'client_name' => str_repeat( 'n', 500 ), 'token_endpoint_auth_method' => 'none' ) );
+	$ok( 201 === $mh_name->get_status(), 'mcp-oauth: an http://[::1] loopback redirect URI is accepted' );
+	$ok( 100 === mb_strlen( (string) ( $mh_name->get_data()['client_name'] ?? '' ) ), 'mcp-oauth: a long client_name is cut to 100 characters' );
+	$ok( 'no-store' === ( $mh_name->get_headers()['Cache-Control'] ?? '' ), 'mcp-oauth: the registration response is not cacheable' );
+	delete_transient( Perdita_MCP::rate_limit_key( Perdita_MCP_OAuth::REGISTER_RATE_LIMIT_PREFIX, Perdita_MCP::client_ip() ) );
+	$mh_new_id = (string) ( $mh_name->get_data()['client_id'] ?? '' );
+	if ( '' !== $mh_new_id ) {
+		$mh_clients = (array) get_option( Perdita_MCP_OAuth::OPTION_CLIENTS, array() );
+		unset( $mh_clients[ $mh_new_id ] );
+		update_option( Perdita_MCP_OAuth::OPTION_CLIENTS, $mh_clients, false );
+	}
+}
+$ok( Perdita_MCP::rate_limit_key( 'x_', '2001:db8:1:2:aaaa::1' ) === Perdita_MCP::rate_limit_key( 'x_', '2001:db8:1:2:bbbb::9' ), 'mcp: rate limits count an IPv6 /64 as one client' );
+$ok( Perdita_MCP::rate_limit_key( 'x_', '2001:db8:1:2::1' ) !== Perdita_MCP::rate_limit_key( 'x_', '2001:db8:1:3::1' ), 'mcp: different IPv6 /64s keep separate limits' );
+
+// Module toggles that change sign-in or outside access need manage_options.
+$mh_editor = wp_insert_user( array( 'user_login' => 'perdita_smoke_mh_editor_' . wp_rand(), 'user_pass' => wp_generate_password(), 'role' => 'editor' ) );
+( new WP_User( $mh_editor ) )->add_cap( 'edit_theme_options' );
+wp_set_current_user( $mh_editor );
+$ok( false === Perdita_Core_Admin::can_toggle( 'mcp' ) && false === Perdita_Core_Admin::can_toggle( 'security' ) && true === Perdita_Core_Admin::can_toggle( 'breadcrumbs' ), 'modules: an Editor with edit_theme_options cannot switch MCP or Security, only ordinary modules' );
+wp_set_current_user( 1 );
+$ok( true === Perdita_Core_Admin::can_toggle( 'mcp' ), 'modules: an administrator can switch every module' );
+wp_set_current_user( $mh_orig_user );
+wp_delete_user( $mh_editor );

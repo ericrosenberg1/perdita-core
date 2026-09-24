@@ -782,6 +782,12 @@ class Perdita_MCP {
 	 * @return string
 	 */
 	public static function rate_limit_key( $prefix, $ip ) {
+		// One IPv6 subscriber usually holds a whole /64, so each counter
+		// keys on the /64 rather than handing every address its own budget.
+		$ip = (string) $ip;
+		if ( false !== strpos( $ip, ':' ) && false !== ( $packed = @inet_pton( $ip ) ) && 16 === strlen( $packed ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.CodeAnalysis.AssignmentInCondition.Found -- invalid input simply keeps the raw string.
+			$ip = bin2hex( substr( $packed, 0, 8 ) ) . '::/64';
+		}
 		return $prefix . md5( $ip );
 	}
 

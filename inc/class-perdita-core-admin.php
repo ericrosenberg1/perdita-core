@@ -89,9 +89,9 @@ class Perdita_Core_Admin {
 
 		echo '<div class="wrap"><h1>' . esc_html__( 'Perdita', 'perdita-core' ) . ' <span style="font-size:12px;color:#787c82;">' . esc_html( PERDITA_CORE_VERSION ) . '</span></h1>';
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display of a message this plugin put in the URL itself.
-		if ( isset( $_GET['perdita_msg'] ) ) {
+		if ( '' !== perdita_notice_text( 'perdita_msg' ) ) {
 			// phpcs:ignore WordPress.Security.NonceVerification.Recommended
-			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( sanitize_text_field( wp_unslash( $_GET['perdita_msg'] ) ) ) . '</p></div>';
+			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( perdita_notice_text( 'perdita_msg' ) ) . '</p></div>';
 		}
 		?>
 		<h2><?php esc_html_e( 'Modules', 'perdita-core' ); ?></h2>
@@ -104,6 +104,19 @@ class Perdita_Core_Admin {
 		</form>
 		</div>
 		<?php
+	}
+
+	/**
+	 * Modules whose toggle needs manage_options: they change who can sign
+	 * in, what an outside client can do, or what is written to disk, and
+	 * many sites give Editors edit_theme_options, which opens this screen.
+	 *
+	 * @param string $id Module id.
+	 * @return bool
+	 */
+	public static function can_toggle( $id ) {
+		$restricted = array( 'security', 'security-pro', 'backups', 'backups-pro', 'mcp', 'smtp', 'smtp-pro' );
+		return ! in_array( (string) $id, $restricted, true ) || current_user_can( 'manage_options' );
 	}
 
 	/**
@@ -139,7 +152,7 @@ class Perdita_Core_Admin {
 				printf(
 					'<p style="margin:2px 0;"><label><input type="checkbox" name="module_%1$s" value="1" %2$s /> <strong>%3$s</strong>%4$s</label></p>',
 					esc_attr( $id ),
-					checked( $this->core->modules->is_enabled( $id ), true, false ),
+					checked( $this->core->modules->is_enabled( $id ), true, false ) . ( self::can_toggle( $id ) ? '' : ' disabled="disabled"' ),
 					esc_html( $module['label'] ),
 					$module['description'] ? ' &middot; ' . esc_html( $module['description'] ) : ''
 				);
@@ -157,8 +170,14 @@ class Perdita_Core_Admin {
 			wp_die( esc_html__( 'Not allowed.', 'perdita-core' ) );
 		}
 
+		// The modules that change who can sign in, what an outside client
+		// can do, or what is written to disk need manage_options. Many sites
+		// give Editors edit_theme_options, which opens this screen.
 		$modules = $this->core->modules;
 		foreach ( array_keys( $modules->all() ) as $id ) {
+			if ( ! self::can_toggle( $id ) ) {
+				continue; // Left as it is.
+			}
 			$was = $modules->is_enabled( $id );
 			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- check_admin_referer() above.
 			$now = ! empty( $_POST[ 'module_' . $id ] );
