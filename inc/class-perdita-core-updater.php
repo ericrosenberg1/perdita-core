@@ -310,12 +310,12 @@ class Perdita_Core_Updater {
 			return false;
 		}
 		$sig = base64_decode( trim( (string) $signature ), true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- decoding a published signature, not obfuscated code.
-		if ( false === $sig || SODIUM_CRYPTO_SIGN_BYTES !== strlen( $sig ) ) {
+		if ( false === $sig || 64 !== strlen( $sig ) ) {
 			return false;
 		}
 		foreach ( static::trusted_keys() as $b64 ) {
 			$key = base64_decode( (string) $b64, true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- decoding a public key.
-			if ( false === $key || SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES !== strlen( $key ) ) {
+			if ( false === $key || 32 !== strlen( $key ) ) {
 				continue;
 			}
 			try {
