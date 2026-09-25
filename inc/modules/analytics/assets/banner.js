@@ -1,9 +1,12 @@
 /**
  * Perdita Analytics consent banner.
  *
- * Reveals the banner only when there is no stored choice and Do Not Track is
- * not blocking. On Accept, stores the choice for a year and grants Consent Mode
- * v2 storage. On Decline, stores a denied choice and leaves storage denied.
+ * Reveals the banner only when there is no stored choice and no privacy signal
+ * (Global Privacy Control, or a respected Do Not Track) is blocking. On Accept,
+ * stores the choice for a year, grants analytics storage and resends this
+ * page's page_view, which went out before consent and which GA4 does not
+ * report. That keeps one-page visits and their referrer. On Decline, stores a
+ * denied choice and leaves analytics off. Ad storage is never granted.
  *
  * The banner does not trap focus. Keyboard users can Tab through the buttons
  * and continue into the page, and Escape dismisses the banner as a decline.
@@ -45,12 +48,13 @@
 	}
 
 	function grant() {
-		gtagSafe()( 'consent', 'update', {
-			analytics_storage: 'granted',
-			ad_storage: 'granted',
-			ad_user_data: 'granted',
-			ad_personalization: 'granted'
-		} );
+		var gtag = gtagSafe();
+		gtag( 'consent', 'update', { analytics_storage: 'granted' } );
+		gtag( 'event', 'page_view' );
+	}
+
+	function deny() {
+		gtagSafe()( 'consent', 'update', { analytics_storage: 'denied' } );
 	}
 
 	function dntBlocking() {
@@ -67,6 +71,8 @@
 		document.documentElement.setAttribute( 'data-perdita-consent', choice );
 		if ( 'granted' === choice ) {
 			grant();
+		} else {
+			deny();
 		}
 		hide( banner );
 	}
@@ -77,8 +83,8 @@
 			return;
 		}
 
-		// Do not show if the browser is under a respected Do Not Track signal, or
-		// if a choice is already stored.
+		// Do not show under a privacy signal (the bootstrap marks it 'dnt'), or
+		// when a choice is already stored.
 		if ( dntBlocking() ) {
 			hide( banner );
 			return;

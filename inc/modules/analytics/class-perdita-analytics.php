@@ -3,10 +3,12 @@
  * Analytics module: Google Analytics 4 with Consent Mode v2.
  *
  * Tracking is consent-gated. Before gtag.js loads, consent defaults to denied
- * for every storage type. Nothing is measured until the visitor agrees, either
- * from a stored choice in the perdita_consent cookie or by clicking Accept on
- * the banner. If the browser sends Do Not Track and the site respects it,
- * consent stays denied and the banner is not shown.
+ * for every storage type. Analytics storage turns on only when the visitor
+ * agrees, from a stored choice in the perdita_consent cookie (applied before
+ * the page_view goes out) or by clicking Accept on the banner (which then
+ * resends that page's page_view). Global Privacy Control always keeps it off,
+ * and so does Do Not Track when the site respects it, and then the banner is
+ * not shown. Ad storage is never granted: the module measures, it runs no ads.
  *
  * This class holds the settings contract (defaults, read, sanitize, validate)
  * and every front-end hook. The admin screen lives in the admin class.
@@ -27,6 +29,13 @@ class Perdita_Analytics {
 	 * Consent cookie name.
 	 */
 	const COOKIE = 'perdita_consent';
+
+	/**
+	 * Earlier default banner messages, replaced by the current default on read.
+	 */
+	const LEGACY_BANNER_MESSAGES = array(
+		'We use cookies to understand how visitors use this site. You can accept or decline analytics cookies. This choice helps you comply with privacy laws, and it is up to you.',
+	);
 
 	/**
 	 * The Perdita core singleton.
@@ -63,7 +72,7 @@ class Perdita_Analytics {
 		return array(
 			'measurement_id'  => '',
 			'show_banner'     => true,
-			'banner_message'  => __( 'We use cookies to understand how visitors use this site. You can accept or decline analytics cookies. This choice helps you comply with privacy laws, and it is up to you.', 'perdita-core' ),
+			'banner_message'  => __( 'We use cookies to understand how visitors use this site. You can accept or decline analytics cookies.', 'perdita-core' ),
 			'accept_label'    => __( 'Accept', 'perdita-core' ),
 			'decline_label'   => __( 'Decline', 'perdita-core' ),
 			'respect_dnt'     => true,
@@ -79,6 +88,12 @@ class Perdita_Analytics {
 		$stored = get_option( self::OPTION, array() );
 		if ( ! is_array( $stored ) ) {
 			$stored = array();
+		}
+		// Sites that saved the settings screen before 0.19.3-alpha stored the old
+		// default message, whose last sentence spoke to the site owner, not the
+		// visitor. An unedited copy of it reads as the current default.
+		if ( isset( $stored['banner_message'] ) && in_array( trim( (string) $stored['banner_message'] ), self::LEGACY_BANNER_MESSAGES, true ) ) {
+			unset( $stored['banner_message'] );
 		}
 		return array_merge( self::defaults(), $stored );
 	}
@@ -132,12 +147,14 @@ class Perdita_Analytics {
 	/* ---------- front-end output ---------- */
 
 	/**
-	 * Print the Consent Mode v2 bootstrap and load gtag.js.
+	 * Print the Consent Mode v2 bootstrap (assets/consent-bootstrap.js).
 	 *
-	 * Order matters. We set consent defaults to denied BEFORE gtag.js loads, so
-	 * no measurement happens until consent is granted. A small inline reader then
-	 * grants consent immediately if the visitor chose Accept on a prior visit.
-	 * Do Not Track, when respected, keeps everything denied.
+	 * Order matters twice. The bootstrap runs before gtag.js loads, so consent
+	 * defaults to denied before anything can measure. And a visitor's stored
+	 * Accept is applied BEFORE gtag('config'), because config sends the
+	 * page_view: a page_view sent while analytics storage is denied is one GA4
+	 * never reports. Global Privacy Control, and Do Not Track when the site
+	 * respects it, keep analytics off. Ad storage is never granted.
 	 */
 	public function print_consent_bootstrap() {
 		$id = $this->measurement_id();
@@ -145,48 +162,31 @@ class Perdita_Analytics {
 			return;
 		}
 
-		$settings    = $this->get_settings();
-		$respect_dnt = ! empty( $settings['respect_dnt'] );
+		$settings = $this->get_settings();
+		$config   = array(
+			// Validated to /^G-[A-Z0-9]+$/ and upper-cased by measurement_id().
+			'id'         => $id,
+			'respectDnt' => ! empty( $settings['respect_dnt'] ),
+		);
 
-		// $id is validated to /^G-[A-Z0-9]+$/i and upper-cased, so it is safe to
-		// print. esc_js is still applied as defense in depth.
-		$id_js  = esc_js( $id );
-		$dnt_js = $respect_dnt ? 'true' : 'false';
-		?>
-<!-- Perdita Analytics: Google Consent Mode v2 -->
-<script>
-window.dataLayer = window.dataLayer || [];
-function gtag(){dataLayer.push(arguments);}
-gtag('consent', 'default', {
-	'analytics_storage': 'denied',
-	'ad_storage': 'denied',
-	'ad_user_data': 'denied',
-	'ad_personalization': 'denied'
-});
-gtag('js', new Date());
-gtag('config', '<?php echo $id_js; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- validated GA4 id, esc_js applied. ?>');
-(function () {
-	var respectDnt = <?php echo $dnt_js; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- literal true/false. ?>;
-	var dntOn = respectDnt && (navigator.doNotTrack === '1' || window.doNotTrack === '1' || navigator.msDoNotTrack === '1');
-	if (dntOn) {
-		document.documentElement.setAttribute('data-perdita-consent', 'dnt');
-		return;
+		echo "<!-- Perdita Analytics: Google Consent Mode v2 -->\n";
+		wp_print_inline_script_tag(
+			'window.perditaAnalytics = ' . wp_json_encode( $config, JSON_HEX_TAG | JSON_HEX_AMP ) . ";\n" . self::bootstrap_js()
+		);
+		echo "<!-- /Perdita Analytics (gtag.js itself is enqueued, see enqueue_gtag()) -->\n";
 	}
-	var m = document.cookie.match(/(?:^|;\s*)perdita_consent=([^;]+)/);
-	var choice = m ? decodeURIComponent(m[1]) : '';
-	if (choice === 'granted') {
-		gtag('consent', 'update', {
-			'analytics_storage': 'granted',
-			'ad_storage': 'granted',
-			'ad_user_data': 'granted',
-			'ad_personalization': 'granted'
-		});
-	}
-	document.documentElement.setAttribute('data-perdita-consent', choice || 'unset');
-})();
-</script>
-<!-- /Perdita Analytics (gtag.js itself is enqueued, see enqueue_gtag()) -->
-		<?php
+
+	/**
+	 * The bootstrap script's source, read once per request.
+	 *
+	 * @return string
+	 */
+	public static function bootstrap_js() {
+		static $js = null;
+		if ( null === $js ) {
+			$js = (string) file_get_contents( __DIR__ . '/assets/consent-bootstrap.js' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- A file shipped in this plugin, inlined so it runs before gtag.js.
+		}
+		return $js;
 	}
 
 	/**

@@ -309,6 +309,58 @@ $ok( ! Perdita_Analytics::is_valid_measurement_id( '<script>x</script>' ), 'anal
 $an_clean = Perdita_Analytics::sanitize( array( 'measurement_id' => '<script>x</script>' ) );
 $ok( '' === $an_clean['measurement_id'], 'analytics: sanitize() drops an invalid id rather than storing it (never printed into the page)' );
 
+// --- analytics: the consent bootstrap (0.19.3-alpha regression) ---
+// config sends the page_view, so a stored Accept has to be applied before it,
+// or every page_view goes out denied and GA4 drops it.
+$__an_orig = get_option( Perdita_Analytics::OPTION );
+$__an      = ( new ReflectionClass( 'Perdita_Analytics' ) )->newInstanceWithoutConstructor();
+$__an_head = static function () use ( $__an ) {
+	ob_start();
+	$__an->print_consent_bootstrap();
+	return (string) ob_get_clean();
+};
+update_option( Perdita_Analytics::OPTION, array( 'measurement_id' => 'G-SMOKE123' ) );
+$__an_out    = $__an_head();
+$__an_update = strpos( $__an_out, "gtag( 'consent', 'update'" );
+$__an_config = strpos( $__an_out, "gtag( 'config'" );
+$ok( false !== $__an_update && false !== $__an_config && $__an_update < $__an_config, 'analytics: the stored consent choice is applied before gtag(config) sends the page_view' );
+$ok( strpos( $__an_out, "gtag( 'consent', 'default'" ) < $__an_update, 'analytics: consent defaults to denied before the stored choice is applied' );
+$ok( false !== strpos( $__an_out, '"id":"G-SMOKE123"' ) && false !== strpos( $__an_out, '"respectDnt":true' ), 'analytics: the bootstrap config carries the measurement ID and the DNT setting' );
+$ok( false !== strpos( $__an_out, 'globalPrivacyControl' ), 'analytics: the bootstrap checks Global Privacy Control' );
+$ok( 1 === substr_count( $__an_out, '<script' ), 'analytics: the bootstrap prints as one inline script' );
+$__an_js = $__an_out . file_get_contents( PERDITA_CORE_DIR . 'inc/modules/analytics/assets/banner.js' );
+$ok( ! preg_match( "/ad_(storage|user_data|personalization)\s*:\s*'granted'/", $__an_js ), 'analytics: neither the bootstrap nor the banner ever grants ad storage' );
+$ok( false !== strpos( $__an_js, "gtag( 'event', 'page_view' )" ), 'analytics: Accept on the banner resends the page_view' );
+update_option( Perdita_Analytics::OPTION, array( 'measurement_id' => 'G-SMOKE123', 'respect_dnt' => false ) );
+$ok( false !== strpos( $__an_head(), '"respectDnt":false' ), 'analytics: switching DNT respect off reaches the bootstrap' );
+update_option( Perdita_Analytics::OPTION, array( 'measurement_id' => '' ) );
+$ok( '' === $__an_head(), 'analytics: no measurement ID prints no bootstrap' );
+
+// The default banner text speaks to visitors. The old one ended with a line
+// for site owners, and a saved, unedited copy of it now reads as the default.
+$__an_default = Perdita_Analytics::defaults()['banner_message'];
+$ok( false === stripos( $__an_default, 'comply' ), 'analytics: the default banner message has no line aimed at site owners' );
+update_option( Perdita_Analytics::OPTION, array( 'banner_message' => Perdita_Analytics::LEGACY_BANNER_MESSAGES[0] ) );
+$ok( $__an_default === $__an->get_settings()['banner_message'], 'analytics: a stored copy of the old default reads as the new default' );
+update_option( Perdita_Analytics::OPTION, array( 'banner_message' => 'Our own words.' ) );
+$ok( 'Our own words.' === $__an->get_settings()['banner_message'], 'analytics: a customized banner message is kept' );
+if ( false === $__an_orig ) {
+	delete_option( Perdita_Analytics::OPTION );
+} else {
+	update_option( Perdita_Analytics::OPTION, $__an_orig );
+}
+
+// The same scripts, executed: order, Accept resend, DNT/GPC, never ad storage.
+$__an_node = trim( (string) shell_exec( 'command -v node 2>/dev/null' ) );
+if ( '' !== $__an_node ) {
+	$__an_node_out  = array();
+	$__an_node_code = 1;
+	exec( escapeshellarg( $__an_node ) . ' --test ' . escapeshellarg( PERDITA_CORE_DIR . 'tests/analytics-consent.test.mjs' ) . ' 2>&1', $__an_node_out, $__an_node_code );
+	$ok( 0 === $__an_node_code, 'analytics: node consent tests pass (tests/analytics-consent.test.mjs)' . ( 0 === $__an_node_code ? '' : "\n" . implode( "\n", array_slice( $__an_node_out, -30 ) ) ) );
+} else {
+	echo "SKIP  analytics node consent tests (node not on PATH)\n";
+}
+
 // --- pagespeed module (static only) ---
 require_once PERDITA_CORE_DIR . 'inc/modules/pagespeed/class-perdita-pagespeed.php';
 $__orig_psi_settings = get_option( Perdita_Pagespeed::OPTION );

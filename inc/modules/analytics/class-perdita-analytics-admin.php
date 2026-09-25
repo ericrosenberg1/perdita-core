@@ -198,7 +198,7 @@ class Perdita_Analytics_Admin {
 								<input type="checkbox" name="perdita_analytics[respect_dnt]" value="1" <?php checked( ! empty( $s['respect_dnt'] ) ); ?> />
 								<?php esc_html_e( 'Respect Do Not Track', 'perdita-core' ); ?>
 							</label>
-							<p class="description"><?php esc_html_e( 'When a browser sends a Do Not Track signal, keep tracking off and do not show the banner.', 'perdita-core' ); ?></p>
+							<p class="description"><?php esc_html_e( 'When a browser sends a Do Not Track signal, keep tracking off and do not show the banner. A Global Privacy Control signal always does both.', 'perdita-core' ); ?></p>
 						</td>
 					</tr>
 				</table>
