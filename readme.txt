@@ -4,7 +4,7 @@ Tags: forms, seo, caching, security, newsletter
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.19.2-alpha
+Stable tag: 0.19.3-alpha
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -76,6 +76,12 @@ Form entries, subscribers, orders, products, form definitions, the SMTP log, you
 Yes, that's what Pro is built on. Pro registers its own modules into this plugin's registry, so they appear on the same Modules screen and behave the same way.
 
 == Changelog ==
+
+= 0.19.3-alpha =
+* Fix: Analytics counts page views from visitors who accepted.
+* Fix: Analytics never enables ad storage.
+* Analytics honors Global Privacy Control.
+* Simpler default consent banner text.
 
 = 0.19.2-alpha =
 * Security: admin notices show only messages Perdita itself sent, so a crafted link cannot put fake text on a Perdita screen.
