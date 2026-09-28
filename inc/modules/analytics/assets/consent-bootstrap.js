@@ -1,23 +1,34 @@
 /**
- * Perdita Analytics: GA4 with Google Consent Mode v2.
+ * Perdita Analytics: Google Consent Mode v2.
  *
- * Inlined at the top of <head>, before gtag.js loads, after
- * window.perditaAnalytics = { id, respectDnt } (print_consent_bootstrap()).
+ * Inlined at the top of <head>, before gtag.js or any other Google tag loads,
+ * after window.perditaAnalytics = { id, model, adSignals, respectDnt }
+ * (print_consent_bootstrap()).
  *
- * Opt-in: every storage type starts denied. A visitor's stored Accept turns
- * analytics storage on BEFORE gtag('config'), because config sends the
- * page_view and a page_view sent while denied is one GA4 never reports. Global
- * Privacy Control always keeps analytics off, and so does Do Not Track when
- * the site respects it. Ad storage is never granted.
+ * Opt-in (model 'opt_in'): every storage type starts denied. A visitor's
+ * stored Accept turns analytics on BEFORE gtag('config'), because config
+ * sends the page_view and a page_view sent while denied is one GA4 never
+ * reports. Opt-out (model 'opt_out'): analytics starts granted unless the
+ * visitor opted out. In both, Global Privacy Control always keeps analytics
+ * off, and so does Do Not Track when the site respects it. The three ad
+ * signals follow analytics only when adSignals is on, and are denied
+ * otherwise. Every consent command sets all four.
+ *
+ * With no id, this manages consent for Google tags other plugins add and
+ * loads nothing itself. A choice stored by Simple Consent Manager
+ * (scm_consent=accepted|declined) counts when perdita_consent is unset, and
+ * is copied into perdita_consent so the visitor is not asked again.
+ *
+ * The cookie is read here, in the browser, because pages come from page
+ * caches.
  */
 ( function () {
 	'use strict';
 
 	var cfg = window.perditaAnalytics || {};
-	var id = cfg.id;
-	if ( ! id ) {
-		return;
-	}
+	var id = cfg.id || '';
+	var optOut = 'opt_out' === cfg.model;
+	var ads = true === cfg.adSignals;
 
 	window.dataLayer = window.dataLayer || [];
 	window.gtag =
@@ -34,32 +45,56 @@
 		( '1' === nav.doNotTrack || '1' === window.doNotTrack || '1' === nav.msDoNotTrack );
 	var signal = gpc || dnt;
 
-	var choice = '';
-	var m = document.cookie.match( /(?:^|;\s*)perdita_consent=([^;]+)/ );
-	if ( m ) {
+	function readCookie( name ) {
+		var m = document.cookie.match( new RegExp( '(?:^|;\\s*)' + name + '=([^;]+)' ) );
+		if ( ! m ) {
+			return '';
+		}
 		try {
-			choice = decodeURIComponent( m[ 1 ] );
+			return decodeURIComponent( m[ 1 ] );
 		} catch ( e ) {
-			choice = '';
+			return '';
 		}
 	}
 
-	gtag( 'consent', 'default', {
-		analytics_storage: 'denied',
-		ad_storage: 'denied',
-		ad_user_data: 'denied',
-		ad_personalization: 'denied'
-	} );
-	gtag( 'set', 'ads_data_redaction', true );
-	if ( ! signal && 'granted' === choice ) {
-		gtag( 'consent', 'update', { analytics_storage: 'granted' } );
+	var choice = readCookie( 'perdita_consent' );
+	if ( 'granted' !== choice && 'denied' !== choice ) {
+		choice = '';
+		var scm = readCookie( 'scm_consent' );
+		if ( 'accepted' === scm || 'declined' === scm ) {
+			choice = 'accepted' === scm ? 'granted' : 'denied';
+			document.cookie =
+				'perdita_consent=' +
+				choice +
+				'; Max-Age=31536000; Path=/; SameSite=Lax' +
+				( 'https:' === ( window.location || {} ).protocol ? '; Secure' : '' );
+		}
 	}
-	gtag( 'js', new Date() );
-	gtag( 'config', id );
+
+	var state = ! signal && ( 'granted' === choice || ( '' === choice && optOut ) ) ? 'granted' : 'denied';
+
+	function signals( s ) {
+		var a = ads ? s : 'denied';
+		return { analytics_storage: s, ad_storage: a, ad_user_data: a, ad_personalization: a };
+	}
+
+	// Opt-out starts at the visitor's state. Opt-in starts denied and applies
+	// a stored Accept as an update, both before config below.
+	var initial = signals( optOut ? state : 'denied' );
+	if ( ! id ) {
+		// Other plugins' tags may load before anything else runs here.
+		initial.wait_for_update = 500;
+	}
+	gtag( 'consent', 'default', initial );
+	gtag( 'set', 'ads_data_redaction', true );
+	if ( ! optOut && 'granted' === state ) {
+		gtag( 'consent', 'update', signals( 'granted' ) );
+	}
+	if ( id ) {
+		gtag( 'js', new Date() );
+		gtag( 'config', id );
+	}
 
 	// Read by the banner, which stays hidden for 'dnt' or a stored choice.
-	document.documentElement.setAttribute(
-		'data-perdita-consent',
-		signal ? 'dnt' : ( 'granted' === choice || 'denied' === choice ) ? choice : 'unset'
-	);
+	document.documentElement.setAttribute( 'data-perdita-consent', signal ? 'dnt' : choice || 'unset' );
 } )();

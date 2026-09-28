@@ -64,7 +64,7 @@ function perdita_core_uninstall_options() {
 		'perdita_core',
 
 		// Module settings.
-		'perdita_analytics_settings',
+		'perdita_analytics_settings', // Every consent setting, model included. Visitors' perdita_consent cookies live in their browsers.
 		'perdita_backups_settings',
 		'perdita_caching_settings',
 		// perdita_forms_settings is kept, like perdita_seo: notification recipients and

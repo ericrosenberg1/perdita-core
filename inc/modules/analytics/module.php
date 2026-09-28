@@ -14,7 +14,7 @@ defined( 'ABSPATH' ) || exit;
 return array(
 	'id'          => 'analytics',
 	'label'       => 'Analytics and consent',
-	'description' => 'Google Analytics 4 with a cookie-consent banner that gates tracking until the visitor agrees.',
+	'description' => 'Google Analytics 4 and a cookie-consent banner (opt-in or opt-out) that sets Google Consent Mode v2 for Perdita\'s tag or any Google tag on the page. Replaces Simple Consent Manager.',
 	'group'       => 'infrastructure',
 	'default'     => false,
 	'contexts'    => array( 'front', 'admin' ),

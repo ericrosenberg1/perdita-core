@@ -1,9 +1,17 @@
 /**
  * Perdita Analytics consent banner styles.
  *
- * A fixed bar at the bottom of the viewport. Buttons have a visible focus ring
- * so keyboard users can see where they are. Honors reduced-motion and dark
- * color-scheme preferences.
+ * A fixed bar at the bottom of the viewport, plus a small Cookie Preferences
+ * button that reopens it once a choice is stored. Buttons have a visible focus
+ * ring so keyboard users can see where they are. The accent color (accept
+ * button and focus ring) comes from --perdita-consent-accent, which the
+ * module sets inline when the site picks one. Honors reduced motion.
+ *
+ * Button and link rules are scoped by the banner's id, and the preferences
+ * button by its own, so a theme's generic button rules cannot repaint them.
+ * The Perdita theme's `.perdita-styled :is(.button, button, input[type=
+ * "submit"])` rule (specificity 0,2,1) used to turn both banner buttons the
+ * theme's primary color, so Decline looked exactly like Accept.
  */
 
 .perdita-consent-banner {
@@ -34,13 +42,28 @@
 	margin: 0;
 }
 
+#perdita-consent-banner .perdita-consent-banner__link {
+	color: #93c5fd;
+	text-underline-offset: 2px;
+	white-space: nowrap;
+}
+
+#perdita-consent-banner .perdita-consent-banner__link:hover {
+	color: #f5f7fa;
+}
+
+#perdita-consent-banner .perdita-consent-banner__link:focus-visible {
+	outline: 3px solid var( --perdita-consent-accent, #93c5fd );
+	outline-offset: 2px;
+}
+
 .perdita-consent-banner__actions {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 10px;
 }
 
-.perdita-consent-banner__btn {
+#perdita-consent-banner .perdita-consent-banner__btn {
 	appearance: none;
 	cursor: pointer;
 	border: 1px solid transparent;
@@ -51,27 +74,58 @@
 	line-height: 1.2;
 }
 
-.perdita-consent-banner__btn--accept {
-	background: #2563eb;
-	color: #ffffff;
+#perdita-consent-banner .perdita-consent-banner__btn--accept {
+	background: var( --perdita-consent-accent, #2563eb );
+	color: var( --perdita-consent-accent-text, #ffffff );
 }
 
-.perdita-consent-banner__btn--accept:hover {
-	background: #1d4ed8;
+#perdita-consent-banner .perdita-consent-banner__btn--accept:hover {
+	filter: brightness( 1.12 );
 }
 
-.perdita-consent-banner__btn--decline {
+#perdita-consent-banner .perdita-consent-banner__btn--decline {
 	background: transparent;
 	color: #f5f7fa;
 	border-color: rgba( 245, 247, 250, 0.5 );
 }
 
-.perdita-consent-banner__btn--decline:hover {
+#perdita-consent-banner .perdita-consent-banner__btn--decline:hover {
 	border-color: #f5f7fa;
 }
 
-.perdita-consent-banner__btn:focus-visible {
-	outline: 3px solid #93c5fd;
+#perdita-consent-banner .perdita-consent-banner__btn:focus-visible {
+	outline: 3px solid var( --perdita-consent-accent, #93c5fd );
+	outline-offset: 2px;
+}
+
+#perdita-consent-prefs {
+	position: fixed;
+	right: 16px;
+	bottom: 12px;
+	z-index: 99998;
+	appearance: none;
+	cursor: pointer;
+	border: 0;
+	border-radius: 4px;
+	padding: 4px 6px;
+	background: rgba( 255, 255, 255, 0.85 );
+	color: #475569;
+	font-size: 12px;
+	line-height: 1.3;
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+
+#perdita-consent-prefs[hidden] {
+	display: none;
+}
+
+#perdita-consent-prefs:hover {
+	color: #1f2933;
+}
+
+#perdita-consent-prefs:focus-visible {
+	outline: 3px solid var( --perdita-consent-accent, #2563eb );
 	outline-offset: 2px;
 }
 
@@ -88,7 +142,8 @@
 
 @media ( prefers-reduced-motion: reduce ) {
 	.perdita-consent-banner,
-	.perdita-consent-banner__btn {
+	#perdita-consent-banner .perdita-consent-banner__btn,
+	#perdita-consent-prefs {
 		transition: none;
 	}
 }
