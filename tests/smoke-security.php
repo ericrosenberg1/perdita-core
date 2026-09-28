@@ -437,6 +437,21 @@ if ( ! file_exists( PERDITA_CORE_DIR . 'inc/class-perdita-core-updater.php' ) ) 
 	$psx_offered = $psx_updater->check( clone $psx_tr );
 	$ok( empty( $psx_offered->response[ $psx_base ] ), 'updater: check() does not offer an update whose manifest is unsigned' );
 
+	// A wordpress.org offer for this plugin (the directory build, which has no
+	// updater) never reaches a self-hosted install, even when our manifest is
+	// unreachable and check() returns before offering anything of its own.
+	$psx_wporg                         = clone $psx_tr;
+	$psx_wporg->response[ $psx_base ] = (object) array(
+		'slug'        => 'perdita-core',
+		'new_version' => '99.9.9',
+		'package'     => 'https://downloads.wordpress.org/plugin/perdita-core.99.9.9.zip',
+	);
+	set_transient( Perdita_Core_Updater::CACHE, array(), MINUTE_IN_SECONDS );
+	$psx_offered = $psx_updater->check( clone $psx_wporg );
+	$ok( empty( $psx_offered->response[ $psx_base ] ), 'updater: a wordpress.org offer for this plugin is dropped when our manifest is unreachable' );
+	$psx_hdr = get_file_data( PERDITA_CORE_FILE, array( 'uri' => 'Update URI' ) );
+	$ok( 'https://perdita.ericrosenberg.com/updates/perdita-core.json' === $psx_hdr['uri'], 'updater: the plugin header names the self-hosted channel in Update URI' );
+
 	// Background auto-updates are off by default for the plugin, unlike the
 	// theme: an update here can change what runs on a login form or an MCP
 	// endpoint, so the site owner picks the moment.

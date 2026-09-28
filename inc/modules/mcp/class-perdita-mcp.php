@@ -787,7 +787,13 @@ class Perdita_MCP {
 		$ip = (string) $ip;
 		$packed = false !== strpos( $ip, ':' ) ? @inet_pton( $ip ) : false; // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- invalid input simply keeps the raw string.
 		if ( false !== $packed && 16 === strlen( $packed ) ) {
-			$ip = bin2hex( substr( $packed, 0, 8 ) ) . '::/64';
+			// An IPv4-mapped address (::ffff:203.0.113.9) is one IPv4 client.
+			// Its first 8 bytes are all zero, so keying it on the /64 would put
+			// every IPv4 visitor of a host that reports mapped addresses into
+			// one shared bucket, and one abuser could lock everyone out.
+			$ip = str_repeat( "\0", 10 ) . "\xff\xff" === substr( $packed, 0, 12 )
+				? inet_ntop( substr( $packed, 12 ) )
+				: bin2hex( substr( $packed, 0, 8 ) ) . '::/64';
 		}
 		return $prefix . md5( $ip );
 	}
@@ -1765,7 +1771,8 @@ class Perdita_MCP {
 		// Perdita_AI::is_ready() is the actual, existing source of truth for
 		// this (also what the onboarding wizard checks) - there is no
 		// separate 'ai.api_key_set' settings flag.
-		$ai_connected = (bool) $this->core->ai->is_ready();
+		// Null with the theme's wordpress.org build, which has no AI router.
+		$ai_connected = $this->core->ai ? (bool) $this->core->ai->is_ready() : false;
 
 		// Two versions, because there are two pieces now. theme_version is the
 		// Perdita theme's, and it keeps that name and that meaning: an AI

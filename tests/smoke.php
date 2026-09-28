@@ -87,6 +87,19 @@ $ok( perdita_core() === perdita_core(), 'perdita_core() is a singleton, not a ne
 // that is not this theme.
 $ok( Perdita_Core::theme_is_ready(), 'the theme gate passes with Perdita active' );
 $ok( function_exists( 'perdita' ) && class_exists( 'Perdita_Crypto' ), 'the theme engine the plugin actually reads is loaded' );
+// This plugin carries its own Perdita_Crypto for the theme's wordpress.org
+// build, which has none. Two copies of a cipher must never drift, or a secret
+// saved under one theme build stops decrypting under the other.
+$__crypto_theme = get_template_directory() . '/inc/class-perdita-crypto.php';
+if ( file_exists( $__crypto_theme ) ) {
+	$ok(
+		str_replace( "'perdita-core'", "'perdita'", (string) file_get_contents( PERDITA_CORE_DIR . 'inc/class-perdita-crypto.php' ) ) === (string) file_get_contents( $__crypto_theme ),
+		'crypto: the plugin copy of Perdita_Crypto matches the theme copy, text domain aside'
+	);
+} else {
+	$ok( ( new ReflectionClass( 'Perdita_Crypto' ) )->getFileName() === realpath( PERDITA_CORE_DIR . 'inc/class-perdita-crypto.php' ), 'crypto: with a theme build that has no Perdita_Crypto, the plugin loads its own copy' );
+}
+unset( $__crypto_theme );
 $ok( 0 === has_action( 'after_setup_theme', 'perdita_core_boot' ), 'the plugin boots on after_setup_theme priority 0 (plugins load before functions.php, so plugins_loaded would be too early)' );
 $ok( ! has_action( 'admin_notices', 'perdita_core_theme_notice' ), 'the missing-theme notice is not registered when the theme IS active' );
 
