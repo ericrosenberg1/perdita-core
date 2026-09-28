@@ -57,6 +57,13 @@ can live in its own fragment without two people editing the main file at once.
   cover the three SEO modules: key file and submission scheduling with HTTP
   stubbed, the breadcrumb trail for every view type, and alt text generation
   plus the image sitemap.
+- `smoke-consent.php` covers the Analytics module's consent layer: opt-in and
+  opt-out settings, consent-only operation with no measurement ID, accent
+  color validation, the privacy link, the message filters, the Cookie
+  Preferences shortcode, cache-safe markup, and the Simple Consent Manager
+  hand-over. `analytics-consent.test.mjs` runs the shipped bootstrap and
+  banner scripts under node for the browser half (GPC, the `scm_consent`
+  migration, Escape and focus).
 - `smoke-mcp-seo.php` covers the MCP SEO fields: the update action fires with
   sanitized fields and `get_post` merges the filter result.
 

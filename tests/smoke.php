@@ -329,7 +329,8 @@ $ok( false !== strpos( $__an_out, '"id":"G-SMOKE123"' ) && false !== strpos( $__
 $ok( false !== strpos( $__an_out, 'globalPrivacyControl' ), 'analytics: the bootstrap checks Global Privacy Control' );
 $ok( 1 === substr_count( $__an_out, '<script' ), 'analytics: the bootstrap prints as one inline script' );
 $__an_js = $__an_out . file_get_contents( PERDITA_CORE_DIR . 'inc/modules/analytics/assets/banner.js' );
-$ok( ! preg_match( "/ad_(storage|user_data|personalization)\s*:\s*'granted'/", $__an_js ), 'analytics: neither the bootstrap nor the banner ever grants ad storage' );
+$ok( ! preg_match( "/ad_(storage|user_data|personalization)\s*:\s*'granted'/", $__an_js ), 'analytics: neither the bootstrap nor the banner hard-codes a granted ad signal' );
+$ok( false !== strpos( $__an_out, '"adSignals":false' ), 'analytics: ad signals stay off unless the site turns them on' );
 $ok( false !== strpos( $__an_js, "gtag( 'event', 'page_view' )" ), 'analytics: Accept on the banner resends the page_view' );
 update_option( Perdita_Analytics::OPTION, array( 'measurement_id' => 'G-SMOKE123', 'respect_dnt' => false ) );
 $ok( false !== strpos( $__an_head(), '"respectDnt":false' ), 'analytics: switching DNT respect off reaches the bootstrap' );
@@ -350,7 +351,8 @@ if ( false === $__an_orig ) {
 	update_option( Perdita_Analytics::OPTION, $__an_orig );
 }
 
-// The same scripts, executed: order, Accept resend, DNT/GPC, never ad storage.
+// The same scripts, executed: order, Accept resend, DNT/GPC, ad signals, both
+// consent models, the scm_consent migration, and the banner's controls.
 $__an_node = trim( (string) shell_exec( 'command -v node 2>/dev/null' ) );
 if ( '' !== $__an_node ) {
 	$__an_node_out  = array();
