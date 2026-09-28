@@ -114,7 +114,15 @@ class Perdita_Image_SEO_Admin {
 		echo '</td></tr>';
 
 		echo '<tr><th scope="row">' . esc_html__( 'Variables', 'perdita-core' ) . '</th><td><p class="description">';
-		echo esc_html__( '%filename% is the file name with the dashes and underscores turned back into spaces, the extension dropped, and digit-only segments removed. %post_title% is the post the image is attached to. %sitename% is the site title.', 'perdita-core' );
+		echo esc_html(
+			sprintf(
+				/* translators: 1: the filename variable, 2: the post title variable, 3: the site name variable. Keep them as they are. */
+				__( '%1$s is the file name with the dashes and underscores turned back into spaces, the extension dropped, and digit-only segments removed. %2$s is the post the image is attached to. %3$s is the site title.', 'perdita-core' ),
+				'%filename%',
+				'%post_title%',
+				'%sitename%'
+			)
+		);
 		echo '</p></td></tr>';
 
 		echo '<tr><th scope="row">' . esc_html__( 'Cleanup', 'perdita-core' ) . '</th><td>';

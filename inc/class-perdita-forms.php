@@ -550,7 +550,7 @@ class Perdita_Forms {
 			return __( 'Please complete the anti-spam check and try again.', 'perdita-core' );
 		}
 		$resp = wp_remote_post(
-			'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+			'https://challenges.cloudflare.com/turnstile/v0/siteverify', // phpcs:ignore PluginCheck.CodeAnalysis.Offloading.OffloadedContent -- a server-side Turnstile token check, not an offloaded asset.
 			array(
 				'timeout' => 10,
 				'body'    => array(
