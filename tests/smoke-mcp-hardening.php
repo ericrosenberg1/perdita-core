@@ -166,6 +166,7 @@ if ( isset( $oauth_smoke ) ) {
 }
 $ok( Perdita_MCP::rate_limit_key( 'x_', '2001:db8:1:2:aaaa::1' ) === Perdita_MCP::rate_limit_key( 'x_', '2001:db8:1:2:bbbb::9' ), 'mcp: rate limits count an IPv6 /64 as one client' );
 $ok( Perdita_MCP::rate_limit_key( 'x_', '2001:db8:1:2::1' ) !== Perdita_MCP::rate_limit_key( 'x_', '2001:db8:1:3::1' ), 'mcp: different IPv6 /64s keep separate limits' );
+$ok( Perdita_MCP::rate_limit_key( 'x_', 'zz::not-an-ip' ) === 'x_' . md5( 'zz::not-an-ip' ) && Perdita_MCP::rate_limit_key( 'x_', '203.0.113.9' ) === 'x_' . md5( '203.0.113.9' ), 'mcp: an invalid IPv6 string and an IPv4 address key on the raw address' );
 
 // Module toggles that change sign-in or outside access need manage_options.
 $mh_editor = wp_insert_user( array( 'user_login' => 'perdita_smoke_mh_editor_' . wp_rand(), 'user_pass' => wp_generate_password(), 'role' => 'editor' ) );
