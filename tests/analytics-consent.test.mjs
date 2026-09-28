@@ -25,9 +25,10 @@ function page({
   respectDnt = true,
   model = 'opt_in',
   adSignals = false,
+  scmBanner = false,
 } = {}) {
   const attrs = {};
-  const window = { perditaAnalytics: { id, model, adSignals, respectDnt }, location: { protocol: 'https:' } };
+  const window = { perditaAnalytics: { id, model, adSignals, respectDnt, scmBanner }, location: { protocol: 'https:' } };
   window.navigator = { doNotTrack: dnt, globalPrivacyControl: gpc };
   // A cookie jar that behaves like document.cookie: reads return every
   // name=value pair, writes set one.
@@ -101,6 +102,7 @@ function withBanner(p, { prefs = true } = {}) {
   const buttons = { granted: el(), denied: el() };
   const banner = el({
     querySelector: (sel) => (sel === 'button' ? buttons.denied : sel.includes('granted') ? buttons.granted : buttons.denied),
+    contains: (x) => x === banner || x === buttons.granted || x === buttons.denied,
   });
   const prefsBtn = prefs ? el() : null;
   p.document.getElementById = (id) =>
@@ -108,7 +110,11 @@ function withBanner(p, { prefs = true } = {}) {
   p.document.addEventListener = (type, fn) => (docListeners[type] = fn);
   vm.runInContext(BANNER, p.context);
   const shown = (x) => !x.hasAttribute('hidden');
-  const press = (key, defaultPrevented = false) => docListeners.keydown({ key, defaultPrevented });
+  // Escape is only for the banner when focus is inside it.
+  const press = (key, defaultPrevented = false, inside = true) => {
+    p.document.activeElement = inside ? buttons.denied : null;
+    docListeners.keydown({ key, defaultPrevented });
+  };
   const click = (target) => {
     let prevented = false;
     docListeners.click({ target, preventDefault: () => (prevented = true) });
@@ -403,6 +409,7 @@ test('Cookie Preferences reopens the banner, focuses it, and returns focus on cl
   b.press('Escape');
   assert.equal(b.bannerShown(), false);
   assert.equal(p.jar.get('perdita_consent'), 'denied', 'Escape on a reopened banner changes nothing');
+  assert.equal(p.writes.length, 0);
   assert.equal(b.prefs.focused, true, 'focus goes back to the button that opened it');
 });
 
@@ -449,12 +456,82 @@ test('under GPC a preferences link does nothing but is still kept from jumping',
   assert.equal(b.bannerShown(), false);
 });
 
-test('opt-in: Escape on a first visit records a decline', () => {
+test('opt-in: Escape inside the banner on a first visit closes it and saves nothing', () => {
   const p = page();
   const b = withBanner(p);
   b.press('Escape');
   assert.equal(b.bannerShown(), false);
-  assert.equal(p.jar.get('perdita_consent'), 'denied');
+  assert.equal(p.writes.length, 0, 'no year-long decline from a keypress');
+  assert.equal(consent(p.calls(), 'update').length, 0);
+});
+
+test('Escape with focus outside the banner (a theme menu, say) is left alone', () => {
+  for (const model of ['opt_in', 'opt_out']) {
+    const p = page({ model });
+    const b = withBanner(p);
+    b.press('Escape', false, false);
+    assert.equal(b.bannerShown(), true, model);
+    assert.equal(p.writes.length, 0, model);
+  }
+});
+
+/* ---------- at most one resent page_view per page ---------- */
+
+const pageViews = (p) => p.calls().filter((c) => c[0] === 'event' && c[1] === 'page_view').length;
+
+test('opt-in: Decline then Accept on the same page resends the page_view once', () => {
+  const p = page();
+  const b = withBanner(p);
+  b.decline();
+  b.click(b.prefs);
+  b.accept();
+  assert.equal(pageViews(p), 1);
+});
+
+test('opt-in: Accept, Decline, Accept on one page still resends only once', () => {
+  const p = page();
+  const b = withBanner(p);
+  b.accept();
+  b.click(b.prefs);
+  b.decline();
+  b.click(b.prefs);
+  b.accept();
+  assert.equal(pageViews(p), 1);
+});
+
+test('opt-out: a fresh visitor\'s page_view already counted, so Accept sends none', () => {
+  const p = page({ model: 'opt_out' });
+  assert.equal(p.window.perditaAnalytics.pvGranted, true);
+  const b = withBanner(p);
+  b.decline();
+  b.click(b.prefs);
+  b.accept();
+  assert.equal(pageViews(p), 0);
+});
+
+test('opt-out: a stored opt out, then Accept, resends the page_view once', () => {
+  const p = page({ model: 'opt_out', cookie: 'perdita_consent=denied' });
+  assert.equal(p.window.perditaAnalytics.pvGranted, false);
+  const b = withBanner(p);
+  b.click(b.prefs);
+  b.accept();
+  b.click(b.prefs);
+  b.accept();
+  assert.equal(pageViews(p), 1);
+});
+
+test('GPC: config went out denied, so pvGranted stays false', () => {
+  assert.equal(page({ cookie: 'perdita_consent=granted', gpc: true }).window.perditaAnalytics.pvGranted, false);
+});
+
+/* ---------- SCM's banner still on the page ---------- */
+
+test('with SCM\'s banner kept, scm_consent is the live choice and is not copied', () => {
+  const p = page({ scmBanner: true, cookie: 'perdita_consent=granted; scm_consent=declined', model: 'opt_out' });
+  assert.equal(consent(p.calls(), 'default')[0].analytics_storage, 'denied');
+  assert.equal(p.writes.length, 0);
+  const q = page({ scmBanner: true, cookie: 'perdita_consent=denied', model: 'opt_out' });
+  assert.equal(q.attrs['data-perdita-consent'], 'denied', 'no SCM cookie: perdita_consent still counts');
 });
 
 test('Escape does nothing when the banner is hidden or another handler took it', () => {

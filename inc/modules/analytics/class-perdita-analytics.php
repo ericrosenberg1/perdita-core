@@ -87,12 +87,17 @@ class Perdita_Analytics {
 	public function __construct( $core ) {
 		$this->core = $core;
 
-		self::maybe_adopt_scm();
+		// Admin only: front-end requests can carry option filters (a site may
+		// blank the measurement ID there), and nothing should be written from
+		// a page view.
+		if ( is_admin() ) {
+			add_action( 'admin_init', array( __CLASS__, 'maybe_adopt_scm' ) );
+		}
 
 		// Front-end only. The admin context loads the admin class instead.
 		if ( ! is_admin() ) {
 			if ( $this->consent_active() ) {
-				self::take_over_scm();
+				self::take_over_scm( $this->banner_enabled() );
 			}
 			// Consent Mode v2 default + gtag bootstrap must run before gtag.js
 			// and before any other plugin's Google tag, so print it very early
@@ -350,28 +355,59 @@ class Perdita_Analytics {
 	}
 
 	/**
-	 * Switch Simple Consent Manager's head script and footer banner off, so
-	 * the page carries one consent default and one banner. Called only when
+	 * Switch Simple Consent Manager's head script off, so the page carries one
+	 * consent default, and its footer banner too when this module prints its
+	 * own, so the page carries one banner. With this module's banner turned
+	 * off, SCM's banner stays, or the site would have none. Called only when
 	 * this module's own consent layer is going to print.
 	 *
+	 * @param bool $with_banner Whether this module prints its own banner.
 	 * @return bool Whether SCM was active and got switched off.
 	 */
-	public static function take_over_scm() {
+	public static function take_over_scm( $with_banner = true ) {
 		if ( ! self::scm_active() ) {
 			return false;
 		}
 		remove_action( 'wp_head', 'scm_consent_mode_script', 0 );
-		remove_action( 'wp_footer', 'scm_consent_banner', 5 );
+		if ( $with_banner ) {
+			remove_action( 'wp_footer', 'scm_consent_banner', 5 );
+		}
 		return true;
 	}
 
 	/**
+	 * The stored settings exactly as saved, with no option_ filter applied.
+	 * A site may filter the option on some requests (nonprofitmanager.app
+	 * blanks the measurement ID on the front end), and a value read through
+	 * such a filter must never be written back.
+	 *
+	 * @return array
+	 */
+	public static function raw_settings() {
+		global $wp_filter;
+		$hook  = 'option_' . self::OPTION;
+		$saved = isset( $wp_filter[ $hook ] ) ? $wp_filter[ $hook ] : null;
+		unset( $wp_filter[ $hook ] );
+		$stored = get_option( self::OPTION, array() );
+		if ( null !== $saved ) {
+			$wp_filter[ $hook ] = $saved; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- restoring the exact hook object removed two lines up.
+		}
+		return is_array( $stored ) ? $stored : array();
+	}
+
+	/**
 	 * On a site that runs Simple Consent Manager and never chose a consent
-	 * model here, adopt SCM's behavior once and store it: opt-out, managing
-	 * whatever Google tags are on the page, in SCM's accent color. Stored, not
-	 * derived, so the site keeps it after SCM is deactivated. A site that
-	 * already ran its own GA4 through this module keeps opt-in, which is what
-	 * its visitors were given.
+	 * model here, adopt SCM's behavior once and store it: opt-out with all
+	 * four signals granted by default (what SCM did, so ad tags keep working),
+	 * managing whatever Google tags are on the page, in SCM's accent color.
+	 * Stored, not derived, so the site keeps it after SCM is deactivated. A
+	 * site that already ran its own GA4 through this module keeps opt-in and
+	 * its ad signal setting, which is what its visitors were given, and needs
+	 * no consent-only mode.
+	 *
+	 * Runs on admin_init, never on a page view, and reads the option with no
+	 * filters applied (raw_settings()), so a front-end filter's value cannot
+	 * be saved by accident.
 	 *
 	 * @return bool Whether anything was stored.
 	 */
@@ -379,19 +415,19 @@ class Perdita_Analytics {
 		if ( ! self::scm_active() ) {
 			return false;
 		}
-		$stored = get_option( self::OPTION, array() );
-		if ( ! is_array( $stored ) ) {
-			$stored = array();
-		}
+		$stored = self::raw_settings();
 		if ( array_key_exists( 'consent_model', $stored ) && array_key_exists( 'manage_without_id', $stored ) ) {
 			return false;
 		}
 		$had_id = isset( $stored['measurement_id'] ) && self::is_valid_measurement_id( $stored['measurement_id'] );
 		if ( ! array_key_exists( 'consent_model', $stored ) ) {
 			$stored['consent_model'] = $had_id ? self::MODEL_OPT_IN : self::MODEL_OPT_OUT;
+			if ( self::MODEL_OPT_OUT === $stored['consent_model'] && ! array_key_exists( 'ad_signals', $stored ) ) {
+				$stored['ad_signals'] = true;
+			}
 		}
 		if ( ! array_key_exists( 'manage_without_id', $stored ) ) {
-			$stored['manage_without_id'] = true;
+			$stored['manage_without_id'] = ! $had_id;
 		}
 		if ( empty( $stored['accent_color'] ) && defined( 'SCM_ACCENT_COLOR' ) ) {
 			$stored['accent_color'] = self::sanitize_accent_color( constant( 'SCM_ACCENT_COLOR' ) );
@@ -415,6 +451,9 @@ class Perdita_Analytics {
 			'model'      => $settings['consent_model'],
 			'adSignals'  => ! empty( $settings['ad_signals'] ),
 			'respectDnt' => ! empty( $settings['respect_dnt'] ),
+			// SCM's banner is still on the page (this module's banner is off),
+			// so its scm_consent cookie is the visitor's live choice.
+			'scmBanner'  => self::scm_active() && ! $this->banner_enabled(),
 		);
 	}
 
@@ -477,7 +516,7 @@ class Perdita_Analytics {
 	 *
 	 * @return bool
 	 */
-	private function banner_enabled() {
+	public function banner_enabled() {
 		return $this->consent_active() && ! empty( $this->get_settings()['show_banner'] );
 	}
 

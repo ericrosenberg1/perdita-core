@@ -230,11 +230,37 @@ $__cs_set( array() );
 $ok( true === Perdita_Analytics::maybe_adopt_scm(), 'scm: adoption stores settings on a site that never chose' );
 $__cs_s = get_option( Perdita_Analytics::OPTION );
 $ok( 'opt_out' === $__cs_s['consent_model'] && true === $__cs_s['manage_without_id'], 'scm: adoption keeps SCM behavior, opt-out for whatever Google tags are on the page' );
+$ok( true === $__cs_s['ad_signals'], 'scm: adoption keeps SCM granting ad signals by default, so ad tags behave as before' );
 $ok( Perdita_Analytics::sanitize_accent_color( SCM_ACCENT_COLOR ) === $__cs_s['accent_color'], 'scm: adoption stores SCM\'s accent color, so the banner keeps it after SCM is gone' );
 $ok( false === Perdita_Analytics::maybe_adopt_scm(), 'scm: adoption runs once' );
 $__cs_set( array( 'measurement_id' => 'G-OWN1' ) );
 Perdita_Analytics::maybe_adopt_scm();
-$ok( 'opt_in' === get_option( Perdita_Analytics::OPTION )['consent_model'], 'scm: a site already running its own GA4 here stays opt-in' );
+$__cs_s = get_option( Perdita_Analytics::OPTION );
+$ok( 'opt_in' === $__cs_s['consent_model'], 'scm: a site already running its own GA4 here stays opt-in' );
+$ok( false === $__cs_s['manage_without_id'] && ! array_key_exists( 'ad_signals', $__cs_s ), 'scm: a site with its own ID gets no consent-only mode and keeps its ad signal setting' );
+
+// A filter that blanks the ID on some requests (nonprofitmanager.app does it
+// on the front end) must never be saved back by adoption.
+$__cs_blank = static function ( $v ) {
+	if ( is_array( $v ) ) {
+		$v['measurement_id'] = '';
+	}
+	return $v;
+};
+add_filter( 'option_' . Perdita_Analytics::OPTION, $__cs_blank );
+$__cs_set( array( 'measurement_id' => 'G-OWN2' ) );
+Perdita_Analytics::maybe_adopt_scm();
+remove_filter( 'option_' . Perdita_Analytics::OPTION, $__cs_blank );
+$__cs_s = get_option( Perdita_Analytics::OPTION );
+$ok( 'G-OWN2' === $__cs_s['measurement_id'] && 'opt_in' === $__cs_s['consent_model'], 'scm: adoption reads the stored option, not a filtered one, so a filtered-out ID is never saved blank' );
+add_filter( 'option_' . Perdita_Analytics::OPTION, $__cs_blank );
+$ok( '' === get_option( Perdita_Analytics::OPTION )['measurement_id'], 'scm: the site\'s own option filter is back in place after adoption reads around it' );
+remove_filter( 'option_' . Perdita_Analytics::OPTION, $__cs_blank );
+
+// A page view never writes: adoption is hooked to admin_init only.
+$__cs_set( array() );
+$__cs_build();
+$ok( array() === get_option( Perdita_Analytics::OPTION ), 'scm: constructing the module on a front-end request adopts nothing' );
 $__cs_set( array( 'consent_model' => 'opt_in', 'manage_without_id' => false ) );
 $ok( false === Perdita_Analytics::maybe_adopt_scm() && array( 'consent_model' => 'opt_in', 'manage_without_id' => false ) === get_option( Perdita_Analytics::OPTION ), 'scm: an explicit choice is never overwritten' );
 
@@ -246,6 +272,14 @@ $ok( ! $__cs_scm_gone(), 'scm: with Perdita\'s consent layer off, SCM keeps its 
 $__cs_set( array( 'manage_without_id' => true, 'consent_model' => 'opt_out' ) );
 $__cs_build();
 $ok( $__cs_scm_gone(), 'scm: with Perdita\'s consent layer on, SCM\'s head script and banner are unhooked' );
+$ok( false === $__cs_cfg( $__cs_head() )['scmBanner'], 'scm: with Perdita\'s banner on, the bootstrap owns the choice' );
+
+// Perdita's banner off: SCM's banner stays, or the site would have none.
+$__cs_scm_hooks();
+$__cs_set( array( 'manage_without_id' => true, 'consent_model' => 'opt_out', 'show_banner' => false ) );
+$__cs_build();
+$ok( false === has_action( 'wp_head', 'scm_consent_mode_script' ) && 5 === has_action( 'wp_footer', 'scm_consent_banner' ), 'scm: with Perdita\'s banner off, only SCM\'s head script is unhooked and its banner stays' );
+$ok( true === $__cs_cfg( $__cs_head() )['scmBanner'], 'scm: with SCM\'s banner kept, the bootstrap reads scm_consent as the live choice' );
 $__cs_scm_hooks();
 $__cs_set( array( 'measurement_id' => 'G-SMOKE1', 'manage_without_id' => false, 'consent_model' => 'opt_in' ) );
 $__cs_build();
@@ -289,6 +323,13 @@ if ( ! empty( $__cs_admin_ids ) ) {
 	$__cs_admin->scm_notice();
 	$__cs_notice = (string) ob_get_clean();
 	$ok( false !== strpos( $__cs_notice, 'You can deactivate Simple Consent Manager' ), 'scm: the Plugins screen says SCM can be deactivated' );
+	$__cs_keep = get_option( Perdita_Analytics::OPTION );
+	$__cs_set( array( 'manage_without_id' => true, 'show_banner' => false ) );
+	ob_start();
+	$__cs_admin->scm_notice();
+	$__cs_notice = (string) ob_get_clean();
+	$ok( false !== strpos( $__cs_notice, 'its banner is off' ) && false === strpos( $__cs_notice, 'You can deactivate' ), 'scm: with Perdita\'s banner off, the notice says turn it on before deactivating SCM' );
+	$__cs_set( $__cs_keep );
 	$__cs_set( array( 'measurement_id' => '', 'manage_without_id' => false ) );
 	ob_start();
 	$__cs_admin->scm_notice();

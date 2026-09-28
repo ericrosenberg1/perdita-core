@@ -72,7 +72,18 @@ class Perdita_Analytics_Admin {
 			return;
 		}
 		$settings_url = admin_url( 'admin.php?page=' . self::PAGE );
-		if ( $this->main->consent_active() ) {
+		if ( $this->main->consent_active() && ! $this->main->banner_enabled() ) {
+			?>
+			<div class="notice notice-warning">
+				<p>
+					<?php esc_html_e( 'Perdita Core now sets the consent defaults, but its banner is off, so the Simple Consent Manager banner is still the one visitors see. Turn on the Perdita banner before you deactivate Simple Consent Manager, or visitors will have no way to choose.', 'perdita-core' ); ?>
+					<?php if ( ! $ours ) : ?>
+						<a href="<?php echo esc_url( $settings_url ); ?>"><?php esc_html_e( 'Consent settings', 'perdita-core' ); ?></a>
+					<?php endif; ?>
+				</p>
+			</div>
+			<?php
+		} elseif ( $this->main->consent_active() ) {
 			?>
 			<div class="notice notice-info">
 				<p>

@@ -17,7 +17,12 @@
  * With no id, this manages consent for Google tags other plugins add and
  * loads nothing itself. A choice stored by Simple Consent Manager
  * (scm_consent=accepted|declined) counts when perdita_consent is unset, and
- * is copied into perdita_consent so the visitor is not asked again.
+ * is copied into perdita_consent so the visitor is not asked again. When
+ * SCM's own banner is still on the page (scmBanner, this module's banner is
+ * off), scm_consent is the live choice and is read first, never copied.
+ *
+ * Sets cfg.pvGranted when config sent this page's page_view with analytics
+ * granted, so the banner never resends a page_view that already counted.
  *
  * The cookie is read here, in the browser, because pages come from page
  * caches.
@@ -57,12 +62,15 @@
 		}
 	}
 
+	var scm = readCookie( 'scm_consent' );
+	var fromScm = 'accepted' === scm ? 'granted' : 'declined' === scm ? 'denied' : '';
 	var choice = readCookie( 'perdita_consent' );
-	if ( 'granted' !== choice && 'denied' !== choice ) {
+	if ( true === cfg.scmBanner && fromScm ) {
+		choice = fromScm;
+	} else if ( 'granted' !== choice && 'denied' !== choice ) {
 		choice = '';
-		var scm = readCookie( 'scm_consent' );
-		if ( 'accepted' === scm || 'declined' === scm ) {
-			choice = 'accepted' === scm ? 'granted' : 'denied';
+		if ( fromScm ) {
+			choice = fromScm;
 			document.cookie =
 				'perdita_consent=' +
 				choice +
@@ -93,6 +101,7 @@
 	if ( id ) {
 		gtag( 'js', new Date() );
 		gtag( 'config', id );
+		cfg.pvGranted = 'granted' === state;
 	}
 
 	// Read by the banner, which stays hidden for 'dnt' or a stored choice.
