@@ -156,6 +156,26 @@ class Perdita_Core_Updater {
 		if ( ! is_object( $transient ) || empty( $transient->checked ) ) {
 			return $transient;
 		}
+
+		// Once perdita-core is listed on wordpress.org, core's own update check
+		// can offer that directory build to this site too, and it would carry
+		// no updater of its own. This install updates from the self-hosted
+		// channel only: drop any offer for this plugin that does not come from
+		// it, before anything below can return early. The plugin header also
+		// carries an Update URI, which tells wordpress.org the same thing.
+		if ( isset( $transient->response[ $this->basename ] ) ) {
+			$offer   = $transient->response[ $this->basename ];
+			$package = '';
+			if ( is_object( $offer ) && isset( $offer->package ) ) {
+				$package = (string) $offer->package;
+			} elseif ( is_array( $offer ) && isset( $offer['package'] ) ) {
+				$package = (string) $offer['package'];
+			}
+			if ( ! self::package_url_is_pinned( $package ) ) {
+				unset( $transient->response[ $this->basename ] );
+			}
+		}
+
 		$m = $this->manifest();
 		if ( empty( $m['version'] ) || ! is_string( $m['version'] ) || empty( $m['download_url'] ) || ! is_string( $m['download_url'] ) ) {
 			return $transient;

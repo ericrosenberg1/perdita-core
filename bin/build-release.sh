@@ -186,6 +186,12 @@ if [ "$wporg" = "1" ]; then
 	rm -f "$work/$slug/inc/class-perdita-core-updater.php"
 	[ ! -f "$work/$slug/inc/class-perdita-core-updater.php" ] || die "--wporg: the self-hosted updater is still in the staged tree"
 	ok "--wporg: self-hosted updater removed from the staged tree"
+	# The self-hosted header names its own update channel in Update URI, so
+	# wordpress.org never offers the directory build to a self-hosted site.
+	# The directory rejects the header, so the wporg build drops it.
+	perl -ni -e 'print unless /^\s*\*\s*Update URI:/' "$work/$slug/$slug.php"
+	! grep -q 'Update URI' "$work/$slug/$slug.php" || die "--wporg: $slug.php still has an Update URI header"
+	ok "--wporg: Update URI header removed"
 	# Every remaining reference to the class must sit next to a file_exists()
 	# guard, or a directory install would fatal on the first admin page.
 	while IFS= read -r f; do

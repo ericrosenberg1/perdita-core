@@ -10,6 +10,7 @@
  * Author URI:        https://ericrosenberg.com
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
+ * Update URI:        https://perdita.ericrosenberg.com/updates/perdita-core.json
  * Text Domain:       perdita-core
  * Domain Path:       /languages
  *
