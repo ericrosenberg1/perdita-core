@@ -17,9 +17,10 @@
  * plugin territory by the wordpress.org theme review rules (SEO output,
  * forms, page caching, analytics, shortcodes, custom post types, custom
  * capabilities). The theme keeps design: the token document, the CSS
- * generator, the Customizer, fonts, patterns, the AI provider router, and
- * Perdita_Crypto. This plugin keeps behavior, and reads the theme's shared
- * pieces through perdita().
+ * generator, the Customizer, fonts, patterns, and (in its self-hosted build)
+ * the AI provider router and Perdita_Crypto. This plugin keeps behavior, and
+ * reads the theme's shared pieces through perdita(). It brings its own copy
+ * of Perdita_Crypto for the theme's wordpress.org build, which has none.
  *
  * @package Perdita_Core
  */
@@ -58,6 +59,14 @@ function perdita_core() {
  * and still early enough to hook init, rest_api_init and admin_menu.
  */
 function perdita_core_boot() {
+	// Every module secret is encrypted with Perdita_Crypto. The self-hosted
+	// theme defines it. The wordpress.org build of the theme does not (the
+	// theme only needed it for AI keys, and base64 fails Theme Check), so
+	// this plugin carries an identical copy and loads it only when the theme
+	// did not. Both copies read and write the same format.
+	if ( function_exists( 'perdita' ) && ! class_exists( 'Perdita_Crypto' ) ) {
+		require_once PERDITA_CORE_DIR . 'inc/class-perdita-crypto.php';
+	}
 	if ( ! Perdita_Core::theme_is_ready() ) {
 		add_action( 'admin_notices', 'perdita_core_theme_notice' );
 		return;

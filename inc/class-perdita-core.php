@@ -117,9 +117,10 @@ final class Perdita_Core {
 
 	/**
 	 * The theme's AI provider router (perdita()->ai). Read by the MCP module
-	 * for its status tool and by Perdita_Section.
+	 * for its status tool and by Perdita_Section. Null when the theme is its
+	 * wordpress.org build, which carries no AI.
 	 *
-	 * @var Perdita_AI
+	 * @var Perdita_AI|null
 	 */
 	public $ai;
 
@@ -177,7 +178,7 @@ final class Perdita_Core {
 	 * Three separate checks because each fails differently. get_template()
 	 * catches a site running a child theme of Perdita (the common real
 	 * deployment) as well as Perdita itself. function_exists('perdita') and
-	 * class_exists('Perdita_Crypto') catch a theme directory named 'perdita'
+	 * class_exists('Perdita_Settings') catch a theme directory named 'perdita'
 	 * that is not this theme, and a Perdita install whose functions.php
 	 * bailed before wiring the engine up.
 	 *
@@ -213,7 +214,7 @@ final class Perdita_Core {
 	 * @return string ok|missing|old
 	 */
 	public static function theme_status() {
-		if ( ! function_exists( 'perdita' ) || ! class_exists( 'Perdita_Crypto' ) || 'perdita' !== wp_get_theme()->get_template() ) {
+		if ( ! function_exists( 'perdita' ) || ! class_exists( 'Perdita_Settings' ) || 'perdita' !== wp_get_theme()->get_template() ) {
 			return 'missing';
 		}
 		if ( ! defined( 'PERDITA_VERSION' ) || version_compare( PERDITA_VERSION, self::MIN_THEME, '<' ) ) {
@@ -582,7 +583,11 @@ final class Perdita_Core {
 			return;
 		}
 		$this->rest_subsystems_booted = true;
-		$this->section                = new Perdita_Section( $this->ai );
+		// The AI section builder needs the theme's AI router, which the
+		// wordpress.org build of the theme does not carry.
+		if ( $this->ai ) {
+			$this->section = new Perdita_Section( $this->ai );
+		}
 	}
 
 	/**

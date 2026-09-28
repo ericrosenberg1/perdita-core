@@ -42,7 +42,7 @@ if ( ! function_exists( 'perdita_notice_params' ) ) {
 	}
 
 	/**
-	 * wp_redirect filter: add a signature for every notice parameter in a
+	 * Filter wp_redirect to add a signature for every notice parameter in a
 	 * redirect this request makes. Runs on the already-sanitized location,
 	 * so the signed value is exactly what the next request receives.
 	 *

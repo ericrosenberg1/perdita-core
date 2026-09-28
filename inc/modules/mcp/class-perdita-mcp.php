@@ -1765,7 +1765,8 @@ class Perdita_MCP {
 		// Perdita_AI::is_ready() is the actual, existing source of truth for
 		// this (also what the onboarding wizard checks) - there is no
 		// separate 'ai.api_key_set' settings flag.
-		$ai_connected = (bool) $this->core->ai->is_ready();
+		// Null with the theme's wordpress.org build, which has no AI router.
+		$ai_connected = $this->core->ai ? (bool) $this->core->ai->is_ready() : false;
 
 		// Two versions, because there are two pieces now. theme_version is the
 		// Perdita theme's, and it keeps that name and that meaning: an AI
