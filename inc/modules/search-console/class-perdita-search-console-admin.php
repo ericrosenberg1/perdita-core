@@ -14,6 +14,11 @@
 
 defined( 'ABSPATH' ) || exit;
 
+// The module loader requires only the descriptor's 'file' and 'admin_file'.
+// The constructor below instantiates the OAuth handler, so its file has to
+// come in here, or turning the module on fatals every wp-admin page.
+require_once __DIR__ . '/class-perdita-search-console-oauth.php';
+
 class Perdita_Search_Console_Admin {
 
 	/**
