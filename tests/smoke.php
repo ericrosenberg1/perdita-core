@@ -417,6 +417,55 @@ if ( false === $__orig_sc_settings ) {
 	update_option( Perdita_Search_Console::OPTION, $__orig_sc_settings );
 }
 
+// --- every module class a module file instantiates is required by something ---
+// Perdita_Modules::boot() requires only a descriptor's 'file' and, in
+// wp-admin, its 'admin_file'. Any other class in the module's directory has
+// to be pulled in by a require in one of its files, or switching the module on
+// fatals every request in that context. Search Console's admin class shipped
+// with `new Perdita_Search_Console_OAuth()` and nothing requiring that file,
+// which took down all of wp-admin the moment the module was turned on. This
+// reads the files without loading them, so nothing is instantiated, no hook
+// registers, and no admin class is loaded on this front-end-context run.
+$boot_missing = array();
+foreach ( perdita_core()->modules->all() as $boot_id => $boot_d ) {
+	if ( empty( $boot_d['path'] ) || empty( $boot_d['file'] ) || ! is_dir( $boot_d['path'] ) ) {
+		continue;
+	}
+	$boot_src     = array();
+	$boot_defines = array();
+	foreach ( (array) glob( $boot_d['path'] . '/*.php' ) as $boot_f ) {
+		$boot_src[ basename( $boot_f ) ] = (string) file_get_contents( $boot_f ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- reading a local plugin file.
+		if ( preg_match_all( '/^\s*(?:final\s+|abstract\s+)?class\s+([A-Za-z0-9_]+)/m', $boot_src[ basename( $boot_f ) ], $boot_cm ) ) {
+			foreach ( $boot_cm[1] as $boot_c ) {
+				$boot_defines[ $boot_c ] = basename( $boot_f );
+			}
+		}
+	}
+	$boot_entry = array_filter( array( $boot_d['file'], isset( $boot_d['admin_file'] ) ? $boot_d['admin_file'] : '' ) );
+	foreach ( $boot_entry as $boot_e ) {
+		if ( ! isset( $boot_src[ $boot_e ] ) || ! preg_match_all( '/\bnew\s+([A-Za-z0-9_]+)\s*\(/', $boot_src[ $boot_e ], $boot_m ) ) {
+			continue;
+		}
+		foreach ( array_unique( $boot_m[1] ) as $boot_class ) {
+			if ( ! isset( $boot_defines[ $boot_class ] ) || in_array( $boot_defines[ $boot_class ], $boot_entry, true ) ) {
+				continue; // Defined outside this module (always loaded) or in a file boot() requires itself.
+			}
+			$boot_needed = preg_quote( $boot_defines[ $boot_class ], '/' );
+			$boot_found  = false;
+			foreach ( $boot_src as $boot_text ) {
+				if ( preg_match( '/\b(?:require|include)(?:_once)?\b[^;]*' . $boot_needed . '/', $boot_text ) ) {
+					$boot_found = true;
+					break;
+				}
+			}
+			if ( ! $boot_found ) {
+				$boot_missing[] = $boot_id . ': ' . $boot_e . ' instantiates ' . $boot_class . ', and nothing requires ' . $boot_defines[ $boot_class ];
+			}
+		}
+	}
+}
+$ok( array() === $boot_missing, 'modules: every class a module file instantiates is required by one of its files' . ( $boot_missing ? ' (' . implode( '; ', $boot_missing ) . ')' : '' ) );
+
 // --- security module (static only; not instantiated, so no authenticate/send_headers hook registers) ---
 require_once PERDITA_CORE_DIR . 'inc/modules/security/class-perdita-security.php';
 $sec_defaults = Perdita_Security::defaults();
