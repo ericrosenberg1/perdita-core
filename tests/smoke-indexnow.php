@@ -11,6 +11,12 @@
  * canned 200, so the assertions are about what this plugin sends rather than
  * what Bing happens to answer today.
  *
+ * Section 5b drives the module's own post hooks through wp_update_post(), the path
+ * WP-CLI's `wp post update` and any PHP caller take, and asserts one
+ * submission for a published post and none for a draft, a revision, or an
+ * autosave. Section 6 also covers the WP-CLI shape, where the queue submits
+ * at shutdown instead of scheduling a cron event.
+ *
  * Everything is restored: the option, blog_public, the ping throttle
  * transient, every cron event scheduled, and the temporary post and terms.
  *
@@ -27,7 +33,7 @@ require_once PERDITA_CORE_DIR . 'inc/modules/indexnow/class-perdita-indexnow.php
 // shutdown handler would schedule a cron event for them after the run ends.
 // Unhook it here, once, so the suite leaves nothing on the cron queue and the
 // assertions below are about the instance this file drives on purpose.
-foreach ( array( 'transition_post_status', 'post_updated', 'pre_post_update', 'before_delete_post', 'deleted_post', 'trashed_post', 'shutdown', 'template_redirect', Perdita_IndexNow::CRON_HOOK ) as $__in_hook ) {
+foreach ( array( 'transition_post_status', 'post_updated', 'save_post', 'pre_post_update', 'before_delete_post', 'deleted_post', 'trashed_post', 'shutdown', 'template_redirect', Perdita_IndexNow::CRON_HOOK ) as $__in_hook ) {
 	if ( empty( $GLOBALS['wp_filter'][ $__in_hook ] ) ) {
 		continue;
 	}
@@ -202,6 +208,7 @@ remove_action( 'template_redirect', array( $__in_instance, 'maybe_serve_key_file
 remove_action( 'pre_post_update', array( $__in_instance, 'stash_before_update' ), 10 );
 remove_action( 'transition_post_status', array( $__in_instance, 'on_transition' ), 10 );
 remove_action( 'post_updated', array( $__in_instance, 'on_post_updated' ), 10 );
+remove_action( 'save_post', array( $__in_instance, 'on_save_post' ), 20 );
 remove_action( 'before_delete_post', array( $__in_instance, 'stash_before_delete' ), 10 );
 remove_action( 'deleted_post', array( $__in_instance, 'on_deleted' ), 10 );
 remove_action( 'trashed_post', array( $__in_instance, 'on_trashed' ) );
@@ -227,6 +234,104 @@ if ( $__in_upd_ts ) {
 }
 
 $ok( false === $__in_instance->flush_queue(), 'indexnow: an empty queue schedules nothing' );
+
+/* ------------------------------------------------------------------ */
+/* 5b. Every save path, through the module's own hooks                */
+/* ------------------------------------------------------------------ */
+
+// This instance keeps its post hooks for the rest of the file, so the saves
+// below reach it the way a WP-CLI `wp post update`, a PHP wp_update_post(),
+// a REST save, or the editor would. Only shutdown, the key file, and the cron
+// handler are unhooked: the queue is flushed by hand so each step can assert
+// exactly what it scheduled.
+$__in_live = new Perdita_IndexNow( perdita_core() );
+remove_action( 'template_redirect', array( $__in_live, 'maybe_serve_key_file' ), 0 );
+remove_action( Perdita_IndexNow::CRON_HOOK, array( $__in_live, 'run_scheduled' ), 10 );
+remove_action( 'shutdown', array( $__in_live, 'flush_queue' ) );
+
+$ok( has_action( 'save_post', array( $__in_live, 'on_save_post' ) ) === 20, 'indexnow: the module listens to save_post, after the save handlers other plugins register at the default priority' );
+
+/**
+ * The submission events added to the cron queue since a snapshot.
+ *
+ * @param array $before Snapshot from $__in_cron_snapshot.
+ * @return array[] Each as array( timestamp, args ).
+ */
+$__in_new_events = function ( array $before ) use ( $__in_cron_snapshot ) {
+	return array_values( array_diff_key( $__in_cron_snapshot(), $before ) );
+};
+
+// A programmatic update of a published post: pre_post_update, a
+// publish-to-publish transition, post_updated (which also stores a revision),
+// and save_post all fire. One submission comes out.
+$__in_snap = $__in_cron_snapshot();
+$__in_ret  = wp_update_post(
+	array(
+		'ID'           => $__in_post_id,
+		'post_content' => 'x, updated the way wp post update does it',
+	),
+	true
+);
+$ok( $__in_ret === $__in_post_id, 'indexnow: wp_update_post() on the published fixture succeeds with the module hooked' );
+$ok( true === $__in_live->flush_queue(), 'indexnow: a wp_update_post() on a published post leaves URLs in the queue and flush_queue() schedules them' );
+$__in_added = $__in_new_events( $__in_snap );
+$__in_want  = Perdita_IndexNow::event_args( Perdita_IndexNow::urls_for_post( $__in_post_id ), false );
+$ok( 1 === count( $__in_added ), 'indexnow: exactly one submission event is queued for that save, however many hooks saw it' );
+$ok( isset( $__in_added[0][1] ) && $__in_want === $__in_added[0][1], 'indexnow: that event carries the post URL, its term archives, and the home page, with no sitemap ping flag' );
+foreach ( $__in_added as $__in_ev ) {
+	wp_unschedule_event( $__in_ev[0], Perdita_IndexNow::CRON_HOOK, $__in_ev[1] );
+}
+$ok( false === $__in_live->flush_queue(), 'indexnow: the queue is empty again after that flush' );
+
+// A revision and an autosave of the published post submit nothing.
+$__in_snap   = $__in_cron_snapshot();
+$__in_rev_id = _wp_put_post_revision( get_post( $__in_post_id ) );
+$ok( is_int( $__in_rev_id ) && $__in_rev_id > 0 && wp_is_post_revision( $__in_rev_id ), 'indexnow: a revision of the published post was stored' );
+$ok( false === $__in_live->flush_queue() && array() === $__in_new_events( $__in_snap ), 'indexnow: storing a revision queues nothing' );
+$__in_auto_id = _wp_put_post_revision( get_post( $__in_post_id ), true );
+$ok( is_int( $__in_auto_id ) && $__in_auto_id > 0 && wp_is_post_autosave( $__in_auto_id ), 'indexnow: an autosave of the published post was stored' );
+$ok( false === $__in_live->flush_queue() && array() === $__in_new_events( $__in_snap ), 'indexnow: storing an autosave queues nothing' );
+$ok( ! Perdita_IndexNow::should_submit( $__in_rev_id ) && ! Perdita_IndexNow::should_submit( $__in_auto_id ), 'indexnow: should_submit() refuses a revision and an autosave outright' );
+
+// A draft, created and then re-saved, submits nothing either.
+$__in_snap     = $__in_cron_snapshot();
+$__in_draft_id = wp_insert_post(
+	array(
+		'post_title'   => 'Perdita IndexNow Smoke Draft',
+		'post_content' => 'x',
+		'post_status'  => 'draft',
+		'post_type'    => 'post',
+	)
+);
+wp_update_post(
+	array(
+		'ID'         => $__in_draft_id,
+		'post_title' => 'Perdita IndexNow Smoke Draft, edited',
+	)
+);
+$ok( $__in_draft_id > 0 && false === $__in_live->flush_queue() && array() === $__in_new_events( $__in_snap ), 'indexnow: creating and re-saving a draft queues nothing' );
+
+// Code that writes a post itself and then fires save_post by hand reaches
+// only the catch-all. It still queues the published post once.
+$__in_snap = $__in_cron_snapshot();
+do_action( 'save_post', $__in_post_id, get_post( $__in_post_id ), true );
+$ok( true === $__in_live->flush_queue(), 'indexnow: a bare save_post for a published post queues its URLs' );
+$__in_added = $__in_new_events( $__in_snap );
+$ok( 1 === count( $__in_added ) && $__in_want === $__in_added[0][1], 'indexnow: that path schedules the same single event as a full save' );
+foreach ( $__in_added as $__in_ev ) {
+	wp_unschedule_event( $__in_ev[0], Perdita_IndexNow::CRON_HOOK, $__in_ev[1] );
+}
+
+// The same bare save_post for the draft, a revision, and under DOING_AUTOSAVE
+// (the block editor's autosave request) queues nothing.
+do_action( 'save_post', $__in_draft_id, get_post( $__in_draft_id ), true );
+do_action( 'save_post', $__in_rev_id, get_post( $__in_rev_id ), false );
+$ok( false === $__in_live->flush_queue(), 'indexnow: a bare save_post for a draft or a revision queues nothing' );
+$__in_live->on_save_post( $__in_post_id, null, true );
+$ok( true === $__in_live->flush_queue(), 'indexnow: on_save_post() fetches the post itself when the hook hands it only an id' );
+foreach ( $__in_new_events( $__in_snap ) as $__in_ev ) {
+	wp_unschedule_event( $__in_ev[0], Perdita_IndexNow::CRON_HOOK, $__in_ev[1] );
+}
 
 /* ------------------------------------------------------------------ */
 /* 6. Submission, with the HTTP call stubbed                           */
@@ -291,6 +396,34 @@ $ok( array() === Perdita_IndexNow::ping_sitemaps( true ) && 0 === count( $__in_r
 ( new ReflectionClass( 'Perdita_IndexNow' ) )->newInstanceWithoutConstructor()->run_scheduled( array(), true );
 $ok( 0 === count( $__in_requests ), 'indexnow: an old queued event that asked for a ping sends nothing' );
 
+// The WP-CLI shape. This harness is not WP-CLI, so the default is the cron
+// path, and the filter switches the queue to submit at shutdown instead: a
+// wp_update_post() on the published post then makes exactly one request,
+// writes one log row, and schedules nothing.
+$ok( false === Perdita_IndexNow::submits_inline(), 'indexnow: on a web request the queue goes through the debounced cron event' );
+add_filter( 'perdita_indexnow_submit_inline', '__return_true' );
+$ok( true === Perdita_IndexNow::submits_inline(), 'indexnow: perdita_indexnow_submit_inline switches the queue to submit at shutdown, which is the WP-CLI default' );
+Perdita_IndexNow::save( array( 'log' => array() ) );
+$__in_requests = array();
+$__in_snap     = $__in_cron_snapshot();
+wp_update_post(
+	array(
+		'ID'           => $__in_post_id,
+		'post_content' => 'x, updated again, submitted inline',
+	)
+);
+$ok( true === $__in_live->flush_queue(), 'indexnow: flushing inline reports the submission' );
+$ok( 1 === count( $__in_requests ) && 'https://api.indexnow.org/indexnow' === $__in_requests[0]['url'], 'indexnow: a wp_update_post() submitted inline makes exactly one IndexNow request' );
+$__in_payload = json_decode( isset( $__in_requests[0]['body'] ) ? $__in_requests[0]['body'] : '', true );
+$ok( is_array( $__in_payload ) && isset( $__in_payload['urlList'] ) && in_array( get_permalink( $__in_post_id ), $__in_payload['urlList'], true ) && in_array( home_url( '/' ), $__in_payload['urlList'], true ), 'indexnow: the inline request carries the post URL and the home page' );
+$__in_log = Perdita_IndexNow::settings()['log'];
+$ok( 1 === count( $__in_log ) && 200 === (int) $__in_log[0]['status'], 'indexnow: the inline submission is in the log before the request ends, which is what a wp post update should leave behind' );
+$ok( array() === $__in_new_events( $__in_snap ), 'indexnow: the inline path schedules no cron event' );
+$__in_requests = array();
+$ok( false === $__in_live->flush_queue() && 0 === count( $__in_requests ), 'indexnow: an empty queue submits nothing inline either' );
+remove_filter( 'perdita_indexnow_submit_inline', '__return_true' );
+$ok( false === Perdita_IndexNow::submits_inline(), 'indexnow: removing the filter restores the cron path' );
+
 remove_filter( 'pre_http_request', $__in_stub, 10 );
 
 /* ------------------------------------------------------------------ */
@@ -306,6 +439,22 @@ $ok( Perdita_IndexNow::key() === $__in_body, 'indexnow: the key file body is the
 /* Cleanup                                                             */
 /* ------------------------------------------------------------------ */
 
+foreach ( array( 'pre_post_update', 'transition_post_status', 'post_updated', 'save_post', 'before_delete_post', 'deleted_post', 'trashed_post' ) as $__in_hook ) {
+	if ( empty( $GLOBALS['wp_filter'][ $__in_hook ] ) ) {
+		continue;
+	}
+	foreach ( $GLOBALS['wp_filter'][ $__in_hook ]->callbacks as $__in_priority => $__in_callbacks ) {
+		foreach ( $__in_callbacks as $__in_registered ) {
+			$__in_fn = isset( $__in_registered['function'] ) ? $__in_registered['function'] : null;
+			if ( is_array( $__in_fn ) && isset( $__in_fn[0] ) && $__in_fn[0] === $__in_live ) {
+				remove_action( $__in_hook, $__in_fn, $__in_priority );
+			}
+		}
+	}
+}
+$ok( false === has_action( 'save_post', array( $__in_live, 'on_save_post' ) ), 'indexnow: the hooked test instance is detached before the fixtures are deleted' );
+
+wp_delete_post( $__in_draft_id, true );
 wp_delete_post( $__in_post_id, true );
 if ( $__in_parent_cat ) {
 	wp_delete_term( $__in_parent_cat, 'category' );

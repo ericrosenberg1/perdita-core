@@ -54,9 +54,11 @@ can live in its own fragment without two people editing the main file at once.
   extension filters, the linked JSON-LD graph, author E-E-A-T, webmaster
   tags, the robots.txt override, feed controls, and llms.txt.
 - `smoke-indexnow.php`, `smoke-breadcrumbs.php`, and `smoke-image-seo.php`
-  cover the three SEO modules: key file and submission scheduling with HTTP
-  stubbed, the breadcrumb trail for every view type, and alt text generation
-  plus the image sitemap.
+  cover the three SEO modules: key file, submission scheduling with HTTP
+  stubbed, every save path through the module's own hooks (a `wp_update_post()` on a
+  published post submits once, a draft, revision or autosave never, and the
+  WP-CLI shape submits at shutdown), the breadcrumb trail for every view
+  type, and alt text generation plus the image sitemap.
 - `smoke-consent.php` covers the Analytics module's consent layer: opt-in and
   opt-out settings, consent-only operation with no measurement ID, accent
   color validation, the privacy link, the message filters, the Cookie
