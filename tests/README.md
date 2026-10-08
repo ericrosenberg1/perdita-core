@@ -57,7 +57,9 @@ can live in its own fragment without two people editing the main file at once.
   cover the three SEO modules: key file, submission scheduling with HTTP
   stubbed, every save path through the module's own hooks (a `wp_update_post()` on a
   published post submits once, a draft, revision or autosave never, and the
-  WP-CLI shape submits at shutdown), the breadcrumb trail for every view
+  WP-CLI shape submits at shutdown), a post created, re-categorized and
+  published through the REST route (the block editor's path, which sets
+  categories after the post hooks fire), the breadcrumb trail for every view
   type, and alt text generation plus the image sitemap.
 - `smoke-consent.php` covers the Analytics module's consent layer: opt-in and
   opt-out settings, consent-only operation with no measurement ID, accent

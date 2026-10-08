@@ -6,12 +6,20 @@
  * How it works. A 32-character hex key is generated once and stored in the
  * perdita_indexnow option. The key is served at /<key>.txt so an engine can
  * verify the site owns it. When a public post is published, updated, trashed,
- * or deleted, the post URL, its term archive URLs, and the home URL are
- * collected during the request and, at shutdown, scheduled as one cron event
- * 60 seconds out. That debounce folds a burst of saves into one submission
- * and keeps the HTTP call off the editor's save request. The cron handler
- * POSTs the URL list as JSON to each configured engine and records the HTTP
- * status in a 50-row log.
+ * or deleted, the change is collected during the request and, at shutdown,
+ * scheduled as one cron event 60 seconds out. That debounce folds a burst of
+ * saves into one submission and keeps the HTTP call off the editor's save
+ * request. The cron handler POSTs the URL list as JSON to each configured
+ * engine and records the HTTP status in a 50-row log.
+ *
+ * A published post is queued by id, and its URLs (the post URL, its term
+ * archive URLs, and the home URL) are built when the queue flushes, from the
+ * post as it ends up. The REST posts controller sets a new post's categories,
+ * tags and meta only after wp_insert_post() has fired every post hook, so a
+ * URL list built at hook time would carry the default category instead of
+ * the one the request set. The URLs a post had before a change (an unpublish,
+ * a trash, a delete, a slug or term change) are captured before the change,
+ * since the post can no longer produce them afterwards.
  *
  * Under WP-CLI the shutdown step submits directly instead of scheduling.
  * A CLI process has no visitor behind it: the event it would schedule only
@@ -27,8 +35,8 @@
  * or a change away from publish), post_updated (a publish-to-publish save),
  * and save_post (anything that fires save_post for a published post,
  * including code that calls it directly after its own write). The queue is
- * keyed by URL, so the three overlapping on one save collapse to one
- * submission.
+ * keyed by post id and by URL, so the three overlapping on one save collapse
+ * to one submission.
  *
  * What it never submits: drafts, pending, private, or scheduled posts (only
  * a publish transition or a change away from publish counts), any post type
@@ -103,10 +111,22 @@ class Perdita_IndexNow {
 
 	/**
 	 * URLs collected this request, keyed by URL so they dedupe for free.
+	 * These are URLs captured before a change (see $stash) or queued by a
+	 * caller. A published post's current URLs are not built here, see $posts.
 	 *
 	 * @var array<string,bool>
 	 */
 	private $queue = array();
+
+	/**
+	 * Published posts changed this request, keyed by post id so they dedupe
+	 * for free. The value is whether the change was a fresh publish. Their
+	 * URLs are built in flush_queue(), after every save path has finished
+	 * writing terms and meta.
+	 *
+	 * @var array<int,bool>
+	 */
+	private $posts = array();
 
 	/**
 	 * Whether a post publish happened this request (triggers the sitemap ping).
@@ -138,8 +158,9 @@ class Perdita_IndexNow {
 		add_action( 'transition_post_status', array( $this, 'on_transition' ), 10, 3 );
 		add_action( 'post_updated', array( $this, 'on_post_updated' ), 10, 3 );
 		// Priority 20: after the save handlers most plugins register at 10
-		// (term and meta writers included), so should_submit() and the URL
-		// list see the post as it ends up.
+		// (term and meta writers included), so should_submit() sees the post
+		// as they leave it. The URL list waits for flush_queue(), which also
+		// covers writers that run after save_post, such as the REST API.
 		add_action( 'save_post', array( $this, 'on_save_post' ), 20, 3 );
 		add_action( 'before_delete_post', array( $this, 'stash_before_delete' ), 10, 2 );
 		add_action( 'deleted_post', array( $this, 'on_deleted' ), 10, 2 );
@@ -481,8 +502,9 @@ class Perdita_IndexNow {
 	}
 
 	/**
-	 * A status change. Publish (fresh or re-saved) queues the current URLs.
-	 * Leaving publish queues the URLs the post had before the change.
+	 * A status change. Publish (fresh or re-saved) queues the post, whose
+	 * current URLs are built at flush. Leaving publish queues the URLs the
+	 * post had before the change.
 	 *
 	 * @param string  $new_status New status.
 	 * @param string  $old_status Old status.
@@ -499,8 +521,9 @@ class Perdita_IndexNow {
 				unset( $this->stash[ $id ] );
 				return;
 			}
-			$this->queue( self::urls_for_post( $post ), 'publish' !== $old_status );
-			// A slug change on a published post: the old URL changed too.
+			$this->queue_post( $id, 'publish' !== $old_status );
+			// An update of a published post: its old URL and the archives it
+			// sat in before a slug or term change changed too.
 			if ( isset( $this->stash[ $id ] ) ) {
 				$this->queue( $this->stash[ $id ] );
 				unset( $this->stash[ $id ] );
@@ -527,7 +550,7 @@ class Perdita_IndexNow {
 	 */
 	public function on_post_updated( $post_id, $after, $before ) {
 		if ( $after instanceof WP_Post && $before instanceof WP_Post && 'publish' === $after->post_status && 'publish' === $before->post_status && self::should_submit( $after ) ) {
-			$this->queue( self::urls_for_post( $after ) );
+			$this->queue_post( $post_id );
 		}
 		unset( $this->stash[ (int) $post_id ] );
 	}
@@ -536,7 +559,7 @@ class Perdita_IndexNow {
 	 * Any save of a published post. wp_insert_post() fires this after the
 	 * two hooks above, and code that writes a post itself and then fires
 	 * save_post by hand reaches only this one, so it is the catch-all: a
-	 * published, public post queues its URLs on every save path, including
+	 * published, public post is queued on every save path, including
 	 * WP-CLI and wp_update_post() from PHP. Autosaves, revisions, and every
 	 * status but publish are skipped. Duplicates collapse in the queue.
 	 *
@@ -556,7 +579,7 @@ class Perdita_IndexNow {
 		if ( ! $post instanceof WP_Post || 'publish' !== $post->post_status || ! self::should_submit( $post ) ) {
 			return;
 		}
-		$this->queue( self::urls_for_post( $post ) );
+		$this->queue_post( $post->ID );
 	}
 
 	/**
@@ -644,6 +667,22 @@ class Perdita_IndexNow {
 	}
 
 	/**
+	 * Add a published post to this request's queue. Its URLs are built when
+	 * the queue flushes, so terms and meta written after the post hooks (the
+	 * REST controller does that) are in the list.
+	 *
+	 * @param int  $post_id Post id.
+	 * @param bool $ping    Whether this was a fresh publish (sets the sitemap
+	 *                      ping flag on the event).
+	 */
+	public function queue_post( $post_id, $ping = false ) {
+		$id = (int) $post_id;
+		if ( $id > 0 ) {
+			$this->posts[ $id ] = ! empty( $this->posts[ $id ] ) || (bool) $ping;
+		}
+	}
+
+	/**
 	 * Whether this request submits at shutdown instead of scheduling a cron
 	 * event. True under WP-CLI, where no visitor follows to run the event.
 	 *
@@ -666,17 +705,39 @@ class Perdita_IndexNow {
 	 * submits_inline()). Hooked to shutdown, safe to call earlier (the queue
 	 * empties either way).
 	 *
+	 * Each queued post is read back here and goes in only if it is still
+	 * published and still passes should_submit(), so a post trashed, deleted
+	 * or marked noindex later in the same request adds nothing beyond the
+	 * old URLs captured before that change.
+	 *
 	 * @return bool Whether an event is now scheduled, or a submission was
 	 *              made, for this URL set.
 	 */
 	public function flush_queue() {
-		if ( empty( $this->queue ) ) {
+		if ( empty( $this->queue ) && empty( $this->posts ) ) {
 			return false;
 		}
-		$urls        = array_keys( $this->queue );
+		$queued      = $this->queue;
+		$posts       = $this->posts;
 		$ping        = $this->ping;
 		$this->queue = array();
+		$this->posts = array();
 		$this->ping  = false;
+
+		foreach ( $posts as $post_id => $published ) {
+			$post = get_post( $post_id );
+			if ( ! $post instanceof WP_Post || 'publish' !== $post->post_status || ! self::should_submit( $post ) ) {
+				continue;
+			}
+			foreach ( self::urls_for_post( $post ) as $url ) {
+				$queued[ $url ] = true;
+			}
+			$ping = $ping || $published;
+		}
+		if ( empty( $queued ) ) {
+			return false;
+		}
+		$urls = array_keys( $queued );
 
 		if ( ! self::submits_inline() ) {
 			return self::schedule( $urls, $ping );
