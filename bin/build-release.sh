@@ -223,6 +223,26 @@ PY
 	[ "$header_version" = "$declared" ] || die "--wporg: $slug.php declares '$header_version', expected '$declared'"
 	grep -q "define( 'PERDITA_CORE_VERSION', '$version' );" "$work/$slug/$slug.php" || die "--wporg: PERDITA_CORE_VERSION must stay '$version' for the lock-step check"
 	ok "--wporg: Version and Stable tag $declared, PERDITA_CORE_VERSION $version, changelog trimmed to this release"
+	# The readme describes the self-hosted update check (the FAQ's "Does it
+	# phone home?" and the Privacy section). The directory build has no
+	# updater, so it says what that build does: no outbound request on its own.
+	README_FILE="$work/$slug/readme.txt" python3 - <<'PY' || die "--wporg: could not rewrite the readme's update-check passages"
+import os, re, sys
+path = os.environ['README_FILE']
+text = open(path, encoding='utf-8').read()
+swaps = [
+    (r'= Does it phone home\? =\n\n[^\n]*\n', '= Does it phone home? =\n\nNo. The plugin makes no outbound request on its own, and it takes its updates from WordPress.org like any other plugin in the directory.\n'),
+    (r'This plugin makes no outbound request on its own except the update check described below\. Every other service', 'This plugin makes no outbound request on its own. Every service'),
+    (r'\* \*\*Update check \(always on\)\.\*\*[^\n]*\n\n?', ''),
+]
+for pattern, replacement in swaps:
+    text, n = re.subn(pattern, replacement, text, count=1)
+    if n != 1:
+        sys.exit('readme passage not found: ' + pattern)
+open(path, 'w', encoding='utf-8').write(text)
+PY
+	! grep -q 'perdita.ericrosenberg.com' "$work/$slug/readme.txt" || die "--wporg: readme.txt still points at the self-hosted update host"
+	ok "--wporg: readme says the directory build makes no outbound request of its own"
 	# Every remaining reference to the class must sit next to a file_exists()
 	# guard, or a directory install would fatal on the first admin page.
 	while IFS= read -r f; do
