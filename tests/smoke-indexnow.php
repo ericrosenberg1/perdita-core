@@ -15,7 +15,9 @@
  * WP-CLI's `wp post update` and any PHP caller take, and asserts one
  * submission for a published post and none for a draft, a revision, or an
  * autosave. Section 6 also covers the WP-CLI shape, where the queue submits
- * at shutdown instead of scheduling a cron event.
+ * at shutdown instead of scheduling a cron event. Section 6b creates and
+ * updates a post through the REST route, which sets categories after the
+ * post hooks fire, and asserts the category archives in the submitted set.
  *
  * Everything is restored: the option, blog_public, the ping throttle
  * transient, every cron event scheduled, and the temporary post and terms.
@@ -424,6 +426,125 @@ $ok( false === $__in_live->flush_queue() && 0 === count( $__in_requests ), 'inde
 remove_filter( 'perdita_indexnow_submit_inline', '__return_true' );
 $ok( false === Perdita_IndexNow::submits_inline(), 'indexnow: removing the filter restores the cron path' );
 
+/* ------------------------------------------------------------------ */
+/* 6b. A post saved through the REST API                               */
+/* ------------------------------------------------------------------ */
+
+// The posts controller calls wp_insert_post() first and sets the request's
+// categories, tags and meta afterwards, so every post hook fires while a new
+// post still sits in the default category. The URL list is built when the
+// queue flushes, from the post as it ends up, so the category the request
+// asked for is submitted and the default one it sat in for a moment is not.
+// An update through the same route that moves the post to another category
+// submits the new archive and the one it left, and a draft published by an
+// update that carries its categories (how the block editor publishes) submits
+// the archive set in that save. Submitted inline, so the assertions read the
+// payload the stubbed engine received.
+$__in_rest_id       = 0;
+$__in_rest_draft_id = 0;
+$__in_rest_cat      = wp_insert_term( 'Perdita IndexNow REST Category', 'category' );
+$__in_rest_cat      = is_array( $__in_rest_cat ) ? (int) $__in_rest_cat['term_id'] : 0;
+$__in_rest_cat2     = wp_insert_term( 'Perdita IndexNow REST Category Two', 'category' );
+$__in_rest_cat2     = is_array( $__in_rest_cat2 ) ? (int) $__in_rest_cat2['term_id'] : 0;
+$__in_rest_admin    = get_users(
+	array(
+		'role'   => 'administrator',
+		'number' => 1,
+		'fields' => 'ID',
+	)
+);
+
+/**
+ * The URL list of the one IndexNow request the stub recorded, or an empty
+ * array when there was not exactly one.
+ *
+ * @return string[]
+ */
+$__in_sent_urls = function () use ( &$__in_requests ) {
+	if ( 1 !== count( $__in_requests ) ) {
+		return array();
+	}
+	$payload = json_decode( (string) $__in_requests[0]['body'], true );
+	return is_array( $payload ) && isset( $payload['urlList'] ) ? (array) $payload['urlList'] : array();
+};
+
+if ( empty( $__in_rest_admin ) || ! $__in_rest_cat || ! $__in_rest_cat2 ) {
+	$ok( true, 'indexnow: REST saves SKIPPED (no administrator, or the fixture categories could not be created)' );
+} else {
+	$__in_orig_user = get_current_user_id();
+	wp_set_current_user( (int) $__in_rest_admin[0] );
+	add_filter( 'perdita_indexnow_submit_inline', '__return_true' );
+	$__in_snap     = $__in_cron_snapshot();
+	$__in_cat_url  = (string) get_term_link( $__in_rest_cat, 'category' );
+	$__in_cat2_url = (string) get_term_link( $__in_rest_cat2, 'category' );
+
+	$__in_requests = array();
+	$__in_req      = new WP_REST_Request( 'POST', '/wp/v2/posts' );
+	$__in_req->set_body_params(
+		array(
+			'title'      => 'Perdita IndexNow Smoke REST Post',
+			'content'    => 'x',
+			'status'     => 'publish',
+			'categories' => array( $__in_rest_cat ),
+		)
+	);
+	$__in_res     = rest_do_request( $__in_req );
+	$__in_data    = $__in_res->get_data();
+	$__in_rest_id = 201 === $__in_res->get_status() && isset( $__in_data['id'] ) ? (int) $__in_data['id'] : 0;
+	$ok( $__in_rest_id > 0 && array( $__in_rest_cat ) === array_map( 'intval', wp_get_post_categories( $__in_rest_id ) ), 'indexnow: POST /wp/v2/posts creates a published post in the requested category' );
+	$ok( true === $__in_live->flush_queue() && 1 === count( $__in_requests ), 'indexnow: the REST create makes exactly one IndexNow request' );
+	$__in_list = $__in_sent_urls();
+	$ok( in_array( $__in_cat_url, $__in_list, true ), 'indexnow: a post created through the REST API submits the archive of the category the request set' );
+	$ok( $__in_rest_id > 0 && in_array( get_permalink( $__in_rest_id ), $__in_list, true ) && in_array( home_url( '/' ), $__in_list, true ), 'indexnow: the REST create also submits the post URL and the home page' );
+	$__in_default_cat = (int) get_option( 'default_category' );
+	if ( $__in_default_cat && $__in_default_cat !== $__in_rest_cat && term_exists( $__in_default_cat, 'category' ) ) {
+		$ok( ! in_array( (string) get_term_link( $__in_default_cat, 'category' ), $__in_list, true ), 'indexnow: the default category the REST post sat in before its terms were set is not submitted' );
+	}
+
+	$__in_requests = array();
+	$__in_req      = new WP_REST_Request( 'POST', '/wp/v2/posts/' . $__in_rest_id );
+	$__in_req->set_body_params( array( 'categories' => array( $__in_rest_cat2 ) ) );
+	$__in_res = rest_do_request( $__in_req );
+	$ok( 200 === $__in_res->get_status() && array( $__in_rest_cat2 ) === array_map( 'intval', wp_get_post_categories( $__in_rest_id ) ), 'indexnow: POST /wp/v2/posts/<id> moves the post to another category' );
+	$ok( true === $__in_live->flush_queue() && 1 === count( $__in_requests ), 'indexnow: the REST update makes exactly one IndexNow request' );
+	$__in_list = $__in_sent_urls();
+	$ok( in_array( $__in_cat2_url, $__in_list, true ), 'indexnow: a REST update submits the archive of the category the post moved into' );
+	$ok( in_array( $__in_cat_url, $__in_list, true ), 'indexnow: a REST update still submits the archive the post left' );
+
+	// The block editor's publish: a draft that already exists is published
+	// by an update that carries the status and the categories together.
+	$__in_requests = array();
+	$__in_req      = new WP_REST_Request( 'POST', '/wp/v2/posts' );
+	$__in_req->set_body_params(
+		array(
+			'title'   => 'Perdita IndexNow Smoke REST Draft',
+			'content' => 'x',
+			'status'  => 'draft',
+		)
+	);
+	$__in_res           = rest_do_request( $__in_req );
+	$__in_data          = $__in_res->get_data();
+	$__in_rest_draft_id = 201 === $__in_res->get_status() && isset( $__in_data['id'] ) ? (int) $__in_data['id'] : 0;
+	$ok( $__in_rest_draft_id > 0 && false === $__in_live->flush_queue() && 0 === count( $__in_requests ), 'indexnow: a draft created through the REST API submits nothing' );
+	$__in_req = new WP_REST_Request( 'POST', '/wp/v2/posts/' . $__in_rest_draft_id );
+	$__in_req->set_body_params(
+		array(
+			'status'     => 'publish',
+			'categories' => array( $__in_rest_cat2 ),
+		)
+	);
+	$__in_res = rest_do_request( $__in_req );
+	$ok( 200 === $__in_res->get_status() && 'publish' === get_post_status( $__in_rest_draft_id ), 'indexnow: POST /wp/v2/posts/<id> publishes the draft with a category, the way the block editor does' );
+	$ok( true === $__in_live->flush_queue() && 1 === count( $__in_requests ), 'indexnow: that publish makes exactly one IndexNow request' );
+	$__in_list = $__in_sent_urls();
+	$ok( in_array( $__in_cat2_url, $__in_list, true ) && in_array( get_permalink( $__in_rest_draft_id ), $__in_list, true ), 'indexnow: a draft published from the block editor submits its URL and the archive of the category set in the same save' );
+
+	$ok( array() === $__in_new_events( $__in_snap ), 'indexnow: the REST saves submitted inline schedule no cron event' );
+
+	remove_filter( 'perdita_indexnow_submit_inline', '__return_true' );
+	wp_set_current_user( $__in_orig_user );
+}
+
 remove_filter( 'pre_http_request', $__in_stub, 10 );
 
 /* ------------------------------------------------------------------ */
@@ -456,8 +577,15 @@ $ok( false === has_action( 'save_post', array( $__in_live, 'on_save_post' ) ), '
 
 wp_delete_post( $__in_draft_id, true );
 wp_delete_post( $__in_post_id, true );
-if ( $__in_parent_cat ) {
-	wp_delete_term( $__in_parent_cat, 'category' );
+foreach ( array( $__in_rest_id, $__in_rest_draft_id ) as $__in_rest_post ) {
+	if ( $__in_rest_post ) {
+		wp_delete_post( $__in_rest_post, true );
+	}
+}
+foreach ( array( $__in_parent_cat, $__in_rest_cat, $__in_rest_cat2 ) as $__in_term_id ) {
+	if ( $__in_term_id ) {
+		wp_delete_term( $__in_term_id, 'category' );
+	}
 }
 
 foreach ( array_diff_key( $__in_cron_snapshot(), $__in_cron_before ) as $__in_leftover ) {
