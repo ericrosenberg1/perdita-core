@@ -462,10 +462,11 @@ class Perdita_Analytics {
 	 *
 	 * Order matters twice. The bootstrap runs before gtag.js and any other
 	 * Google tag loads, so consent has its default before anything can
-	 * measure. And a visitor's stored Accept is applied BEFORE gtag('config'),
-	 * because config sends the page_view: a page_view sent while analytics
-	 * storage is denied is one GA4 never reports. Global Privacy Control, and
-	 * Do Not Track when the site respects it, keep analytics off.
+	 * measure. And the default already carries a visitor's stored choice,
+	 * ahead of gtag('config'), because config sends the page_view: a
+	 * page_view sent while analytics storage is denied is one GA4 never
+	 * reports. Global Privacy Control, and Do Not Track when the site
+	 * respects it, keep analytics off.
 	 */
 	public function print_consent_bootstrap() {
 		if ( ! $this->consent_active() ) {
@@ -482,7 +483,9 @@ class Perdita_Analytics {
 	}
 
 	/**
-	 * The bootstrap script's source, read once per request.
+	 * The bootstrap script's source, read once per request. The file's leading
+	 * docblock documents it for developers and is left out of the page, where
+	 * it would add about 2.5 KB to every response.
 	 *
 	 * @return string
 	 */
@@ -490,6 +493,7 @@ class Perdita_Analytics {
 		static $js = null;
 		if ( null === $js ) {
 			$js = (string) file_get_contents( __DIR__ . '/assets/consent-bootstrap.js' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- A file shipped in this plugin, inlined so it runs before gtag.js.
+			$js = (string) preg_replace( '#\A\s*/\*\*.*?\*/\s*#s', '', $js, 1 );
 		}
 		return $js;
 	}

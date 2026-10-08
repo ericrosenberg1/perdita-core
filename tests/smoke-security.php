@@ -437,6 +437,26 @@ if ( ! file_exists( PERDITA_CORE_DIR . 'inc/class-perdita-core-updater.php' ) ) 
 	$psx_offered = $psx_updater->check( clone $psx_tr );
 	$ok( empty( $psx_offered->response[ $psx_base ] ), 'updater: check() does not offer an update whose manifest is unsigned' );
 
+	// The beta label (0.19.6-beta): beta sorts above alpha in version_compare().
+	$psx_label = function ( $installed, $offered ) use ( $psx_updater, $psx_set, $psx_sign, $psx_pkg, $psx_good_sum, $psx_base ) {
+		$psx_set(
+			array(
+				'version'      => $offered,
+				'download_url' => $psx_pkg,
+				'checksum'     => $psx_good_sum,
+				'signature'    => $psx_sign( $offered, $psx_good_sum ),
+			)
+		);
+		$tr            = new stdClass();
+		$tr->checked   = array( $psx_base => $installed );
+		$tr->response  = array();
+		$tr->no_update = array();
+		$tr            = $psx_updater->check( $tr );
+		return isset( $tr->response[ $psx_base ] ) ? $tr->response[ $psx_base ]->new_version : '';
+	};
+	$ok( '0.19.6-beta' === $psx_label( '0.19.5-alpha', '0.19.6-beta' ), 'updater: a signed beta is offered to a site on an earlier alpha' );
+	$ok( '' === $psx_label( '0.19.6-beta', '0.19.6-alpha' ) && '' === $psx_label( '0.19.6-beta', '0.19.6-beta' ), 'updater: an alpha is never offered over a beta, nor a beta over itself' );
+
 	// A wordpress.org offer for this plugin (the directory build, which has no
 	// updater) never reaches a self-hosted install, even when our manifest is
 	// unreachable and check() returns before offering anything of its own.
