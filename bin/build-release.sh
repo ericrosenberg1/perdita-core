@@ -18,7 +18,12 @@
 # the directory, and a second updater bolted on top of that is both redundant
 # and a guidelines violation. That build gets its own filename and no
 # manifest, so it can never be mistaken for the self-hosted artifact or
-# checked against its checksum.
+# checked against its checksum. It also declares the release without its
+# pre-release label (0.19.6-beta ships to the directory as 0.19.6): the
+# plugin uploader rejects any Version with characters other than digits and
+# periods. PERDITA_CORE_VERSION keeps the lock-step string, because the
+# theme and Pro compare against it. The readme.txt changelog keeps the
+# current entry only, under the declared version, as the theme's does.
 #
 set -euo pipefail
 
@@ -111,6 +116,14 @@ const_version="$(git show HEAD:${slug}.php | sed -n "s/.*PERDITA_CORE_VERSION'[[
 	|| die "version drift: the plugin header says '$version' but PERDITA_CORE_VERSION says '$const_version'"
 ok "version $version (plugin header and PERDITA_CORE_VERSION agree)"
 
+declared="$version"
+if [ "$wporg" = "1" ]; then
+	declared="${version%%-*}"
+	printf '%s' "$declared" | grep -Eq '^[0-9]+\.[0-9]+(\.[0-9]+)?$' \
+		|| die "cannot turn '$version' into the digits-and-periods Version the plugin directory accepts (got '$declared')"
+	ok "wporg build declares Version $declared"
+fi
+
 # --- 2c. lock step with the sibling checkouts --------------------------------
 # The theme, Perdita Core, and Perdita Pro ship as one release under one
 # version number, and each warns in wp-admin when the installed versions
@@ -192,6 +205,24 @@ if [ "$wporg" = "1" ]; then
 	perl -ni -e 'print unless /^\s*\*\s*Update URI:/' "$work/$slug/$slug.php"
 	! grep -q 'Update URI' "$work/$slug/$slug.php" || die "--wporg: $slug.php still has an Update URI header"
 	ok "--wporg: Update URI header removed"
+	perl -pi -e "s/^(\s*\*\s*Version:\s*)\S+/\${1}$declared/" "$work/$slug/$slug.php"
+	perl -pi -e "s/^(Stable tag:\s*)\S+/\${1}$declared/" "$work/$slug/readme.txt"
+	README_FILE="$work/$slug/readme.txt" RELEASE_VERSION="$version" DECLARED_VERSION="$declared" python3 - <<'PY' || die "--wporg: could not trim the readme.txt changelog"
+import os, re, sys
+path = os.environ['README_FILE']
+text = open(path, encoding='utf-8').read()
+m = re.search(r'(== Changelog ==\n\n)= ' + re.escape(os.environ['RELEASE_VERSION']) + r' =\n(.*?)(?=\n= |\n== |\Z)', text, re.S)
+if not m:
+    sys.exit('no changelog entry for ' + os.environ['RELEASE_VERSION'])
+end = text.find('\n== ', m.end())
+end = len(text) if end < 0 else end + 1
+text = text[:m.start()] + m.group(1) + '= ' + os.environ['DECLARED_VERSION'] + ' =\n' + m.group(2).rstrip('\n') + '\n\n' + text[end:]
+open(path, 'w', encoding='utf-8').write(text)
+PY
+	header_version="$(sed -n 's/^[[:space:]]*\*[[:space:]]*Version:[[:space:]]*//p' "$work/$slug/$slug.php" | head -1 | tr -d '\r' | sed 's/[[:space:]]*$//')"
+	[ "$header_version" = "$declared" ] || die "--wporg: $slug.php declares '$header_version', expected '$declared'"
+	grep -q "define( 'PERDITA_CORE_VERSION', '$version' );" "$work/$slug/$slug.php" || die "--wporg: PERDITA_CORE_VERSION must stay '$version' for the lock-step check"
+	ok "--wporg: Version and Stable tag $declared, PERDITA_CORE_VERSION $version, changelog trimmed to this release"
 	# Every remaining reference to the class must sit next to a file_exists()
 	# guard, or a directory install would fatal on the first admin page.
 	while IFS= read -r f; do
@@ -265,7 +296,7 @@ fi
 # readme.txt lists older versions in its Changelog on purpose; only the Stable
 # tag has to agree with the plugin header, and wordpress.org rejects a mismatch.
 stable="$(sed -n 's/^Stable tag:[[:space:]]*//p' "$work/$slug/readme.txt" | head -1 | tr -d '\r')"
-[ "$stable" = "$version" ] || die "readme.txt Stable tag is '$stable' but the plugin header Version is '$version'"
+[ "$stable" = "$declared" ] || die "readme.txt Stable tag is '$stable' but the plugin header Version is '$declared'"
 ok "readme.txt Stable tag matches"
 
 # 4d. syntax-check everything we are about to ship, if a PHP is available.
