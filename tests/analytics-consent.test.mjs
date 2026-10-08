@@ -4,10 +4,12 @@
 // The Analytics module's head bootstrap decides whether a page_view counts.
 // Before 0.19.3-alpha it applied a stored Accept after gtag('config'), and
 // config sends the page_view, so every page_view went out denied, even for
-// visitors who had accepted, and GA4 dropped them. These tests execute the
-// shipped scripts and pin the order plus the consent rules: opt-in and
-// opt-out defaults, privacy signals, the Simple Consent Manager cookie
-// migration, consent-only operation, and the banner's controls.
+// visitors who had accepted, and GA4 dropped them. Since 0.19.6-beta the
+// stored choice goes into the consent default itself, the pattern Nonprofit
+// Manager's site uses, so nothing sits between the default and config. These
+// tests execute the shipped scripts and pin the order plus the consent rules:
+// opt-in and opt-out defaults, privacy signals, the Simple Consent Manager
+// cookie migration, consent-only operation, and the banner's controls.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -135,15 +137,15 @@ function withBanner(p, { prefs = true } = {}) {
 
 /* ---------- opt-in (the default) ---------- */
 
-test('opt-in: a stored Accept is applied before config sends the page_view', () => {
+test('opt-in: a stored Accept is in the consent default, before config sends the page_view', () => {
   const { calls, attrs } = page({ cookie: 'foo=1; perdita_consent=granted' });
   const c = calls();
   const defaultAt = indexOf(c, (x) => x[0] === 'consent' && x[1] === 'default');
-  const updateAt = indexOf(c, (x) => x[0] === 'consent' && x[1] === 'update');
   const configAt = indexOf(c, (x) => x[0] === 'config');
-  assert.ok(defaultAt >= 0 && updateAt > defaultAt, 'default, then the stored choice');
-  assert.ok(configAt > updateAt, 'the stored choice must be in place before config');
-  assert.equal(consent(c, 'update')[0].analytics_storage, 'granted');
+  assert.equal(defaultAt, 0, 'the consent default is the first command in the queue');
+  assert.ok(configAt > defaultAt, 'the stored choice must be in place before config');
+  assert.equal(consent(c, 'default')[0].analytics_storage, 'granted');
+  assert.equal(consent(c, 'update').length, 0, 'no update between the default and config');
   assert.equal(attrs['data-perdita-consent'], 'granted');
 });
 
@@ -169,17 +171,20 @@ test('opt-in: a stored Decline stays denied', () => {
 
 test('Global Privacy Control outranks a stored Accept, even with DNT respect off', () => {
   const { calls, attrs } = page({ cookie: 'perdita_consent=granted', gpc: true, respectDnt: false });
+  assert.equal(consent(calls(), 'default')[0].analytics_storage, 'denied');
   assert.equal(consent(calls(), 'update').length, 0);
   assert.equal(attrs['data-perdita-consent'], 'dnt');
 });
 
 test('Do Not Track outranks a stored Accept when the site respects it', () => {
   const on = page({ cookie: 'perdita_consent=granted', dnt: '1' });
+  assert.equal(consent(on.calls(), 'default')[0].analytics_storage, 'denied');
   assert.equal(consent(on.calls(), 'update').length, 0);
   assert.equal(on.attrs['data-perdita-consent'], 'dnt');
 
   const off = page({ cookie: 'perdita_consent=granted', dnt: '1', respectDnt: false });
-  assert.equal(consent(off.calls(), 'update')[0].analytics_storage, 'granted');
+  assert.equal(consent(off.calls(), 'default')[0].analytics_storage, 'granted');
+  assert.equal(consent(off.calls(), 'update').length, 0);
 });
 
 test('ad signals stay denied by default, by a stored Accept or by the banner, in both models', () => {
@@ -205,8 +210,8 @@ test('every consent command sets all four signals', () => {
 
 test('ad signals follow analytics when the site turns them on', () => {
   const stored = page({ cookie: 'perdita_consent=granted', adSignals: true });
-  const u = consent(stored.calls(), 'update')[0];
-  for (const k of ALL_FOUR) assert.equal(u[k], 'granted', k);
+  const d = consent(stored.calls(), 'default')[0];
+  for (const k of ALL_FOUR) assert.equal(d[k], 'granted', k);
 
   const gpc = page({ cookie: 'perdita_consent=granted', adSignals: true, gpc: true });
   assert.ok(!grantsAds(gpc.calls()), 'GPC keeps ad signals off too');
@@ -337,8 +342,9 @@ test('scm_consent=declined is honored and copied into perdita_consent', () => {
 test('scm_consent=accepted counts as an Accept, before config', () => {
   const p = page({ cookie: 'scm_consent=accepted' });
   const c = p.calls();
-  assert.equal(consent(c, 'update')[0].analytics_storage, 'granted');
-  assert.ok(indexOf(c, (x) => x[1] === 'update') < indexOf(c, (x) => x[0] === 'config'));
+  assert.equal(consent(c, 'default')[0].analytics_storage, 'granted');
+  assert.equal(consent(c, 'update').length, 0);
+  assert.ok(indexOf(c, (x) => x[1] === 'default') < indexOf(c, (x) => x[0] === 'config'));
   assert.equal(p.jar.get('perdita_consent'), 'granted');
 });
 
@@ -372,9 +378,12 @@ test('no measurement ID: consent defaults still apply, and nothing loads or conf
   assert.equal(typeof p.window.gtag, 'function', 'gtag is defined for the other tags');
 });
 
-test('no measurement ID, opt-in: a stored Accept still updates before any tag', () => {
+test('no measurement ID, opt-in: a stored Accept is in the default, before any other tag', () => {
   const p = page({ id: '', cookie: 'perdita_consent=granted' });
-  assert.equal(consent(p.calls(), 'update')[0].analytics_storage, 'granted');
+  const d = consent(p.calls(), 'default')[0];
+  assert.equal(d.analytics_storage, 'granted');
+  assert.equal(d.wait_for_update, 500);
+  assert.equal(consent(p.calls(), 'update').length, 0);
 });
 
 test('no measurement ID: Accept on the banner does not send a page_view of its own', () => {
@@ -550,4 +559,62 @@ test('the banner works without the preferences button', () => {
   const b = withBanner(p, { prefs: false });
   b.accept();
   assert.equal(b.bannerShown(), false);
+});
+
+/* ---------- every path: the default comes first, config never precedes it ---------- */
+
+test('every path: one consent default, first in the queue, and no update or config ahead of it', () => {
+  const cookies = ['', 'perdita_consent=granted', 'perdita_consent=denied', 'scm_consent=accepted', 'scm_consent=declined', 'perdita_consent=bogus'];
+  const privacy = [{}, { gpc: true }, { dnt: '1' }, { dnt: '1', respectDnt: false }];
+  let paths = 0;
+  for (const model of ['opt_in', 'opt_out']) {
+    for (const id of ['G-TEST123', '']) {
+      for (const cookie of cookies) {
+        for (const sig of privacy) {
+          for (const scmBanner of [false, true]) {
+            for (const banner of [false, true]) {
+              const opts = { model, id, cookie, scmBanner, ...sig };
+              const p = page(opts);
+              if (banner) withBanner(p);
+              const c = p.calls();
+              const label = JSON.stringify({ ...opts, banner });
+              const defaults = c.filter((x) => x[0] === 'consent' && x[1] === 'default');
+              const configAt = indexOf(c, (x) => x[0] === 'config');
+              const updateAt = indexOf(c, (x) => x[0] === 'consent' && x[1] === 'update');
+              assert.equal(defaults.length, 1, `${label}: exactly one consent default`);
+              assert.deepEqual(c[0].slice(0, 2), ['consent', 'default'], `${label}: the default is the first command`);
+              assert.equal(updateAt, -1, `${label}: page load sends no consent update, the default already carries the state`);
+              assert.equal(c.filter((x) => x[0] === 'config').length, id ? 1 : 0, `${label}: config runs once with an ID, never without`);
+              if (id) {
+                assert.ok(configAt > indexOf(c, (x) => x[0] === 'js'), `${label}: js before config`);
+                assert.equal(
+                  p.window.perditaAnalytics.pvGranted,
+                  defaults[0][2].analytics_storage === 'granted',
+                  `${label}: pvGranted matches the state config ran under`,
+                );
+              }
+              paths++;
+            }
+          }
+        }
+      }
+    }
+  }
+  assert.equal(paths, 384);
+});
+
+test('the banner never sends config, and its choices come after the default and config', () => {
+  for (const model of ['opt_in', 'opt_out']) {
+    for (const choose of ['accept', 'decline']) {
+      const p = page({ model });
+      const b = withBanner(p);
+      b[choose]();
+      const c = p.calls();
+      assert.equal(c.filter((x) => x[0] === 'config').length, 1, `${model} ${choose}: config only from the bootstrap`);
+      const configAt = indexOf(c, (x) => x[0] === 'config');
+      c.forEach((x, i) => {
+        if (x[0] === 'consent' && x[1] === 'update') assert.ok(i > configAt, `${model} ${choose}: a banner update follows config`);
+      });
+    }
+  }
 });

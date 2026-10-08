@@ -323,8 +323,10 @@ $an_clean = Perdita_Analytics::sanitize( array( 'measurement_id' => '<script>x</
 $ok( '' === $an_clean['measurement_id'], 'analytics: sanitize() drops an invalid id rather than storing it (never printed into the page)' );
 
 // --- analytics: the consent bootstrap (0.19.3-alpha regression) ---
-// config sends the page_view, so a stored Accept has to be applied before it,
-// or every page_view goes out denied and GA4 drops it.
+// config sends the page_view, so a stored Accept has to be in place before it,
+// or every page_view goes out denied and GA4 drops it. Since 0.19.6-beta the
+// choice rides in the consent default itself (tests/smoke-analytics-order.php
+// checks the rendered page on every path).
 $__an_orig = get_option( Perdita_Analytics::OPTION );
 $__an      = ( new ReflectionClass( 'Perdita_Analytics' ) )->newInstanceWithoutConstructor();
 $__an_head = static function () use ( $__an ) {
@@ -334,10 +336,10 @@ $__an_head = static function () use ( $__an ) {
 };
 update_option( Perdita_Analytics::OPTION, array( 'measurement_id' => 'G-SMOKE123' ) );
 $__an_out    = $__an_head();
-$__an_update = strpos( $__an_out, "gtag( 'consent', 'update'" );
+$__an_def    = strpos( $__an_out, "gtag( 'consent', 'default'" );
 $__an_config = strpos( $__an_out, "gtag( 'config'" );
-$ok( false !== $__an_update && false !== $__an_config && $__an_update < $__an_config, 'analytics: the stored consent choice is applied before gtag(config) sends the page_view' );
-$ok( strpos( $__an_out, "gtag( 'consent', 'default'" ) < $__an_update, 'analytics: consent defaults to denied before the stored choice is applied' );
+$ok( false !== $__an_def && false !== $__an_config && $__an_def < $__an_config, 'analytics: the consent default, which carries a stored choice, comes before gtag(config) sends the page_view' );
+$ok( false === strpos( $__an_out, "gtag( 'consent', 'update'" ), 'analytics: the bootstrap sends no consent update before config, the stored choice is in the default' );
 $ok( false !== strpos( $__an_out, '"id":"G-SMOKE123"' ) && false !== strpos( $__an_out, '"respectDnt":true' ), 'analytics: the bootstrap config carries the measurement ID and the DNT setting' );
 $ok( false !== strpos( $__an_out, 'globalPrivacyControl' ), 'analytics: the bootstrap checks Global Privacy Control' );
 $ok( 1 === substr_count( $__an_out, '<script' ), 'analytics: the bootstrap prints as one inline script' );

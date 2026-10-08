@@ -5,14 +5,16 @@
  * after window.perditaAnalytics = { id, model, adSignals, respectDnt }
  * (print_consent_bootstrap()).
  *
- * Opt-in (model 'opt_in'): every storage type starts denied. A visitor's
- * stored Accept turns analytics on BEFORE gtag('config'), because config
- * sends the page_view and a page_view sent while denied is one GA4 never
- * reports. Opt-out (model 'opt_out'): analytics starts granted unless the
- * visitor opted out. In both, Global Privacy Control always keeps analytics
- * off, and so does Do Not Track when the site respects it. The three ad
- * signals follow analytics only when adSignals is on, and are denied
- * otherwise. Every consent command sets all four.
+ * Opt-in (model 'opt_in'): every storage type starts denied unless the
+ * visitor accepted on an earlier page. Opt-out (model 'opt_out'): analytics
+ * starts granted unless the visitor opted out. In both, the visitor's state
+ * goes into the consent default itself, the first command in the queue and
+ * ahead of gtag('config'). config sends the page_view, and a page_view sent
+ * while denied is one GA4 never reports, so no later update can fix it.
+ * Global Privacy Control always keeps analytics off, and so does Do Not
+ * Track when the site respects it. The three ad signals follow analytics
+ * only when adSignals is on, and are denied otherwise. Every consent command
+ * sets all four.
  *
  * With no id, this manages consent for Google tags other plugins add and
  * loads nothing itself. A choice stored by Simple Consent Manager
@@ -86,18 +88,15 @@
 		return { analytics_storage: s, ad_storage: a, ad_user_data: a, ad_personalization: a };
 	}
 
-	// Opt-out starts at the visitor's state. Opt-in starts denied and applies
-	// a stored Accept as an update, both before config below.
-	var initial = signals( optOut ? state : 'denied' );
+	// The default carries the visitor's state in both models, a stored choice
+	// included, so config below runs under it with no update in between.
+	var initial = signals( state );
 	if ( ! id ) {
 		// Other plugins' tags may load before anything else runs here.
 		initial.wait_for_update = 500;
 	}
 	gtag( 'consent', 'default', initial );
 	gtag( 'set', 'ads_data_redaction', true );
-	if ( ! optOut && 'granted' === state ) {
-		gtag( 'consent', 'update', signals( 'granted' ) );
-	}
 	if ( id ) {
 		gtag( 'js', new Date() );
 		gtag( 'config', id );
