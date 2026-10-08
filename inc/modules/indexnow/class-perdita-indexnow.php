@@ -19,7 +19,10 @@
  * URL list built at hook time would carry the default category instead of
  * the one the request set. The URLs a post had before a change (an unpublish,
  * a trash, a delete, a slug or term change) are captured before the change,
- * since the post can no longer produce them afterwards.
+ * since the post can no longer produce them afterwards. A trashed post
+ * submits the permalink it had while published: wp_trash_post() renames it
+ * to <slug>__trashed before pre_post_update fires, and that URL never
+ * existed.
  *
  * Under WP-CLI the shutdown step submits directly instead of scheduling.
  * A CLI process has no visitor behind it: the event it would schedule only
@@ -497,7 +500,7 @@ class Perdita_IndexNow {
 		unset( $data );
 		$post = get_post( $post_id );
 		if ( $post && 'publish' === $post->post_status && self::should_submit( $post ) ) {
-			$this->stash[ (int) $post_id ] = self::urls_for_post( $post );
+			$this->stash[ (int) $post_id ] = self::urls_for_post( $post, self::public_permalink( $post ) );
 		}
 	}
 
@@ -592,7 +595,7 @@ class Perdita_IndexNow {
 	public function stash_before_delete( $post_id, $post = null ) {
 		$post = $post instanceof WP_Post ? $post : get_post( $post_id );
 		if ( $post && 'publish' === $post->post_status && self::should_submit( $post ) ) {
-			$this->stash[ (int) $post_id ] = self::urls_for_post( $post );
+			$this->stash[ (int) $post_id ] = self::urls_for_post( $post, self::public_permalink( $post ) );
 		}
 	}
 
@@ -631,9 +634,13 @@ class Perdita_IndexNow {
 	}
 
 	/**
-	 * The permalink a post would have if it were published, for a post that
-	 * just left that status (a draft's permalink is a ?p= form and useless
-	 * to an engine).
+	 * The permalink a post has, or had, while published, for a post that is
+	 * leaving that status (a draft's permalink is a ?p= form and useless to
+	 * an engine). A post on its way to the trash already carries its
+	 * __trashed slug when pre_post_update fires, because wp_insert_post()
+	 * writes it to the database first, so the slug comes back from the
+	 * _wp_desired_post_slug meta WordPress stores beside it, or from
+	 * stripping the suffix when that meta is missing.
 	 *
 	 * @param WP_Post $post Post.
 	 * @return string
@@ -641,6 +648,10 @@ class Perdita_IndexNow {
 	private static function public_permalink( WP_Post $post ) {
 		$copy              = clone $post;
 		$copy->post_status = 'publish';
+		if ( '__trashed' === substr( (string) $copy->post_name, -9 ) ) {
+			$desired         = (string) get_post_meta( $post->ID, '_wp_desired_post_slug', true );
+			$copy->post_name = '' !== $desired ? $desired : substr( (string) $copy->post_name, 0, -9 );
+		}
 		return (string) get_permalink( $copy );
 	}
 

@@ -27,17 +27,18 @@ Open, waiting on Eric (don't change without his answer):
 
 - Analytics: the consent default carries the visitor's stored choice and runs before every `gtag('config')`, with no consent update on page load. `tests/smoke-analytics-order.php` renders the actual head and footer for six settings paths and runs the inline scripts in node. A blank measurement ID with "manage consent for other Google tags" off prints nothing, and a live site's mu-plugin depends on that.
 - Analytics adopts Simple Consent Manager's settings once on `admin_init` for a site that never chose a consent model, and unhooks SCM's head script while Perdita's consent layer is on.
-- IndexNow: changes queue during the request and go out at shutdown as one cron event. Under WP-CLI they submit inline at shutdown (filter `perdita_indexnow_submit_inline`), and `save_post` at priority 20 is the catch-all for every save path. A published post queues by id and its URLs are built at flush, because the REST controller (and so the block editor) sets categories, tags and meta after `wp_insert_post()` fires the post hooks. Old URLs (unpublish, trash, delete, slug or term change) are still captured before the change.
+- IndexNow: changes queue during the request and go out at shutdown as one cron event. Under WP-CLI they submit inline at shutdown (filter `perdita_indexnow_submit_inline`), and `save_post` at priority 20 is the catch-all for every save path. A published post queues by id and its URLs are built at flush, because the REST controller (and so the block editor) sets categories, tags and meta after `wp_insert_post()` fires the post hooks. Old URLs (unpublish, trash, delete, slug or term change) are still captured before the change. A trashed post submits the permalink it had while published, never the `__trashed` slug WordPress renames it to before `pre_post_update`.
 
 ## Pending changelog
 
 Fixes merged to main since the last release go here, one `readme.txt` line each. At the next lock-step bump, move them into that version's changelog entry and empty this list.
 
 - Fix: IndexNow submits the category and tag archives of posts published from the block editor or the REST API.
+- Fix: IndexNow submits a trashed post's original URL instead of its `__trashed` slug.
 
 ## Tests
 
 - `bash tests/run.sh /path/to/wordpress` (see `tests/README.md`). The node tests (`*.test.mjs`) run from `smoke.php` when node is on PATH.
-- 818 passing at 0.19.6-beta on WordPress 7.1.3 with PHP 8.5 and 8.4, zero notices. 832 on main since the IndexNow REST fix.
+- 818 passing at 0.19.6-beta on WordPress 7.1.3 with PHP 8.5 and 8.4, zero notices. 842 on main since the IndexNow trash fix, with an empty debug log.
 - Plugin Check 2.1.0 on the `--wporg` zip: 0 errors, 81 warnings. Those are the baseline. WPCS reports 278 errors and 217 warnings on the directory build, all pre-existing, so compare against those numbers rather than zero.
 - Rig recipes are in the Mac's memory files `reference_perdita_review_tooling` and `reference_headless_wp_test_rig`.

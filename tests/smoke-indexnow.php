@@ -18,6 +18,8 @@
  * at shutdown instead of scheduling a cron event. Section 6b creates and
  * updates a post through the REST route, which sets categories after the
  * post hooks fire, and asserts the category archives in the submitted set.
+ * Section 6c trashes a published post and asserts that its old permalink is
+ * submitted, never the __trashed slug WordPress renames it to.
  *
  * Everything is restored: the option, blog_public, the ping throttle
  * transient, every cron event scheduled, and the temporary post and terms.
@@ -545,6 +547,72 @@ if ( empty( $__in_rest_admin ) || ! $__in_rest_cat || ! $__in_rest_cat2 ) {
 	wp_set_current_user( $__in_orig_user );
 }
 
+/* ------------------------------------------------------------------ */
+/* 6c. A published post moved to the trash                             */
+/* ------------------------------------------------------------------ */
+
+// wp_trash_post() renames the post to <slug>__trashed in the database before
+// wp_insert_post() fires pre_post_update, so a URL list built from the post
+// at that moment points at a slug that never existed while it was public.
+// The engine is told about the permalink the post had while published, and
+// never about a __trashed URL. Pretty permalinks are switched on for the
+// section, since a plain ?p= link carries no slug to get wrong.
+$__in_orig_permalinks = (string) get_option( 'permalink_structure' );
+if ( '' === $__in_orig_permalinks ) {
+	$GLOBALS['wp_rewrite']->set_permalink_structure( '/%postname%/' );
+}
+add_filter( 'perdita_indexnow_submit_inline', '__return_true' );
+$__in_snap     = $__in_cron_snapshot();
+$__in_trash_id = wp_insert_post(
+	array(
+		'post_title'   => 'Perdita IndexNow Smoke Trash',
+		'post_name'    => 'perdita-indexnow-smoke-trash',
+		'post_content' => 'x',
+		'post_status'  => 'publish',
+		'post_type'    => 'post',
+	)
+);
+if ( $__in_parent_cat ) {
+	wp_set_post_terms( $__in_trash_id, array( $__in_parent_cat ), 'category' );
+}
+$__in_live->flush_queue();
+$__in_trash_url = (string) get_permalink( $__in_trash_id );
+$__in_no_trash  = function ( array $urls ) {
+	return array() === preg_grep( '/__trashed/', $urls );
+};
+
+$__in_requests = array();
+$ok( $__in_trash_id > 0 && false === strpos( $__in_trash_url, '?p=' ) && false !== wp_trash_post( $__in_trash_id ), 'indexnow: a published post with a pretty permalink moves to the trash' );
+$ok( '__trashed' === substr( (string) get_post_field( 'post_name', $__in_trash_id ), -9 ), 'indexnow: WordPress gave the trashed post its __trashed slug' );
+$ok( true === $__in_live->flush_queue() && 1 === count( $__in_requests ), 'indexnow: trashing a published post makes exactly one IndexNow request' );
+$__in_list = $__in_sent_urls();
+$ok( in_array( $__in_trash_url, $__in_list, true ), 'indexnow: a trashed post submits the permalink it had while published, so the engine recrawls it and drops it' );
+$ok( ! empty( $__in_list ) && $__in_no_trash( $__in_list ), 'indexnow: no URL submitted for a trashed post carries the __trashed slug' );
+$ok( in_array( home_url( '/' ), $__in_list, true ) && ( ! $__in_parent_cat || in_array( (string) get_term_link( $__in_parent_cat, 'category' ), $__in_list, true ) ), 'indexnow: the trash also submits the home page and the archives the post sat in' );
+
+// The fallback for a trash that reaches transition_post_status with nothing
+// stashed (no pre_post_update before it), with and without the desired slug
+// WordPress stores beside the __trashed one.
+$__in_requests = array();
+$__in_live->on_transition( 'trash', 'publish', get_post( $__in_trash_id ) );
+$ok( true === $__in_live->flush_queue() && in_array( $__in_trash_url, $__in_sent_urls(), true ) && $__in_no_trash( $__in_sent_urls() ), 'indexnow: with nothing stashed, a publish-to-trash transition still submits the old permalink and no __trashed URL' );
+delete_post_meta( $__in_trash_id, '_wp_desired_post_slug' );
+$__in_requests = array();
+$__in_live->on_transition( 'trash', 'publish', get_post( $__in_trash_id ) );
+$ok( true === $__in_live->flush_queue() && in_array( $__in_trash_url, $__in_sent_urls(), true ) && $__in_no_trash( $__in_sent_urls() ), 'indexnow: without the stored desired slug, the __trashed suffix is stripped to rebuild the old permalink' );
+
+// Deleting it for good from the trash adds nothing: the engine already has
+// the old URL from the trash.
+$__in_requests = array();
+wp_delete_post( $__in_trash_id, true );
+$ok( null === get_post( $__in_trash_id ) && false === $__in_live->flush_queue() && 0 === count( $__in_requests ), 'indexnow: permanently deleting a post from the trash submits nothing more' );
+$ok( array() === $__in_new_events( $__in_snap ), 'indexnow: the trash checks submitted inline schedule no cron event' );
+
+remove_filter( 'perdita_indexnow_submit_inline', '__return_true' );
+if ( '' === $__in_orig_permalinks ) {
+	$GLOBALS['wp_rewrite']->set_permalink_structure( '' );
+}
+
 remove_filter( 'pre_http_request', $__in_stub, 10 );
 
 /* ------------------------------------------------------------------ */
@@ -577,8 +645,8 @@ $ok( false === has_action( 'save_post', array( $__in_live, 'on_save_post' ) ), '
 
 wp_delete_post( $__in_draft_id, true );
 wp_delete_post( $__in_post_id, true );
-foreach ( array( $__in_rest_id, $__in_rest_draft_id ) as $__in_rest_post ) {
-	if ( $__in_rest_post ) {
+foreach ( array( $__in_rest_id, $__in_rest_draft_id, $__in_trash_id ) as $__in_rest_post ) {
+	if ( $__in_rest_post && get_post( $__in_rest_post ) ) {
 		wp_delete_post( $__in_rest_post, true );
 	}
 }
