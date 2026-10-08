@@ -24,7 +24,10 @@ if ( ! class_exists( 'Perdita_Analytics' ) ) {
 }
 
 global $wp_filter, $wp_scripts, $wp_styles;
-$__ao_hooks   = array( 'wp_head', 'wp_footer', 'wp_enqueue_scripts', 'wp_print_footer_scripts' );
+// wp_print_styles is reset too: core hooks its deprecated print_emoji_styles
+// there, and only wp_enqueue_emoji_styles on wp_enqueue_scripts (reset here)
+// unhooks it, so leaving it would log a core deprecation on every render.
+$__ao_hooks   = array( 'wp_head', 'wp_footer', 'wp_enqueue_scripts', 'wp_print_styles', 'wp_print_footer_scripts' );
 $__ao_saved   = array();
 foreach ( $__ao_hooks as $__ao_hook ) {
 	$__ao_saved[ $__ao_hook ] = isset( $wp_filter[ $__ao_hook ] ) ? $wp_filter[ $__ao_hook ] : null;
