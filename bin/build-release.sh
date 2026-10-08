@@ -50,6 +50,7 @@ update_host="perdita.ericrosenberg.com"
 # Paths that are development-only and must not reach a user's site.
 EXCLUDE_TOP=(
 	.gitignore
+	CLAUDE.md
 	README.md
 )
 EXCLUDE_DIRS=(bin tests dist)
