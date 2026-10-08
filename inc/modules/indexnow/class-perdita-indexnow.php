@@ -11,8 +11,24 @@
  * 60 seconds out. That debounce folds a burst of saves into one submission
  * and keeps the HTTP call off the editor's save request. The cron handler
  * POSTs the URL list as JSON to each configured engine and records the HTTP
- * status in a 50-row log. A newly published post also pings the classic
- * Google and Bing sitemap endpoints, throttled to once per 10 minutes.
+ * status in a 50-row log.
+ *
+ * Under WP-CLI the shutdown step submits directly instead of scheduling.
+ * A CLI process has no visitor behind it: the event it would schedule only
+ * runs when some later request loads WordPress after the debounce, and a
+ * scripted batch of `wp post update` calls finishes inside that window, so
+ * its submissions can sit on the cron queue with nothing in the log until
+ * a web request happens to run them. Submitting before the command exits
+ * costs the CLI user at most the HTTP timeout and removes the dependency on
+ * wp-cron. perdita_indexnow_submit_inline can switch that on for any other
+ * context, or off for WP-CLI.
+ *
+ * Three hooks catch a save: transition_post_status (a publish, a re-save,
+ * or a change away from publish), post_updated (a publish-to-publish save),
+ * and save_post (anything that fires save_post for a published post,
+ * including code that calls it directly after its own write). The queue is
+ * keyed by URL, so the three overlapping on one save collapse to one
+ * submission.
  *
  * What it never submits: drafts, pending, private, or scheduled posts (only
  * a publish transition or a change away from publish counts), any post type
@@ -121,6 +137,10 @@ class Perdita_IndexNow {
 		add_action( 'pre_post_update', array( $this, 'stash_before_update' ), 10, 2 );
 		add_action( 'transition_post_status', array( $this, 'on_transition' ), 10, 3 );
 		add_action( 'post_updated', array( $this, 'on_post_updated' ), 10, 3 );
+		// Priority 20: after the save handlers most plugins register at 10
+		// (term and meta writers included), so should_submit() and the URL
+		// list see the post as it ends up.
+		add_action( 'save_post', array( $this, 'on_save_post' ), 20, 3 );
 		add_action( 'before_delete_post', array( $this, 'stash_before_delete' ), 10, 2 );
 		add_action( 'deleted_post', array( $this, 'on_deleted' ), 10, 2 );
 		add_action( 'trashed_post', array( $this, 'on_trashed' ) );
@@ -513,6 +533,33 @@ class Perdita_IndexNow {
 	}
 
 	/**
+	 * Any save of a published post. wp_insert_post() fires this after the
+	 * two hooks above, and code that writes a post itself and then fires
+	 * save_post by hand reaches only this one, so it is the catch-all: a
+	 * published, public post queues its URLs on every save path, including
+	 * WP-CLI and wp_update_post() from PHP. Autosaves, revisions, and every
+	 * status but publish are skipped. Duplicates collapse in the queue.
+	 *
+	 * @param int          $post_id Post id.
+	 * @param WP_Post|null $post    Post.
+	 * @param bool         $update  Whether this is an update (unused).
+	 */
+	public function on_save_post( $post_id, $post = null, $update = false ) {
+		unset( $update );
+		if ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) {
+			return;
+		}
+		if ( wp_is_post_revision( $post_id ) || wp_is_post_autosave( $post_id ) ) {
+			return;
+		}
+		$post = $post instanceof WP_Post ? $post : get_post( $post_id );
+		if ( ! $post instanceof WP_Post || 'publish' !== $post->post_status || ! self::should_submit( $post ) ) {
+			return;
+		}
+		$this->queue( self::urls_for_post( $post ) );
+	}
+
+	/**
 	 * Remember a published post's URLs while it still exists. Fires on
 	 * before_delete_post.
 	 *
@@ -597,10 +644,30 @@ class Perdita_IndexNow {
 	}
 
 	/**
-	 * Schedule everything queued this request as one cron event. Hooked to
-	 * shutdown, safe to call earlier (the queue empties either way).
+	 * Whether this request submits at shutdown instead of scheduling a cron
+	 * event. True under WP-CLI, where no visitor follows to run the event.
 	 *
-	 * @return bool Whether an event is now scheduled for this URL set.
+	 * @return bool
+	 */
+	public static function submits_inline() {
+		$inline = defined( 'WP_CLI' ) && WP_CLI;
+
+		/**
+		 * Submit at shutdown instead of through a debounced cron event.
+		 *
+		 * @param bool $inline Default true under WP-CLI, false elsewhere.
+		 */
+		return (bool) apply_filters( 'perdita_indexnow_submit_inline', $inline );
+	}
+
+	/**
+	 * Send everything queued this request: one cron event 60 seconds out on
+	 * a web request, one direct submission under WP-CLI (see
+	 * submits_inline()). Hooked to shutdown, safe to call earlier (the queue
+	 * empties either way).
+	 *
+	 * @return bool Whether an event is now scheduled, or a submission was
+	 *              made, for this URL set.
 	 */
 	public function flush_queue() {
 		if ( empty( $this->queue ) ) {
@@ -610,7 +677,23 @@ class Perdita_IndexNow {
 		$ping        = $this->ping;
 		$this->queue = array();
 		$this->ping  = false;
-		return self::schedule( $urls, $ping );
+
+		if ( ! self::submits_inline() ) {
+			return self::schedule( $urls, $ping );
+		}
+
+		$results = self::submit( $urls );
+		if ( defined( 'WP_CLI' ) && WP_CLI && class_exists( 'WP_CLI' ) ) {
+			// Debug channel only: a plain log line would land in the stdout
+			// of commands scripts parse, such as `wp post create --porcelain`.
+			foreach ( $results as $row ) {
+				WP_CLI::debug(
+					sprintf( 'IndexNow: %1$d URL(s) to %2$s, %3$s', (int) $row['count'], $row['engine'], $row['status'] ? 'HTTP ' . $row['status'] : $row['error'] ),
+					'perdita'
+				);
+			}
+		}
+		return ! empty( $results );
 	}
 
 	/**
