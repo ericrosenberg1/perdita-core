@@ -592,7 +592,11 @@ class Perdita_Sales {
 		}
 
 		$tax_rate = self::normalize_amount( self::settings()['tax_rate'] );
-		$tax      = round( ( $subtotal + $shipping ) * ( $tax_rate / 100 ), 2 );
+		// Round tax to what the buyer can pay: whole yen, won, krónur. Stripe
+		// rounds a whole-unit charge anyway, so this keeps the stored order
+		// total equal to the amount actually charged.
+		$decimals = self::currency_decimals();
+		$tax      = round( ( $subtotal + $shipping ) * ( $tax_rate / 100 ), $decimals );
 		$total    = round( $subtotal + $shipping + $tax, 2 );
 
 		return array(
@@ -883,21 +887,21 @@ class Perdita_Sales {
 		foreach ( $totals['lines'] as $line ) {
 			$body[ "line_items[$i][price_data][currency]" ]              = $currency;
 			$body[ "line_items[$i][price_data][product_data][name]" ]    = $line['title'];
-			$body[ "line_items[$i][price_data][unit_amount]" ]           = (string) self::to_minor_units( $line['unit_price'] );
+			$body[ "line_items[$i][price_data][unit_amount]" ]           = (string) self::to_minor_units( $line['unit_price'], $currency );
 			$body[ "line_items[$i][quantity]" ]                          = (string) (int) $line['qty'];
 			$i++;
 		}
 		if ( $totals['shipping'] > 0 ) {
 			$body[ "line_items[$i][price_data][currency]" ]           = $currency;
 			$body[ "line_items[$i][price_data][product_data][name]" ] = __( 'Shipping', 'perdita-core' );
-			$body[ "line_items[$i][price_data][unit_amount]" ]        = (string) self::to_minor_units( $totals['shipping'] );
+			$body[ "line_items[$i][price_data][unit_amount]" ]        = (string) self::to_minor_units( $totals['shipping'], $currency );
 			$body[ "line_items[$i][quantity]" ]                       = '1';
 			$i++;
 		}
 		if ( $totals['tax'] > 0 ) {
 			$body[ "line_items[$i][price_data][currency]" ]           = $currency;
 			$body[ "line_items[$i][price_data][product_data][name]" ] = __( 'Tax', 'perdita-core' );
-			$body[ "line_items[$i][price_data][unit_amount]" ]        = (string) self::to_minor_units( $totals['tax'] );
+			$body[ "line_items[$i][price_data][unit_amount]" ]        = (string) self::to_minor_units( $totals['tax'], $currency );
 			$body[ "line_items[$i][quantity]" ]                       = '1';
 			$i++;
 		}
@@ -932,15 +936,100 @@ class Perdita_Sales {
 	}
 
 	/**
-	 * Convert a major-unit decimal amount (e.g. 12.34) to integer minor units
-	 * (1234). Zero-decimal currencies are not special-cased in this slim build;
-	 * that is a Pro concern.
+	 * Currencies Stripe takes in whole units, with no minor unit at all:
+	 * 500 JPY is sent as 500, not 50000. Source: docs.stripe.com/currencies.
 	 *
-	 * @param float $amount Amount in major units.
+	 * @var string[]
+	 */
+	const ZERO_DECIMAL_CURRENCIES = array( 'BIF', 'CLP', 'DJF', 'GNF', 'JPY', 'KMF', 'KRW', 'MGA', 'PYG', 'RWF', 'VND', 'VUV', 'XAF', 'XOF', 'XPF' );
+
+	/**
+	 * Currencies Stripe takes in thousandths, with the last digit 0.
+	 *
+	 * @var string[]
+	 */
+	const THREE_DECIMAL_CURRENCIES = array( 'BHD', 'JOD', 'KWD', 'OMR', 'TND' );
+
+	/**
+	 * Currencies that are whole-unit in practice but that Stripe still reads
+	 * as two-decimal for backward compatibility, with the decimals always 00.
+	 *
+	 * @var string[]
+	 */
+	const WHOLE_UNIT_TWO_DECIMAL_CURRENCIES = array( 'ISK', 'UGX' );
+
+	/**
+	 * Normalize a currency argument: '' means the store currency.
+	 *
+	 * @param string $currency 3-letter code or ''.
+	 * @return string Uppercase code.
+	 */
+	private static function currency_code( $currency ) {
+		$currency = strtoupper( (string) $currency );
+		return preg_match( '/^[A-Z]{3}$/', $currency ) ? $currency : self::currency();
+	}
+
+	/**
+	 * How many decimals a buyer can actually pay in this currency. JPY, ISK
+	 * and the other whole-unit currencies have none, so totals in them are
+	 * rounded to whole units before they reach Stripe.
+	 *
+	 * @param string $currency 3-letter code, or '' for the store currency.
+	 * @return int 0 or 2. Three-decimal currencies still price in 2 here,
+	 *             because normalize_amount() keeps 2 places.
+	 */
+	public static function currency_decimals( $currency = '' ) {
+		$currency = self::currency_code( $currency );
+		if ( in_array( $currency, self::ZERO_DECIMAL_CURRENCIES, true ) || in_array( $currency, self::WHOLE_UNIT_TWO_DECIMAL_CURRENCIES, true ) ) {
+			return 0;
+		}
+		return 2;
+	}
+
+	/**
+	 * Convert a major-unit decimal amount (e.g. 12.34) to the integer Stripe
+	 * expects for this currency: 1234 for USD, 1500 for 1500 JPY (not 150000),
+	 * 12340 for 12.34 KWD, and 50000 for 500 ISK.
+	 *
+	 * Before 2026-10-09 every currency was multiplied by 100, so a store set
+	 * to JPY or KRW charged the buyer 100 times the price.
+	 *
+	 * @param float  $amount   Amount in major units.
+	 * @param string $currency 3-letter code, or '' for the store currency.
 	 * @return int
 	 */
-	public static function to_minor_units( $amount ) {
-		return (int) round( self::normalize_amount( $amount ) * 100 );
+	public static function to_minor_units( $amount, $currency = '' ) {
+		$currency = self::currency_code( $currency );
+		$amount   = self::normalize_amount( $amount );
+		if ( in_array( $currency, self::ZERO_DECIMAL_CURRENCIES, true ) ) {
+			return (int) round( $amount );
+		}
+		if ( in_array( $currency, self::WHOLE_UNIT_TWO_DECIMAL_CURRENCIES, true ) ) {
+			return (int) round( $amount ) * 100;
+		}
+		if ( in_array( $currency, self::THREE_DECIMAL_CURRENCIES, true ) ) {
+			return (int) round( $amount * 100 ) * 10;
+		}
+		return (int) round( $amount * 100 );
+	}
+
+	/**
+	 * The inverse of to_minor_units(): a Stripe amount back to major units.
+	 *
+	 * @param int|float $minor    Stripe amount.
+	 * @param string    $currency 3-letter code, or '' for the store currency.
+	 * @return float
+	 */
+	public static function from_minor_units( $minor, $currency = '' ) {
+		$currency = self::currency_code( $currency );
+		$minor    = is_numeric( $minor ) ? (float) $minor : 0.0;
+		if ( in_array( $currency, self::ZERO_DECIMAL_CURRENCIES, true ) ) {
+			return self::normalize_amount( $minor );
+		}
+		if ( in_array( $currency, self::THREE_DECIMAL_CURRENCIES, true ) ) {
+			return self::normalize_amount( $minor / 1000 );
+		}
+		return self::normalize_amount( $minor / 100 );
 	}
 
 	/**
@@ -1619,7 +1708,7 @@ class Perdita_Sales {
 	 */
 	public function format_money( $amount, $currency = '' ) {
 		$currency = '' !== $currency ? strtoupper( $currency ) : self::currency();
-		return $currency . ' ' . number_format_i18n( self::normalize_amount( $amount ), 2 );
+		return $currency . ' ' . number_format_i18n( self::normalize_amount( $amount ), self::currency_decimals( $currency ) );
 	}
 
 	/* ------------------------------------------------------------------ */
