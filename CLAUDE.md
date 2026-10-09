@@ -35,6 +35,7 @@ Fixes merged to main since the last release go here, one `readme.txt` line each.
 
 - Fix: IndexNow submits the category and tag archives of posts published from the block editor or the REST API.
 - Fix: IndexNow submits a trashed post's original URL instead of its `__trashed` slug.
+- Fix: a Turnstile outage (siteverify 5xx or 429) lets the form through instead of turning every visitor away.
 - Fix: the "describe a section" sidebar loads on the post editor only, so the block widgets screen no longer logs a `wp-editor` doing_it_wrong notice.
 
 ## Tests
