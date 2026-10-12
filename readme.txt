@@ -4,7 +4,7 @@ Tags: forms, seo, caching, security, newsletter
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.19.6-beta
+Stable tag: 0.19.7-beta
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -76,6 +76,12 @@ Form entries, subscribers, orders, products, form definitions, the SMTP log, you
 Yes, that's what Pro is built on. Pro registers its own modules into this plugin's registry, so they appear on the same Modules screen and behave the same way.
 
 == Changelog ==
+
+= 0.19.7-beta =
+* Automatic updates are on by default. Turn them off on the Plugins screen and they stay off.
+* The one-click connect section for claude.ai and ChatGPT drops its "Pro" label. It stays free.
+* Fix: IndexNow submits the category and tag archives of posts published from the block editor or the REST API.
+* Fix: IndexNow submits a trashed post's original URL instead of its `__trashed` slug.
 
 = 0.19.6-beta =
 * Fix: GA4 consent is set before the first page view.

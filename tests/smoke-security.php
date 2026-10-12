@@ -273,6 +273,7 @@ if ( ! file_exists( PERDITA_CORE_DIR . 'inc/class-perdita-core-updater.php' ) ) 
 		remove_filter( 'auto_update_plugin', array( $u, 'auto_update' ) );
 		remove_filter( 'upgrader_pre_download', array( $u, 'verify_download' ) );
 		remove_action( 'upgrader_process_complete', array( $u, 'flush' ) );
+		remove_action( 'init', array( $u, 'maybe_default_auto_updates' ) );
 	};
 	$psx_unhook( $psx_updater );
 
@@ -472,11 +473,11 @@ if ( ! file_exists( PERDITA_CORE_DIR . 'inc/class-perdita-core-updater.php' ) ) 
 	$psx_hdr = get_file_data( PERDITA_CORE_FILE, array( 'uri' => 'Update URI' ) );
 	$ok( 'https://perdita.ericrosenberg.com/updates/perdita-core.json' === $psx_hdr['uri'], 'updater: the plugin header names the self-hosted channel in Update URI' );
 
-	// Background auto-updates are off by default for the plugin, unlike the
-	// theme: an update here can change what runs on a login form or an MCP
-	// endpoint, so the site owner picks the moment.
+	// Background auto-updates follow the owner's Plugins-screen setting, so
+	// the Plugins screen is never told the setting is forced (0.19.7-beta).
+	// tests/smoke-auto-update.php covers the once-per-site default.
 	$psx_offer = (object) array( 'plugin' => plugin_basename( PERDITA_CORE_FILE ) );
-	$ok( false === $psx_updater->auto_update( null, $psx_offer ), 'updater: background auto-updates are off by default for this plugin' );
+	$ok( null === $psx_updater->auto_update( null, $psx_offer ), 'updater: the auto-update setting is the owner\'s, not forced by the plugin' );
 	$psx_force = function () {
 		return true;
 	};
