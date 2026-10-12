@@ -4,7 +4,7 @@ Tags: forms, seo, caching, security, newsletter
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.19.7-beta
+Stable tag: 0.19.8-beta
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -76,6 +76,11 @@ Form entries, subscribers, orders, products, form definitions, the SMTP log, you
 Yes, that's what Pro is built on. Pro registers its own modules into this plugin's registry, so they appear on the same Modules screen and behave the same way.
 
 == Changelog ==
+
+= 0.19.8-beta =
+* Fix: Stripe charges in JPY, KRW and other zero-decimal currencies use whole units. They were 100 times the price.
+* Fix: a Turnstile outage no longer turns every visitor away from a form.
+* Fix: the section sidebar loads on the post editor only.
 
 = 0.19.7-beta =
 * Automatic updates are on by default. Turn them off on the Plugins screen and they stay off.

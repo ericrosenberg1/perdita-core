@@ -1,0 +1,6 @@
+* Fix: Stripe charges in JPY, KRW and other zero-decimal currencies use whole units. They were 100 times the price.
+* Fix: a Turnstile outage no longer turns every visitor away from a form.
+* Fix: the section sidebar loads on the post editor only.
+* Fix: IndexNow submits the category and tag archives of posts published from the block editor or the REST API.
+* Fix: IndexNow submits a trashed post's original URL instead of its `__trashed` slug.
+* The one-click connect section for claude.ai and ChatGPT has a plain title.
