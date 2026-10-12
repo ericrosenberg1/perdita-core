@@ -208,7 +208,17 @@ if [ "$wporg" = "1" ]; then
 	ok "--wporg: Update URI header removed"
 	perl -pi -e "s/^(\s*\*\s*Version:\s*)\S+/\${1}$declared/" "$work/$slug/$slug.php"
 	perl -pi -e "s/^(Stable tag:\s*)\S+/\${1}$declared/" "$work/$slug/readme.txt"
-	README_FILE="$work/$slug/readme.txt" RELEASE_VERSION="$version" DECLARED_VERSION="$declared" python3 - <<'PY' || die "--wporg: could not trim the readme.txt changelog"
+	# A release whose readme.txt lines only fit the self-hosted build (the
+	# updater, Pro, lock step) can commit the directory's own lines as
+	# bin/wporg-changelog/<version>.txt. bin/ never ships, so the self-hosted
+	# zip stays byte-identical. Read from HEAD, like the rest of the build.
+	wporg_notes=""
+	if git -C "$repo_root" cat-file -e "HEAD:bin/wporg-changelog/$version.txt" 2>/dev/null; then
+		wporg_notes="$work/wporg-changelog.txt"
+		git -C "$repo_root" show "HEAD:bin/wporg-changelog/$version.txt" >"$wporg_notes"
+		ok "--wporg: changelog lines from bin/wporg-changelog/$version.txt"
+	fi
+	README_FILE="$work/$slug/readme.txt" RELEASE_VERSION="$version" DECLARED_VERSION="$declared" WPORG_NOTES_FILE="$wporg_notes" python3 - <<'PY' || die "--wporg: could not trim the readme.txt changelog"
 import os, re, sys
 path = os.environ['README_FILE']
 text = open(path, encoding='utf-8').read()
@@ -217,7 +227,12 @@ if not m:
     sys.exit('no changelog entry for ' + os.environ['RELEASE_VERSION'])
 end = text.find('\n== ', m.end())
 end = len(text) if end < 0 else end + 1
-text = text[:m.start()] + m.group(1) + '= ' + os.environ['DECLARED_VERSION'] + ' =\n' + m.group(2).rstrip('\n') + '\n\n' + text[end:]
+notes = m.group(2)
+if os.environ.get('WPORG_NOTES_FILE'):
+    notes = open(os.environ['WPORG_NOTES_FILE'], encoding='utf-8').read()
+    if not notes.strip():
+        sys.exit('bin/wporg-changelog file is empty')
+text = text[:m.start()] + m.group(1) + '= ' + os.environ['DECLARED_VERSION'] + ' =\n' + notes.strip('\n') + '\n\n' + text[end:]
 open(path, 'w', encoding='utf-8').write(text)
 PY
 	header_version="$(sed -n 's/^[[:space:]]*\*[[:space:]]*Version:[[:space:]]*//p' "$work/$slug/$slug.php" | head -1 | tr -d '\r' | sed 's/[[:space:]]*$//')"
