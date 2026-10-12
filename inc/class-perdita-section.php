@@ -194,9 +194,12 @@ class Perdita_Section {
 	}
 
 	/**
-	 * Enqueue the editor sidebar script.
+	 * Enqueue the editor sidebar script, on the post editor only.
 	 */
 	public function editor_assets() {
+		if ( ! self::is_post_editor() ) {
+			return;
+		}
 		wp_enqueue_script(
 			'perdita-section-editor',
 			PERDITA_CORE_URL . 'assets/js/section-editor.js',
@@ -212,5 +215,25 @@ class Perdita_Section {
 				'setup' => esc_url_raw( admin_url( 'admin.php?page=perdita' ) ),
 			)
 		);
+	}
+
+	/**
+	 * Whether the current admin screen is the post editor.
+	 *
+	 * The enqueue_block_editor_assets hook also fires on the block widgets screen and
+	 * in the Customizer. The sidebar depends on wp-edit-post, which pulls in
+	 * the wp-editor script, and WordPress logs a doing_it_wrong notice when
+	 * that loads beside the widgets editor. The sidebar has nothing to attach
+	 * to there anyway. Public static so Perdita Pro's section builder and the
+	 * smoke suite share the same test.
+	 *
+	 * @return bool
+	 */
+	public static function is_post_editor() {
+		if ( ! function_exists( 'get_current_screen' ) ) {
+			return false;
+		}
+		$screen = get_current_screen();
+		return $screen instanceof WP_Screen && 'post' === $screen->base;
 	}
 }

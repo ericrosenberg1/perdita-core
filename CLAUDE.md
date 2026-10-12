@@ -36,6 +36,8 @@ Open, waiting on Eric (don't change without his answer):
 Fixes merged to main since the last release go here, one `readme.txt` line each. At the next lock-step bump, move them into that version's changelog entry and empty this list.
 
 - Fix: Sales charges zero-decimal currencies (JPY, KRW and 13 more) in whole units. It sent 100 times the price to Stripe before.
+- Fix: a Turnstile outage (siteverify 5xx or 429) lets the form through instead of turning every visitor away.
+- Fix: the "describe a section" sidebar loads on the post editor only, so the block widgets screen no longer logs a `wp-editor` doing_it_wrong notice.
 
 ## Tests
 

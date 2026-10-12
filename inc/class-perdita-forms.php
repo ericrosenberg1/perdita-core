@@ -563,6 +563,14 @@ class Perdita_Forms {
 		if ( is_wp_error( $resp ) ) {
 			return ''; // Fail open on a verify-endpoint outage.
 		}
+		// A 5xx or 429 from siteverify is an outage too, and its body is an
+		// HTML error page, not a verdict. Before 2026-10-09 this fell through
+		// to "did not pass" and turned every visitor away while Cloudflare
+		// was down. A verdict always comes back as a 200 with JSON.
+		$code = (int) wp_remote_retrieve_response_code( $resp );
+		if ( 429 === $code || $code >= 500 ) {
+			return '';
+		}
 		$data = json_decode( wp_remote_retrieve_body( $resp ), true );
 		if ( is_array( $data ) && ! empty( $data['success'] ) ) {
 			return '';
