@@ -115,6 +115,10 @@ class Perdita_Caching {
 		add_action( 'transition_comment_status', array( $this, 'on_comment_status' ), 10, 3 );
 		add_action( 'switch_theme', array( $this, 'purge_all' ) );
 		add_action( 'customize_save_after', array( $this, 'purge_all' ) );
+		// A theme, plugin or WordPress update can change every page's markup
+		// and its ?ver= asset URLs. Without this, a live site kept serving
+		// the previous version's pages for an hour after an update.
+		add_action( 'upgrader_process_complete', array( $this, 'purge_all' ), 10, 0 );
 		// Any Perdita-owned option can change rendered HTML: the design token
 		// document, this module's own settings, the SEO store, the module
 		// on/off registry, and every other module's settings (analytics,
