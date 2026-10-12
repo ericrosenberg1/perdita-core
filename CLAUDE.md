@@ -38,6 +38,7 @@ Fixes merged to main since the last release go here, one `readme.txt` line each.
 ## Tests
 
 - `bash tests/run.sh /path/to/wordpress` (see `tests/README.md`). The node tests (`*.test.mjs`) run from `smoke.php` when node is on PATH.
-- 818 passing at 0.19.6-beta on WordPress 7.1.3 with PHP 8.5 and 8.4, zero notices. 842 on main since the IndexNow trash fix, with an empty debug log.
+- 856 passing at 0.19.7-beta on WordPress 7.1.3 with PHP 8.5 and 8.4, zero notices.
+- The `--wporg` build takes its changelog from `bin/wporg-changelog/<version>.txt` when that file exists. 0.19.7-beta needed it, since the automatic-update default lives in the updater the directory build strips.
 - Plugin Check 2.1.0 on the `--wporg` zip: 0 errors, 81 warnings. Those are the baseline. WPCS reports 278 errors and 217 warnings on the directory build, all pre-existing, so compare against those numbers rather than zero.
 - Rig recipes are in the Mac's memory files `reference_perdita_review_tooling` and `reference_headless_wp_test_rig`.
