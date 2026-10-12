@@ -192,3 +192,8 @@ if ( is_multisite() ) {
 } else {
 	perdita_core_uninstall_site();
 }
+
+// Network-wide record that automatic updates were turned on once. WordPress
+// drops a deleted plugin from its auto-update list, so a reinstall starts
+// over with the same default a new install gets.
+delete_site_option( 'perdita_core_auto_updates_defaulted' );

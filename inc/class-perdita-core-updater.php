@@ -72,6 +72,12 @@ class Perdita_Core_Updater {
 	const SIGNATURE_SLUG = 'perdita-core';
 
 	/**
+	 * Site option recording that automatic updates were turned on once, so
+	 * maybe_default_auto_updates() never overrides the owner after that.
+	 */
+	const AUTO_UPDATE_FLAG = 'perdita_core_auto_updates_defaulted';
+
+	/**
 	 * Plugin basename, e.g. perdita-core/perdita-core.php. This is the key
 	 * WordPress uses in the update transient and in wp_get_active_plugins().
 	 *
@@ -98,6 +104,7 @@ class Perdita_Core_Updater {
 		add_filter( 'auto_update_plugin', array( $this, 'auto_update' ), 10, 2 );
 		add_filter( 'upgrader_pre_download', array( $this, 'verify_download' ), 10, 3 );
 		add_action( 'upgrader_process_complete', array( $this, 'flush' ), 10, 0 );
+		add_action( 'init', array( $this, 'maybe_default_auto_updates' ) );
 	}
 
 	/**
@@ -365,24 +372,67 @@ class Perdita_Core_Updater {
 	}
 
 	/**
-	 * Background auto-updates are OFF by default here, the opposite of the
-	 * theme's default.
+	 * Turn on WordPress's own automatic updates for this plugin, once per site.
 	 *
-	 * A theme update changes presentation. A plugin update in this codebase
-	 * can change what runs on a login form, what an SMTP route does, and what
-	 * an MCP endpoint exposes, so the site owner picks the moment. Flip it
-	 * with the 'perdita_core_auto_update' filter, or per site from the
-	 * Plugins screen's own auto-update column.
+	 * The theme, Core and Pro share one version number, and the theme updates
+	 * itself, so a Core that waited for a click left every site "out of step"
+	 * after each release. WordPress keeps each plugin's setting in the
+	 * auto_update_plugins site option and leaves it off until someone turns it
+	 * on. This adds Core to that list one time and records that it did, so an
+	 * owner who later clicks "Disable auto-updates" on the Plugins screen keeps
+	 * them off for good.
 	 *
-	 * @param bool|null $update Whether to auto-update.
+	 * Hooked to init, and the updater only exists on wp-admin, cron and WP-CLI
+	 * requests, so a front-end page never reads the flag.
+	 *
+	 * @return void
+	 */
+	public function maybe_default_auto_updates() {
+		if ( get_site_option( self::AUTO_UPDATE_FLAG ) ) {
+			return;
+		}
+		// A host or owner can switch plugin auto-updates off for the whole
+		// site. Leave the list alone then, and try again if they allow it.
+		// The helper lives in an admin include that init runs ahead of.
+		if ( ! function_exists( 'wp_is_auto_update_enabled_for_type' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/update.php';
+		}
+		if ( ! wp_is_auto_update_enabled_for_type( 'plugin' ) ) {
+			return;
+		}
+		$list = array_values( array_filter( (array) get_site_option( 'auto_update_plugins', array() ), 'is_string' ) );
+		if ( ! in_array( $this->basename, $list, true ) ) {
+			$list[] = $this->basename;
+			update_site_option( 'auto_update_plugins', $list );
+		}
+		update_site_option( self::AUTO_UPDATE_FLAG, PERDITA_CORE_VERSION );
+	}
+
+	/**
+	 * Background auto-updates follow the owner's setting on the Plugins screen,
+	 * which maybe_default_auto_updates() turns on once.
+	 *
+	 * Without a 'perdita_core_auto_update' filter this hands WordPress's own
+	 * value back untouched, so the Plugins screen keeps its Enable and Disable
+	 * link. A site that adds the filter decides for itself, and the filter
+	 * receives the owner's current setting.
+	 *
+	 * @param bool|null $update Whether to auto-update. Null when the Plugins
+	 *                          screen asks whether the setting is forced.
 	 * @param object    $item   Update offer.
 	 * @return bool|null
 	 */
 	public function auto_update( $update, $item ) {
-		if ( is_object( $item ) && isset( $item->plugin ) && $this->basename === $item->plugin ) {
-			return (bool) apply_filters( 'perdita_core_auto_update', false );
+		if ( ! is_object( $item ) || ! isset( $item->plugin ) || $this->basename !== $item->plugin ) {
+			return $update;
 		}
-		return $update;
+		if ( ! has_filter( 'perdita_core_auto_update' ) ) {
+			return $update;
+		}
+		$current = null === $update
+			? in_array( $this->basename, (array) get_site_option( 'auto_update_plugins', array() ), true )
+			: (bool) $update;
+		return (bool) apply_filters( 'perdita_core_auto_update', $current );
 	}
 
 	/**

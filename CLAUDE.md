@@ -7,7 +7,7 @@ This is the free plugin half of Perdita. It ships in lock step with the Perdita 
 - **One version number across theme, Core and Pro.** Bump with `../perdita/bin/bump-version.sh <version>` (or this repo's copy), never by hand. Labels are -alpha, -beta or -rc only, and the script refuses a downgrade. `bin/build-release.sh` refuses a version the siblings don't share.
 - **The `--wporg` build declares plain X.Y.Z** while `PERDITA_CORE_VERSION` keeps the label. The plugin uploader rejects any version with letters, and the 0.19.5 zip declared `0.19.5-alpha`, so that first submission may never have gone in.
 - **Keep the `Update URI` header and the updater's foreign-offer guard.** Without them, a directory listing would let WordPress replace self-hosted installs with the stripped directory build.
-- **The updater's auto-update default is off** (`perdita_core_auto_update` false) while the theme's is on. Changing that is an open Eric decision.
+- **Automatic updates are on by default since 0.19.7-beta, and the owner's choice sticks.** The updater adds Core to WordPress's `auto_update_plugins` list once per site (flag `perdita_core_auto_updates_defaulted`) and otherwise returns WordPress's own value, so the Plugins screen keeps its Enable and Disable link. Never make `auto_update()` return a bool by default: a non-null answer reads as forced and hides that link. `tests/smoke-auto-update.php` pins it.
 - **`Perdita_Crypto` here is a copy of the theme's.** Core loads it only when the theme didn't, and a test fails on drift.
 
 ## Modules
@@ -18,9 +18,9 @@ Decisions that look like bugs but aren't:
 - The module-state migration copies the old `features.seo` and `features.forms` flags even when they equal the defaults. It's behavior-preserving, leave it.
 - MCP answers an unknown tool name with `-32602`, not `-32601`. The MCP spec's own example and the reference SDK do the same, and an end-to-end test pins it beside `-32601` for an unknown method.
 - OAuth option blobs (grants, clients, connections) only change through `mutate_option()`, a per-option database lock. Don't add a plain `update_option()` on them.
+- MCP one-click OAuth connect is free in Core with no license check (Eric, 2026-10-12). Its admin section is titled "One-click connect from claude.ai or ChatGPT" and a test fails on a "Pro:" label.
 
 Open, waiting on Eric (don't change without his answer):
-- `inc/modules/mcp/class-perdita-mcp-admin.php` titles the OAuth connected-apps section "Pro: one-click connect from claude.ai or ChatGPT", but nothing checks a license before registering those routes. Either the label goes or a license check gates the routes.
 - Forms Turnstile (`check_turnstile()` in `inc/class-perdita-forms.php`): a secret Cloudflare rejects turns every visitor away with "did not pass" and the owner is never told. Pro's Spam Pro treats a rejected secret like an outage and raises an admin notice. Whether Core fails open or closed is his call, and the admin notice is wanted either way.
 
 ## Behavior other code relies on
@@ -33,8 +33,7 @@ Open, waiting on Eric (don't change without his answer):
 
 Fixes merged to main since the last release go here, one `readme.txt` line each. At the next lock-step bump, move them into that version's changelog entry and empty this list.
 
-- Fix: IndexNow submits the category and tag archives of posts published from the block editor or the REST API.
-- Fix: IndexNow submits a trashed post's original URL instead of its `__trashed` slug.
+- (none since 0.19.7-beta)
 
 ## Tests
 
