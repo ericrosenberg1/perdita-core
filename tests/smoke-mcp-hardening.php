@@ -126,6 +126,16 @@ if ( '' === $mh_html ) {
 } else {
 	$ok( false === stripos( $mh_html, '<form' ) && false !== strpos( $mh_html, 'perdita_mcp_revoke_connection' ), 'mcp profile: Revoke is a nonce link, not a form nested inside profile.php\'s own form' );
 }
+// One-click OAuth connect is free in Core, so its section carries no "Pro:" label.
+$mh_section = new ReflectionMethod( 'Perdita_MCP_Admin', 'render_connected_apps' );
+if ( PHP_VERSION_ID < 80100 ) {
+	$mh_section->setAccessible( true );
+}
+ob_start();
+$mh_section->invoke( $mh_admin );
+$mh_section_html = (string) ob_get_clean();
+$ok( false !== strpos( $mh_section_html, '<h2>One-click connect from claude.ai or ChatGPT</h2>' ) && false === strpos( $mh_section_html, 'Pro:' ), 'mcp admin: the free OAuth connect section has a plain title, no "Pro:" label' );
+
 wp_set_current_user( $mh_orig_user );
 Perdita_MCP_OAuth::revoke_connection( $mh_contrib, 'smoke-profile-client' );
 
