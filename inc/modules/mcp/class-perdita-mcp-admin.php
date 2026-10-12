@@ -305,10 +305,10 @@ class Perdita_MCP_Admin {
 	}
 
 	/**
-	 * "Connected apps" section: the Pro one-click-connect experience, now
-	 * real. Shows the Authorization Server discovery URL for manual
-	 * troubleshooting (e.g. pasting into a client that asks for it directly
-	 * rather than auto-discovering it), and every OAuth client the CURRENT
+	 * "Connected apps" section: one-click connect over OAuth, free in Core
+	 * with no license check. Shows the Authorization Server discovery URL
+	 * for manual troubleshooting (e.g. pasting into a client that asks for it
+	 * directly rather than auto-discovering it), and every OAuth client the CURRENT
 	 * WP user has connected, each with a working Revoke button. This
 	 * replaces what was previously an inert "Coming in Perdita Premium"
 	 * card (see git history / the module's earlier state) now that
@@ -327,7 +327,7 @@ class Perdita_MCP_Admin {
 		}
 
 		echo '<div class="card" style="max-width:760px;border-left:4px solid #2563eb;margin-top:24px;padding:1px 20px;">';
-		echo '<h2>' . esc_html__( 'Pro: one-click connect from claude.ai or ChatGPT', 'perdita-core' ) . '</h2>';
+		echo '<h2>' . esc_html__( 'One-click connect from claude.ai or ChatGPT', 'perdita-core' ) . '</h2>';
 		echo '<p>' . esc_html__( 'Instead of generating and pasting an API key, an AI client that supports remote MCP servers with OAuth can connect with one click. It sends you through a normal WordPress login (if you are not already signed in) and a consent screen, then connects using your own account\'s permissions.', 'perdita-core' ) . '</p>';
 
 		echo '<h3 id="perdita-mcp-oauth-issuer-heading">' . esc_html__( 'Authorization server URL', 'perdita-core' ) . '</h3>';
