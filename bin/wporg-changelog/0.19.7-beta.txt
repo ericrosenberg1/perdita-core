@@ -1,0 +1,3 @@
+* The one-click connect section for claude.ai and ChatGPT has a plain title.
+* Fix: IndexNow submits the category and tag archives of posts published from the block editor or the REST API.
+* Fix: IndexNow submits a trashed post's original URL instead of its `__trashed` slug.
