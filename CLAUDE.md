@@ -35,6 +35,7 @@ Open, waiting on Eric (don't change without his answer):
 Fixes merged to main since the last release go here, one `readme.txt` line each. At the next lock-step bump, move them into that version's changelog entry and empty this list.
 
 - Fix: the page cache clears after a theme, plugin or WordPress update, so pages stop pointing at the old version's files.
+- Fix: PageSpeed Insights tests the right page when the home URL carries its own query string, such as a language plugin's `?lang=fr`.
 
 ## Tests
 

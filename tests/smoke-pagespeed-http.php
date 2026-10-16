@@ -123,6 +123,32 @@ $psh_calls = array();
 Perdita_Pagespeed::run_test( 'mobile' );
 $ok( 1 === count( $psh_calls ), 'pagespeed http: a failed run is not cached' );
 
+// A home URL with its own query string, as a language plugin can produce.
+$psh_lang = function ( $url ) {
+	return add_query_arg(
+		array(
+			'lang' => 'fr',
+			'x'    => '1',
+		),
+		$url
+	);
+};
+add_filter( 'home_url', $psh_lang );
+Perdita_Pagespeed::clear_cache();
+$psh_answer = array(
+	200,
+	array( 'lighthouseResult' => $psh_lab ),
+);
+$psh_calls  = array();
+Perdita_Pagespeed::run_test( 'mobile', true );
+$psh_q = array();
+wp_parse_str( (string) wp_parse_url( $psh_calls[0]['url'] ?? '', PHP_URL_QUERY ), $psh_q );
+$psh_want = Perdita_Pagespeed::url_under_test();
+$psh_got  = $psh_q['url'] ?? '';
+$ok( false !== strpos( $psh_want, '&x=1' ) && $psh_want === $psh_got && 'mobile' === ( $psh_q['strategy'] ?? '' ), 'pagespeed http: a home URL with its own query string reaches PSI whole' );
+remove_filter( 'home_url', $psh_lang );
+Perdita_Pagespeed::clear_cache();
+
 remove_filter( 'pre_http_request', $psh_hook, 10 );
 Perdita_Pagespeed::clear_cache();
 if ( false === $psh_orig ) {
@@ -130,4 +156,4 @@ if ( false === $psh_orig ) {
 } else {
 	update_option( Perdita_Pagespeed::OPTION, $psh_orig );
 }
-unset( $psh_orig, $psh_calls, $psh_answer, $psh_hook, $psh_lab, $psh_res, $psh_q, $psh_again );
+unset( $psh_lang, $psh_want, $psh_got, $psh_orig, $psh_calls, $psh_answer, $psh_hook, $psh_lab, $psh_res, $psh_q, $psh_again );
