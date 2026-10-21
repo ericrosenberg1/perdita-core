@@ -318,6 +318,9 @@ class Perdita_Forms_Admin {
 		}
 
 		update_option( 'perdita_forms_settings', $s );
+		// New keys: the old rejection no longer applies. The next real
+		// submission flags it again if Cloudflare still rejects the secret.
+		Perdita_Forms::clear_turnstile_key_error();
 		wp_safe_redirect( add_query_arg( 'perdita_msg', rawurlencode( __( 'Settings saved.', 'perdita-core' ) ), admin_url( 'edit.php?post_type=' . Perdita_Forms::CPT . '&page=perdita-forms-settings' ) ) );
 		exit;
 	}

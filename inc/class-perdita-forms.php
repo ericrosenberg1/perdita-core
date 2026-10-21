@@ -47,6 +47,7 @@ class Perdita_Forms {
 
 		if ( is_admin() ) {
 			add_action( 'admin_notices', array( __CLASS__, 'proxy_ip_notice' ) );
+			add_action( 'admin_notices', array( __CLASS__, 'turnstile_key_error_notice' ) );
 			add_action( 'admin_init', array( __CLASS__, 'maybe_dismiss_proxy_ip_notice' ) );
 		}
 	}
@@ -67,6 +68,22 @@ class Perdita_Forms {
 	 * closed it.
 	 */
 	const PROXY_IP_NOTICE_OPTION = 'perdita_forms_proxy_ip_notice';
+
+	/**
+	 * Option flag: Cloudflare rejected the site's own Turnstile secret on a
+	 * real submission (siteverify answered invalid-input-secret or
+	 * missing-input-secret). Set from the submit path, read by the admin
+	 * notice, cleared by the next good verdict or by saving the Spam
+	 * Protection screen. Forms Pro sets and clears the same flag.
+	 */
+	const TURNSTILE_KEY_ERROR_OPTION = 'perdita_forms_turnstile_key_error';
+
+	/**
+	 * Turnstile siteverify error codes that describe the SITE's secret, not
+	 * the visitor's token, so they say nothing about whether a submission
+	 * is spam.
+	 */
+	const TURNSTILE_KEY_ERRORS = array( 'invalid-input-secret', 'missing-input-secret' );
 
 	/**
 	 * A page embedding [perdita_form] must never be served from the page
@@ -513,6 +530,15 @@ class Perdita_Forms {
 	 * error to the verify endpoint, so a Cloudflare outage doesn't block every
 	 * legitimate visitor (the honeypot, nonce, and rate limit still apply).
 	 *
+	 * It also fails open when Cloudflare rejects the site's own SECRET
+	 * (invalid-input-secret, missing-input-secret), and flags the owner
+	 * admin notice. That answer says the key is wrong, not that the visitor
+	 * is a bot, and before 2026-10-21 it turned away every visitor with
+	 * "did not pass" while nothing told the owner (Eric's call, item 82).
+	 * The `perdita_forms_turnstile_fail_open` filter lets a site that
+	 * prefers to fail closed keep doing that. A failed challenge on a valid
+	 * secret (invalid-input-response, timeout-or-duplicate) still blocks.
+	 *
 	 * It does NOT fail open on an unreadable secret. The secret is encrypted
 	 * with a key derived from the wp-config salts, so rotating those salts
 	 * makes it undecryptable, and decrypt()'s '' return is indistinguishable
@@ -573,9 +599,77 @@ class Perdita_Forms {
 		}
 		$data = json_decode( wp_remote_retrieve_body( $resp ), true );
 		if ( is_array( $data ) && ! empty( $data['success'] ) ) {
+			self::clear_turnstile_key_error();
 			return '';
 		}
+		if ( self::is_turnstile_key_rejection( $data ) ) {
+			self::flag_turnstile_key_error();
+			/**
+			 * Whether a submission goes through when Cloudflare rejects the
+			 * site's own Turnstile secret. Default true: the visitor did
+			 * nothing wrong, and the owner gets an admin notice.
+			 *
+			 * @param bool $fail_open True to accept the submission.
+			 */
+			if ( (bool) apply_filters( 'perdita_forms_turnstile_fail_open', true ) ) {
+				return '';
+			}
+			return __( 'The anti-spam check is not working right now, so this form cannot accept messages. Please contact the site owner.', 'perdita-core' );
+		}
 		return __( 'The anti-spam check did not pass. Please try again.', 'perdita-core' );
+	}
+
+	/**
+	 * Whether a decoded siteverify answer rejects the site's own secret
+	 * rather than the visitor's token. Public so Forms Pro reads the same
+	 * list of codes.
+	 *
+	 * @param mixed $data Decoded siteverify JSON.
+	 * @return bool
+	 */
+	public static function is_turnstile_key_rejection( $data ) {
+		$codes = ( is_array( $data ) && isset( $data['error-codes'] ) && is_array( $data['error-codes'] ) ) ? $data['error-codes'] : array();
+		return (bool) array_intersect( self::TURNSTILE_KEY_ERRORS, $codes );
+	}
+
+	/**
+	 * Record that Cloudflare rejected the site's Turnstile secret. Writes
+	 * only on a change, so a run of submissions against a bad secret costs
+	 * one write.
+	 */
+	public static function flag_turnstile_key_error() {
+		if ( 1 !== (int) get_option( self::TURNSTILE_KEY_ERROR_OPTION ) ) {
+			update_option( self::TURNSTILE_KEY_ERROR_OPTION, 1, false );
+		}
+	}
+
+	/**
+	 * Clear the flag once Cloudflare accepts the secret again, or the owner
+	 * saves new keys.
+	 */
+	public static function clear_turnstile_key_error() {
+		if ( false !== get_option( self::TURNSTILE_KEY_ERROR_OPTION, false ) ) {
+			delete_option( self::TURNSTILE_KEY_ERROR_OPTION );
+		}
+	}
+
+	/**
+	 * Admin notice: Cloudflare rejected the saved Turnstile secret, so forms
+	 * take submissions without the Turnstile check until the owner fixes it.
+	 */
+	public static function turnstile_key_error_notice() {
+		if ( ! current_user_can( 'manage_options' ) || 1 !== (int) get_option( self::TURNSTILE_KEY_ERROR_OPTION ) ) {
+			return;
+		}
+		$screen = admin_url( 'edit.php?post_type=' . self::CPT . '&page=perdita-forms-settings' );
+		echo '<div class="notice notice-error"><p><strong>' . esc_html__( 'Perdita Forms: Cloudflare rejected your Turnstile secret key.', 'perdita-core' ) . '</strong> ' . wp_kses(
+			sprintf(
+				/* translators: %s: link to the forms Spam Protection screen. */
+				__( 'Your forms still take messages, but without the Turnstile check (the honeypot, nonce and rate limit still run). Paste the secret key from your Cloudflare Turnstile widget on the %s screen.', 'perdita-core' ),
+				'<a href="' . esc_url( $screen ) . '">' . esc_html__( 'Spam Protection', 'perdita-core' ) . '</a>'
+			),
+			array( 'a' => array( 'href' => array() ) )
+		) . '</p></div>';
 	}
 
 	/**
