@@ -43,7 +43,11 @@ Fixes merged to main since the last release go here, one `readme.txt` line each.
 ## Tests
 
 - `bash tests/run.sh /path/to/wordpress` (see `tests/README.md`). The node tests (`*.test.mjs`) run from `smoke.php` when node is on PATH.
-- 996 passing at 0.19.9-beta on WordPress 7.1.3 with PHP 8.5 and 8.4, zero notices. `tests/smoke-migration.php` runs the page cache drop-in in a child PHP process, so the suite needs a CLI PHP binary (it skips that block without one).
+- 1012 passing at 0.19.12-beta on WordPress 7.1.3 with PHP 8.5 and 8.4, zero notices. `tests/smoke-migration.php` runs the page cache drop-in in a child PHP process, so the suite needs a CLI PHP binary (it skips that block without one).
 - The `--wporg` build takes its changelog from `bin/wporg-changelog/<version>.txt` when that file exists. 0.19.7-beta needed it, since the automatic-update default lives in the updater the directory build strips. 0.19.8-beta's file also carries 0.19.7's directory lines, because no 0.19.7 zip reached the directory.
 - Plugin Check 2.1.0 on the `--wporg` zip: 0 errors, 81 warnings. Those are the baseline. WPCS reports 278 errors and 217 warnings on the directory build, all pre-existing, so compare against those numbers rather than zero.
 - Rig recipes are in the Mac's memory files `reference_perdita_review_tooling` and `reference_headless_wp_test_rig`.
+
+## Page cache and WordPress's own output buffer
+
+WordPress 6.9+ opens a template enhancement buffer right before the template (`wp_start_template_enhancement_output_buffer()`, inside the page cache's capture buffer) and fills its placeholders, late block styles among them, in that buffer's callback. `Perdita_Caching::write_buffer()` closes every buffer above its own level before reading, then reads its own. Until 0.19.12-beta it read the innermost buffer at shutdown 0, so every cached page lacked WordPress's per-block CSS while the first visitor's copy had it. To see what a visitor really gets, compare a cached fetch (`x-cache: HIT`) with one carrying an unknown query arg, which skips the cache.

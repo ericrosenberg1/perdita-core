@@ -88,6 +88,14 @@ class Perdita_Caching {
 	private $buffering = false;
 
 	/**
+	 * ob_get_level() right after our capture buffer opened, so write_buffer()
+	 * reads our buffer and not one somebody opened after it.
+	 *
+	 * @var int
+	 */
+	private $buffer_level = 0;
+
+	/**
 	 * Constructor. Wire serve/capture on the front end and purge hooks
 	 * everywhere (edits happen in the admin).
 	 *
@@ -468,6 +476,7 @@ class Perdita_Caching {
 		}
 		$this->buffering = true;
 		ob_start();
+		$this->buffer_level = ob_get_level();
 		add_action( 'shutdown', array( $this, 'write_buffer' ), 0 );
 	}
 
@@ -573,6 +582,25 @@ class Perdita_Caching {
 		}
 		$this->buffering = false;
 
+		// Close every buffer opened after ours first, so its callback runs and
+		// its output lands in ours. WordPress 6.9+ opens one right before the
+		// template (wp_start_template_enhancement_output_buffer()) and fills
+		// its placeholders there, block styles included, so reading the
+		// innermost buffer here stored the page without them: cached pages on
+		// nonprofitmanager.app and hsatracker.org lost WordPress's per-block
+		// CSS (buttons, groups, spacers) while the first visitor's copy had it.
+		while ( ob_get_level() > $this->buffer_level ) {
+			$status = ob_get_status();
+			if ( empty( $status['flags'] ) || ! ( $status['flags'] & PHP_OUTPUT_HANDLER_REMOVABLE ) || ! ob_end_flush() ) {
+				return;
+			}
+		}
+		// Our buffer is gone (something closed it), so whatever buffer is
+		// current now isn't the page. Don't cache it.
+		if ( ob_get_level() !== $this->buffer_level ) {
+			return;
+		}
+
 		$html = ob_get_contents();
 		if ( false === $html ) {
 			return;
@@ -585,8 +613,10 @@ class Perdita_Caching {
 		}
 
 		// Only cache a normal 200 response.
+		// http_response_code() answers false only where no response exists
+		// (the CLI), never on a web request.
 		$status = function_exists( 'http_response_code' ) ? http_response_code() : 200;
-		if ( 200 !== (int) $status ) {
+		if ( false !== $status && 200 !== (int) $status ) {
 			return;
 		}
 

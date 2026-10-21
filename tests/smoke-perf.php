@@ -123,6 +123,52 @@ remove_action( 'added_option', array( $__perf_cache, 'purge_on_option_change' ) 
 remove_action( 'updated_option', array( $__perf_cache, 'purge_on_option_change' ) );
 remove_action( 'deleted_option', array( $__perf_cache, 'purge_on_option_change' ) );
 
+// The page cache stores the page as WordPress finished it. WordPress 6.9+
+// opens its template enhancement buffer inside ours and fills placeholders
+// (late block styles) in that buffer's callback. write_buffer() read the
+// innermost buffer, so cached pages lost WordPress's per-block CSS. This
+// stands in for that buffer and checks the stored file and the response.
+$__perf_props = array();
+foreach ( array( 'buffering', 'cache_file', 'buffer_level' ) as $__perf_prop_name ) {
+	$__perf_props[ $__perf_prop_name ] = new ReflectionProperty( 'Perdita_Caching', $__perf_prop_name );
+	if ( PHP_VERSION_ID < 80100 ) {
+		$__perf_props[ $__perf_prop_name ]->setAccessible( true );
+	}
+}
+$__perf_enh_file = Perdita_Caching::file_for_key( 'https://perdita-cache-enhancement.example/page/' );
+ob_start(); // Swallows what write_buffer() sends to the "browser".
+ob_start(); // The capture buffer serve_or_capture() opens.
+$__perf_props['buffering']->setValue( $__perf_cache, true );
+$__perf_props['cache_file']->setValue( $__perf_cache, $__perf_enh_file );
+$__perf_props['buffer_level']->setValue( $__perf_cache, ob_get_level() );
+ob_start(
+	static function ( $out ) {
+		return str_replace( '<!--perdita-placeholder-->', '<style id="wp-block-button-inline-css"></style>', $out );
+	}
+);
+echo '<!doctype html><html><head><!--perdita-placeholder--></head><body>cached</body></html>';
+$__perf_level_before = ob_get_level();
+$__perf_cache->write_buffer();
+$__perf_enh_sent = (string) ob_get_clean();
+$__perf_enh_stored = is_file( $__perf_enh_file ) ? (string) file_get_contents( $__perf_enh_file ) : ''; // phpcs:ignore WordPress.WP.AlternativeFunctions
+$ok( false !== strpos( $__perf_enh_stored, 'wp-block-button-inline-css' ) && false === strpos( $__perf_enh_stored, 'perdita-placeholder' ), 'caching: the stored page is the one WordPress finished, with buffers opened inside ours (block styles) already applied' );
+$ok( $__perf_enh_sent === $__perf_enh_stored && ob_get_level() === $__perf_level_before - 3, 'caching: the first visitor gets the same finished page, and both buffers are closed' );
+wp_delete_file( $__perf_enh_file );
+wp_delete_file( $__perf_enh_file . '.json' );
+
+// A capture buffer somebody else already closed is not the page: nothing
+// may be stored from whatever buffer is current instead.
+ob_start(); // An unrelated buffer that outlives ours.
+$__perf_props['buffering']->setValue( $__perf_cache, true );
+$__perf_props['cache_file']->setValue( $__perf_cache, $__perf_enh_file );
+$__perf_props['buffer_level']->setValue( $__perf_cache, ob_get_level() + 1 );
+echo '<!doctype html><html><body>not the page</body></html>';
+$__perf_cache->write_buffer();
+ob_end_clean();
+$ok( ! is_file( $__perf_enh_file ), 'caching: with its capture buffer already closed, write_buffer() stores nothing' );
+wp_delete_file( $__perf_enh_file );
+wp_delete_file( $__perf_enh_file . '.json' );
+
 $__perf_is_cacheable = new ReflectionMethod( 'Perdita_Caching', 'is_cacheable' );
 if ( PHP_VERSION_ID < 80100 ) { $__perf_is_cacheable->setAccessible( true ); }
 $__perf_request_key = new ReflectionMethod( 'Perdita_Caching', 'request_key' );
