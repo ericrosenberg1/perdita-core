@@ -135,6 +135,12 @@
 		align-items: stretch;
 	}
 
+	/* In a column the 300px basis becomes a height, which stretched a
+	   two-line message to 300px and covered half a phone screen. */
+	.perdita-consent-banner__message {
+		flex-basis: auto;
+	}
+
 	.perdita-consent-banner__actions {
 		justify-content: flex-end;
 	}
