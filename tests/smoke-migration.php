@@ -186,6 +186,18 @@ $_SERVER = $mig_server;
 require_once PERDITA_CORE_DIR . 'inc/modules/caching/class-perdita-caching.php';
 $mig_src = Perdita_Caching::dropin_source();
 $ok( false !== strpos( $mig_src, Perdita_Caching::DROPIN_MARKER ), 'cache drop-in: the source names itself, so a foreign advanced-cache.php is never overwritten' );
+$ok( 0 === strpos( $mig_src, "<?php\n/**\n * " . Perdita_Caching::DROPIN_MARKER . ' v' . Perdita_Caching::DROPIN_VERSION . ".\n" ) && false === strpos( $mig_src, '%%PERDITA_' ) && "} )();\n" === substr( $mig_src, -7 ), 'cache drop-in: the line template fills every placeholder and keeps the exact file shape' );
+
+// wordpress.org's Plugin Check refuses heredoc and nowdoc, and 0.19.9-beta's
+// drop-in writer used one. Keep every shipped PHP file free of them.
+$mig_heredoc = array();
+foreach ( new RecursiveIteratorIterator( new RecursiveDirectoryIterator( PERDITA_CORE_DIR . 'inc', FilesystemIterator::SKIP_DOTS ) ) as $mig_f ) {
+	if ( 'php' === $mig_f->getExtension() && preg_match( '/<<<\s*[\'"]?[A-Za-z_]/', (string) file_get_contents( $mig_f->getPathname() ) ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- local file.
+		$mig_heredoc[] = str_replace( PERDITA_CORE_DIR, '', $mig_f->getPathname() );
+	}
+}
+$ok( array() === $mig_heredoc, 'plugin check: no heredoc or nowdoc in shipped PHP' . ( $mig_heredoc ? ' (' . implode( ', ', $mig_heredoc ) . ')' : '' ) );
+unset( $mig_heredoc, $mig_f );
 
 $mig_php = defined( 'PHP_BINARY' ) && is_executable( PHP_BINARY ) && 'cli' === PHP_SAPI ? PHP_BINARY : '';
 $mig_dir = trailingslashit( get_temp_dir() ) . 'perdita-dropin-' . wp_generate_password( 6, false ) . '/';

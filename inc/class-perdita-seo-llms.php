@@ -121,7 +121,7 @@ class Perdita_SEO_Llms {
 		$removed = array();
 		foreach ( array( 'llms.txt', 'llms-full.txt' ) as $name ) {
 			$file = ABSPATH . $name;
-			if ( ! is_file( $file ) || ! is_writable( $file ) ) {
+			if ( ! is_file( $file ) || ! wp_is_writable( $file ) ) {
 				continue;
 			}
 			$head = (string) file_get_contents( $file, false, null, 0, 2048 ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- a local file in the site root, not a URL.

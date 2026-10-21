@@ -1272,92 +1272,102 @@ class Perdita_Caching {
 		$export = "json_decode( '" . str_replace( array( '\\', "'" ), array( '\\\\', "\\'" ), $json ) . "', true )";
 		$marker = self::DROPIN_MARKER;
 		$ver    = self::DROPIN_VERSION;
-		return <<<PHP
-<?php
-/**
- * {$marker} v{$ver}.
- *
- * Perdita Core wrote this file and rewrites or removes it from the Caching
- * screen. Edits here are lost. It serves a page Perdita already cached before
- * WordPress loads, and hands every other request to WordPress unchanged.
- */
-
-defined( 'ABSPATH' ) || exit;
-
-( function () {
-	\$c = {$export};
-	if ( ( defined( 'WP_CLI' ) && WP_CLI ) || ! is_file( \$c['dir'] . 'early-serve.on' ) ) {
-		return;
-	}
-	if ( 'GET' !== strtoupper( (string) ( \$_SERVER['REQUEST_METHOD'] ?? 'GET' ) ) || ! empty( \$_POST ) ) {
-		return;
-	}
-	\$host = strtolower( (string) preg_replace( '/:\\d+\$/', '', (string) ( \$_SERVER['HTTP_HOST'] ?? '' ) ) );
-	if ( \$host !== \$c['host'] ) {
-		return;
-	}
-	foreach ( array_keys( \$_COOKIE ) as \$name ) {
-		foreach ( \$c['cookies'] as \$needle ) {
-			if ( false !== stripos( (string) \$name, \$needle ) ) {
-				return;
-			}
-		}
-	}
-	\$pairs = array();
-	foreach ( \$_GET as \$k => \$v ) {
-		if ( in_array( (string) \$k, \$c['ignore'], true ) ) {
-			continue;
-		}
-		if ( ! in_array( (string) \$k, \$c['allow'], true ) || ! is_string( \$v ) || ! preg_match( '/^[A-Za-z0-9_-]*\$/', \$v ) ) {
-			return;
-		}
-		\$pairs[ (string) \$k ] = \$v;
-	}
-	ksort( \$pairs );
-	\$query = array();
-	foreach ( \$pairs as \$k => \$v ) {
-		\$query[] = rawurlencode( \$k ) . '=' . rawurlencode( \$v );
-	}
-	\$path = (string) parse_url( (string) ( \$_SERVER['REQUEST_URI'] ?? '/' ), PHP_URL_PATH );
-	\$path = '' === \$path ? '/' : \$path;
-	\$https = ( isset( \$_SERVER['HTTPS'] ) && ( 'on' === strtolower( (string) \$_SERVER['HTTPS'] ) || '1' === (string) \$_SERVER['HTTPS'] ) ) || ( isset( \$_SERVER['SERVER_PORT'] ) && '443' === (string) \$_SERVER['SERVER_PORT'] );
-	\$key  = ( \$https ? 'https' : 'http' ) . '://' . \$c['host'] . \$path . ( \$query ? '?' . implode( '&', \$query ) : '' );
-	\$file = \$c['dir'] . sha1( \$key ) . '.html';
-	\$mtime = (int) @filemtime( \$file );
-	if ( \$mtime <= 0 || time() - \$mtime > \$c['ttl'] || headers_sent() ) {
-		return;
-	}
-	\$size = (int) @filesize( \$file );
-	\$etag = '"' . \$mtime . '-' . \$size . '"';
-	\$sent = array();
-	\$side = @file_get_contents( \$file . '.json' );
-	foreach ( (array) json_decode( (string) \$side, true ) as \$line ) {
-		if ( is_string( \$line ) && false === strpbrk( \$line, "\\r\\n" ) ) {
-			\$name = strtolower( trim( (string) strtok( \$line, ':' ) ) );
-			header( \$line, 'link' !== \$name );
-			\$sent[ \$name ] = true;
-		}
-	}
-	if ( empty( \$sent['content-type'] ) ) {
-		header( 'Content-Type: text/html; charset=' . \$c['charset'] );
-	}
-	header( 'X-Cache: HIT' );
-	header( 'X-Perdita-Cache: early' );
-	header( 'Cache-Control: max-age=' . (int) \$c['max_age'] . ', public' );
-	header( 'Age: ' . max( 0, time() - \$mtime ) );
-	header( 'ETag: ' . \$etag );
-	header( 'Last-Modified: ' . gmdate( 'D, d M Y H:i:s', \$mtime ) . ' GMT' );
-	\$inm = (string) ( \$_SERVER['HTTP_IF_NONE_MATCH'] ?? '' );
-	\$ims = isset( \$_SERVER['HTTP_IF_MODIFIED_SINCE'] ) ? strtotime( (string) \$_SERVER['HTTP_IF_MODIFIED_SINCE'] ) : false;
-	if ( ( '' !== \$inm && \$inm === \$etag ) || ( false !== \$ims && \$ims >= \$mtime ) ) {
-		http_response_code( 304 );
-		exit;
-	}
-	readfile( \$file );
-	exit;
-} )();
-
-PHP;
+		$template = array(
+			'<?php',
+			'/**',
+			' * %%PERDITA_MARKER%% v%%PERDITA_VER%%.',
+			' *',
+			' * Perdita Core wrote this file and rewrites or removes it from the Caching',
+			' * screen. Edits here are lost. It serves a page Perdita already cached before',
+			' * WordPress loads, and hands every other request to WordPress unchanged.',
+			' */',
+			'',
+			'defined( \'ABSPATH\' ) || exit;',
+			'',
+			'( function () {',
+			'	$c = %%PERDITA_CONFIG%%;',
+			'	if ( ( defined( \'WP_CLI\' ) && WP_CLI ) || ! is_file( $c[\'dir\'] . \'early-serve.on\' ) ) {',
+			'		return;',
+			'	}',
+			'	if ( \'GET\' !== strtoupper( (string) ( $_SERVER[\'REQUEST_METHOD\'] ?? \'GET\' ) ) || ! empty( $_POST ) ) {',
+			'		return;',
+			'	}',
+			'	$host = strtolower( (string) preg_replace( \'/:\\d+$/\', \'\', (string) ( $_SERVER[\'HTTP_HOST\'] ?? \'\' ) ) );',
+			'	if ( $host !== $c[\'host\'] ) {',
+			'		return;',
+			'	}',
+			'	foreach ( array_keys( $_COOKIE ) as $name ) {',
+			'		foreach ( $c[\'cookies\'] as $needle ) {',
+			'			if ( false !== stripos( (string) $name, $needle ) ) {',
+			'				return;',
+			'			}',
+			'		}',
+			'	}',
+			'	$pairs = array();',
+			'	foreach ( $_GET as $k => $v ) {',
+			'		if ( in_array( (string) $k, $c[\'ignore\'], true ) ) {',
+			'			continue;',
+			'		}',
+			'		if ( ! in_array( (string) $k, $c[\'allow\'], true ) || ! is_string( $v ) || ! preg_match( \'/^[A-Za-z0-9_-]*$/\', $v ) ) {',
+			'			return;',
+			'		}',
+			'		$pairs[ (string) $k ] = $v;',
+			'	}',
+			'	ksort( $pairs );',
+			'	$query = array();',
+			'	foreach ( $pairs as $k => $v ) {',
+			'		$query[] = rawurlencode( $k ) . \'=\' . rawurlencode( $v );',
+			'	}',
+			'	$path = (string) parse_url( (string) ( $_SERVER[\'REQUEST_URI\'] ?? \'/\' ), PHP_URL_PATH );',
+			'	$path = \'\' === $path ? \'/\' : $path;',
+			'	$https = ( isset( $_SERVER[\'HTTPS\'] ) && ( \'on\' === strtolower( (string) $_SERVER[\'HTTPS\'] ) || \'1\' === (string) $_SERVER[\'HTTPS\'] ) ) || ( isset( $_SERVER[\'SERVER_PORT\'] ) && \'443\' === (string) $_SERVER[\'SERVER_PORT\'] );',
+			'	$key  = ( $https ? \'https\' : \'http\' ) . \'://\' . $c[\'host\'] . $path . ( $query ? \'?\' . implode( \'&\', $query ) : \'\' );',
+			'	$file = $c[\'dir\'] . sha1( $key ) . \'.html\';',
+			'	$mtime = (int) @filemtime( $file );',
+			'	if ( $mtime <= 0 || time() - $mtime > $c[\'ttl\'] || headers_sent() ) {',
+			'		return;',
+			'	}',
+			'	$size = (int) @filesize( $file );',
+			'	$etag = \'"\' . $mtime . \'-\' . $size . \'"\';',
+			'	$sent = array();',
+			'	$side = @file_get_contents( $file . \'.json\' );',
+			'	foreach ( (array) json_decode( (string) $side, true ) as $line ) {',
+			'		if ( is_string( $line ) && false === strpbrk( $line, "\\r\\n" ) ) {',
+			'			$name = strtolower( trim( (string) strtok( $line, \':\' ) ) );',
+			'			header( $line, \'link\' !== $name );',
+			'			$sent[ $name ] = true;',
+			'		}',
+			'	}',
+			'	if ( empty( $sent[\'content-type\'] ) ) {',
+			'		header( \'Content-Type: text/html; charset=\' . $c[\'charset\'] );',
+			'	}',
+			'	header( \'X-Cache: HIT\' );',
+			'	header( \'X-Perdita-Cache: early\' );',
+			'	header( \'Cache-Control: max-age=\' . (int) $c[\'max_age\'] . \', public\' );',
+			'	header( \'Age: \' . max( 0, time() - $mtime ) );',
+			'	header( \'ETag: \' . $etag );',
+			'	header( \'Last-Modified: \' . gmdate( \'D, d M Y H:i:s\', $mtime ) . \' GMT\' );',
+			'	$inm = (string) ( $_SERVER[\'HTTP_IF_NONE_MATCH\'] ?? \'\' );',
+			'	$ims = isset( $_SERVER[\'HTTP_IF_MODIFIED_SINCE\'] ) ? strtotime( (string) $_SERVER[\'HTTP_IF_MODIFIED_SINCE\'] ) : false;',
+			'	if ( ( \'\' !== $inm && $inm === $etag ) || ( false !== $ims && $ims >= $mtime ) ) {',
+			'		http_response_code( 304 );',
+			'		exit;',
+			'	}',
+			'	readfile( $file );',
+			'	exit;',
+			'} )();',
+			'',
+		);
+		// A plain list of lines, not a heredoc: the wordpress.org Plugin Check
+		// refuses heredoc syntax.
+		return strtr(
+			implode( "\n", $template ),
+			array(
+				'%%PERDITA_MARKER%%' => $marker,
+				'%%PERDITA_VER%%'    => $ver,
+				'%%PERDITA_CONFIG%%' => $export,
+			)
+		);
 	}
 
 	/**
