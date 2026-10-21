@@ -97,6 +97,13 @@ class Perdita_SEO {
 
 		add_filter( 'document_title_parts', array( $this, 'title_parts' ) );
 		add_filter( 'document_title_separator', array( $this, 'separator' ) );
+		// Print the title the owner wrote. Core runs wptexturize() over the
+		// finished <title>, which turned a "-" separator into an en dash and
+		// a typed apostrophe into a curly one. Every SEO plugin a site moves
+		// from prints titles as written, so a switch changed every title in
+		// the search results. The text is still escaped (esc_html stays on
+		// this filter), only the typography pass goes.
+		remove_filter( 'document_title', 'wptexturize' );
 		add_action( 'wp_head', array( $this, 'head' ), 1 );
 		add_filter( 'wp_robots', array( $this, 'robots' ) );
 		add_filter( 'robots_txt', array( $this, 'robots_txt' ), 5, 2 );
@@ -329,7 +336,31 @@ class Perdita_SEO {
 		// paginate_links()/the_posts_pagination() rely on, so it is correct
 		// for any archive type under either permalink structure.
 		$paged = (int) get_query_var( 'paged' );
-		return (string) get_pagenum_link( max( 1, $paged ), false );
+		return self::strip_foreign_query_args( (string) get_pagenum_link( max( 1, $paged ), false ) );
+	}
+
+	/**
+	 * Drop every query argument WordPress doesn't route on.
+	 *
+	 * get_pagenum_link() keeps the request's whole query string, so a
+	 * category visited as ?utm_source=newsletter named that URL as its own
+	 * canonical, and every tracking link became a separate page to a search
+	 * engine. Only public query vars (cat, s, post_type, a taxonomy's own
+	 * var under plain permalinks) can change what an archive shows, so those
+	 * stay and the rest go.
+	 *
+	 * @param string $url URL.
+	 * @return string
+	 */
+	public static function strip_foreign_query_args( $url ) {
+		$query = (string) wp_parse_url( $url, PHP_URL_QUERY );
+		if ( '' === $query ) {
+			return $url;
+		}
+		wp_parse_str( $query, $args );
+		$keep = ( isset( $GLOBALS['wp'] ) && $GLOBALS['wp'] instanceof WP ) ? (array) $GLOBALS['wp']->public_query_vars : array();
+		$drop = array_values( array_diff( array_keys( (array) $args ), $keep ) );
+		return $drop ? (string) remove_query_arg( $drop, $url ) : $url;
 	}
 
 	/**

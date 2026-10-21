@@ -535,7 +535,55 @@ class Perdita_SEO_Store {
 	}
 
 	/**
+	 * The media library id for an image URL another plugin stored, or 0.
+	 *
+	 * attachment_url_to_postid() only matches the site's current uploads
+	 * URL exactly, so a URL saved before a move to https, a www change or a
+	 * new domain found nothing and the image silently didn't import. A
+	 * second try maps whatever came after /uploads/ onto today's uploads
+	 * URL, and the scaled-down copies WordPress names "-1024x683" fall back
+	 * to their original.
+	 *
+	 * @param string $url Image URL.
+	 * @return int
+	 */
+	public static function attachment_id_for_url( $url ) {
+		$url = trim( (string) $url );
+		if ( '' === $url ) {
+			return 0;
+		}
+		$id = (int) attachment_url_to_postid( $url );
+		if ( $id ) {
+			return $id;
+		}
+		$path = (string) wp_parse_url( $url, PHP_URL_PATH );
+		$pos  = strpos( $path, '/uploads/' );
+		if ( false === $pos ) {
+			return 0;
+		}
+		$uploads  = wp_get_upload_dir();
+		$relative = substr( $path, $pos + strlen( '/uploads/' ) );
+		$id       = (int) attachment_url_to_postid( trailingslashit( $uploads['baseurl'] ) . $relative );
+		if ( ! $id ) {
+			$original = preg_replace( '/-\d+x\d+(\.[a-z0-9]+)$/i', '$1', $relative );
+			if ( $original !== $relative ) {
+				$id = (int) attachment_url_to_postid( trailingslashit( $uploads['baseurl'] ) . $original );
+			}
+		}
+		return $id;
+	}
+
+	/**
 	 * Import global settings from All in One SEO, if present.
+	 *
+	 * Carries the separator, the home page title and description, every post
+	 * type and taxonomy title and description template with its noindex
+	 * choice, author and date archive noindex, paginated noindex, who the site
+	 * represents with its name and logo, the default share image and X card,
+	 * social profiles, search engine verification codes and the RSS footers.
+	 * AIOSEO's #tags become Perdita %tokens% through
+	 * Perdita_SEO_Variables::from_aioseo(). A template with a tag Perdita has
+	 * no twin for is left at Perdita's default instead of printing the tag.
 	 *
 	 * @return int Number of fields imported.
 	 */
@@ -548,20 +596,136 @@ class Perdita_SEO_Store {
 		if ( ! is_array( $o ) ) {
 			return 0;
 		}
+		// Post type and taxonomy templates live in a second option.
+		$dyn_raw = get_option( 'aioseo_options_dynamic' );
+		$dyn     = is_string( $dyn_raw ) ? json_decode( $dyn_raw, true ) : ( is_array( $dyn_raw ) ? $dyn_raw : array() );
+		$dyn     = is_array( $dyn ) ? $dyn : array();
+
+		if ( ! class_exists( 'Perdita_SEO_Variables' ) ) {
+			require_once __DIR__ . '/class-perdita-seo-variables.php';
+		}
+		$tpl = function ( $value ) {
+			$value = trim( html_entity_decode( (string) $value, ENT_QUOTES | ENT_HTML5, 'UTF-8' ) );
+			return '' === $value ? null : Perdita_SEO_Variables::from_aioseo( $value );
+		};
+		$noindexed = function ( $row ) {
+			$robots = isset( $row['advanced']['robotsMeta'] ) && is_array( $row['advanced']['robotsMeta'] ) ? $row['advanced']['robotsMeta'] : array();
+			if ( isset( $row['show'] ) && false === $row['show'] ) {
+				return true;
+			}
+			return array_key_exists( 'default', $robots ) && empty( $robots['default'] ) && ! empty( $robots['noindex'] );
+		};
+
 		$patch = array( 'social' => array() );
 		$n     = 0;
 
-		$global = isset( $o['searchAppearance']['global'] ) ? $o['searchAppearance']['global'] : array();
+		$sa     = isset( $o['searchAppearance'] ) && is_array( $o['searchAppearance'] ) ? $o['searchAppearance'] : array();
+		$global = isset( $sa['global'] ) && is_array( $sa['global'] ) ? $sa['global'] : array();
+
+		// AIOSEO stores the separator as an HTML entity ("&#45;", "&ndash;").
 		if ( ! empty( $global['separator'] ) ) {
-			$patch['separator'] = (string) $global['separator'];
-			++$n;
-		}
-		if ( ! empty( $global['metaDescription'] ) && false === strpos( $global['metaDescription'], '#' ) ) {
-			$patch['default_description'] = (string) $global['metaDescription'];
+			$patch['separator'] = html_entity_decode( (string) $global['separator'], ENT_QUOTES | ENT_HTML5, 'UTF-8' );
 			++$n;
 		}
 
-		$urls = isset( $o['social']['profiles']['urls'] ) ? $o['social']['profiles']['urls'] : array();
+		// AIOSEO's global title and description are its Home Page fields.
+		// They only reach a site that lists posts on the front page. With a
+		// static front page AIOSEO uses that page's own fields, which the
+		// per-post importer in Perdita Pro carries.
+		if ( 'page' !== get_option( 'show_on_front' ) ) {
+			$home_title = $tpl( $global['siteTitle'] ?? '' );
+			if ( null !== $home_title && '' !== $home_title ) {
+				$patch['home_title'] = $home_title;
+				++$n;
+			}
+			$home_desc = $tpl( $global['metaDescription'] ?? '' );
+			if ( null !== $home_desc && '' !== $home_desc ) {
+				$patch['home_description'] = $home_desc;
+				++$n;
+			}
+		}
+
+		// Per post type and per taxonomy title and description templates, and
+		// the noindex choice for each.
+		$groups = array(
+			'post_types' => array( isset( $dyn['searchAppearance']['postTypes'] ) ? $dyn['searchAppearance']['postTypes'] : array(), 'post_type_exists' ),
+			'taxonomies' => array( isset( $dyn['searchAppearance']['taxonomies'] ) ? $dyn['searchAppearance']['taxonomies'] : array(), 'taxonomy_exists' ),
+		);
+		foreach ( $groups as $key => $group ) {
+			list( $rows, $exists ) = $group;
+			foreach ( (array) $rows as $slug => $row ) {
+				if ( ! is_array( $row ) || ! call_user_func( $exists, $slug ) ) {
+					continue;
+				}
+				$clean = array();
+				$title = $tpl( $row['title'] ?? '' );
+				if ( null !== $title && '' !== $title ) {
+					$clean['title'] = $title;
+				}
+				$desc = $tpl( $row['metaDescription'] ?? '' );
+				if ( null !== $desc && '' !== $desc ) {
+					$clean['description'] = $desc;
+				}
+				if ( $noindexed( $row ) ) {
+					$clean['noindex'] = true;
+				}
+				if ( $clean ) {
+					$patch[ $key ][ $slug ] = $clean;
+					$n                     += count( $clean );
+				}
+			}
+		}
+
+		// Author and date archives.
+		$archives = isset( $sa['archives'] ) && is_array( $sa['archives'] ) ? $sa['archives'] : array();
+		foreach ( array(
+			'author' => 'archive_author',
+			'date'   => 'archive_date',
+		) as $theirs => $ours ) {
+			if ( isset( $archives[ $theirs ] ) && is_array( $archives[ $theirs ] ) ) {
+				$patch['noindex'][ $ours ] = $noindexed( $archives[ $theirs ] );
+				++$n;
+			}
+		}
+
+		$robots = isset( $sa['advanced']['globalRobotsMeta'] ) && is_array( $sa['advanced']['globalRobotsMeta'] ) ? $sa['advanced']['globalRobotsMeta'] : array();
+		if ( array_key_exists( 'noindexPaginated', $robots ) ) {
+			$patch['noindex_paginated'] = ! empty( $robots['noindexPaginated'] );
+			++$n;
+		}
+
+		// Knowledge graph: who the site represents, its name and logo.
+		$schema = isset( $global['schema'] ) && is_array( $global['schema'] ) ? $global['schema'] : array();
+		if ( ! empty( $schema['siteRepresents'] ) ) {
+			$patch['schema_type'] = 'person' === $schema['siteRepresents'] ? 'Person' : 'Organization';
+			++$n;
+		}
+		$org_name = $tpl( $schema['organizationName'] ?? '' );
+		if ( null !== $org_name && '' !== $org_name && false === strpos( $org_name, '%' ) ) {
+			$patch['org_name'] = $org_name;
+			++$n;
+		}
+		$logo_id = ! empty( $schema['organizationLogo'] ) ? self::attachment_id_for_url( (string) $schema['organizationLogo'] ) : 0;
+		if ( $logo_id ) {
+			$patch['org_logo_id'] = $logo_id;
+			++$n;
+		}
+
+		// Social defaults: the fallback share image and the X card type.
+		$social   = isset( $o['social'] ) && is_array( $o['social'] ) ? $o['social'] : array();
+		$fb       = isset( $social['facebook']['general'] ) && is_array( $social['facebook']['general'] ) ? $social['facebook']['general'] : array();
+		$image_id = ! empty( $fb['defaultImagePosts'] ) ? self::attachment_id_for_url( (string) $fb['defaultImagePosts'] ) : 0;
+		if ( $image_id ) {
+			$patch['default_image_id'] = $image_id;
+			++$n;
+		}
+		$card = $social['twitter']['general']['defaultCardType'] ?? '';
+		if ( in_array( $card, array( 'summary', 'summary_large_image' ), true ) ) {
+			$patch['twitter_card'] = $card;
+			++$n;
+		}
+
+		$urls = isset( $social['profiles']['urls'] ) ? $social['profiles']['urls'] : array();
 		foreach ( array(
 			'facebook'  => 'facebookPageUrl',
 			'twitter'   => 'twitterUrl',
@@ -574,6 +738,43 @@ class Perdita_SEO_Store {
 				++$n;
 			}
 		}
+
+		// Search engine verification codes. Losing one can cost a site its
+		// verified Search Console or Bing Webmaster property.
+		$webmaster = isset( $o['webmasterTools'] ) && is_array( $o['webmasterTools'] ) ? $o['webmasterTools'] : array();
+		foreach ( array( 'google', 'bing', 'pinterest', 'yandex', 'baidu' ) as $engine ) {
+			if ( ! empty( $webmaster[ $engine ] ) && is_string( $webmaster[ $engine ] ) ) {
+				$patch[ 'verify_' . $engine ] = $webmaster[ $engine ];
+				++$n;
+			}
+		}
+
+		// RSS feed footers, with AIOSEO's tags turned into Perdita's feed tokens.
+		$rss_tags = array(
+			'#post_link'   => '%%POSTLINK%%',
+			'#post_title'  => '%%POSTTITLE%%',
+			'#site_link'   => '%%BLOGLINK%%',
+			'#site_title'  => '%%BLOGTITLE%%',
+			'#tagline'     => '%%BLOGDESC%%',
+			'#author_link' => '%%AUTHORLINK%%',
+		);
+		$rss      = isset( $o['rssContent'] ) && is_array( $o['rssContent'] ) ? $o['rssContent'] : array();
+		foreach ( array(
+			'before' => 'rss_before',
+			'after'  => 'rss_after',
+		) as $theirs => $ours ) {
+			$value = trim( html_entity_decode( (string) ( $rss[ $theirs ] ?? '' ), ENT_QUOTES | ENT_HTML5, 'UTF-8' ) );
+			if ( '' === $value ) {
+				continue;
+			}
+			$value = strtr( $value, $rss_tags );
+			if ( preg_match( '/#[a-z][a-z0-9_]*/i', $value ) ) {
+				continue;
+			}
+			$patch[ $ours ] = $value;
+			++$n;
+		}
+
 		if ( $n ) {
 			$this->save( $patch );
 		}

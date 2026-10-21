@@ -338,7 +338,26 @@ final class Perdita_Core {
 			$state['modules'] = array();
 		}
 		$state['modules'][ $id ] = (bool) $enabled;
-		return self::save_state( $state );
+		$saved                   = self::save_state( $state );
+		if ( 'caching' === $id && ! $enabled ) {
+			self::remove_cache_dropin();
+		}
+		return $saved;
+	}
+
+	/**
+	 * Take out the page cache's early-serve drop-in, if it's Perdita's. Runs
+	 * when the caching module or this plugin goes off, because a drop-in
+	 * left behind keeps serving pages that nothing purges any more.
+	 */
+	public static function remove_cache_dropin() {
+		$file = PERDITA_CORE_DIR . 'inc/modules/caching/class-perdita-caching.php';
+		if ( ! class_exists( 'Perdita_Caching' ) && is_readable( $file ) ) {
+			require_once $file;
+		}
+		if ( class_exists( 'Perdita_Caching' ) ) {
+			Perdita_Caching::remove_dropin();
+		}
 	}
 
 	/**
@@ -430,6 +449,7 @@ final class Perdita_Core {
 		foreach ( self::CRON_HOOKS as $hook ) {
 			wp_clear_scheduled_hook( $hook );
 		}
+		self::remove_cache_dropin();
 		delete_transient( 'perdita_core_update_manifest' );
 	}
 
@@ -657,6 +677,26 @@ final class Perdita_Core {
 					require_once PERDITA_CORE_DIR . 'inc/class-perdita-seo-llms.php';
 					require_once PERDITA_CORE_DIR . 'inc/class-perdita-seo.php';
 					new Perdita_SEO( $core->seo );
+					// A static llms.txt left by AIOSEO or Yoast would shadow
+					// Perdita's own. Clear it once the old plugin is off, and
+					// on admin pages in case it went without a deactivation
+					// (its folder deleted by hand).
+					add_action(
+						'deactivated_plugin',
+						function ( $plugin ) {
+							if ( 0 === strpos( (string) $plugin, 'all-in-one-seo-pack' ) || 0 === strpos( (string) $plugin, 'wordpress-seo' ) ) {
+								add_action(
+									'shutdown',
+									function () {
+										Perdita_SEO_Llms::remove_foreign_static_files( true );
+									}
+								);
+							}
+						}
+					);
+					if ( is_admin() && ! Perdita_SEO::other_seo_active() ) {
+						add_action( 'admin_init', array( 'Perdita_SEO_Llms', 'remove_foreign_static_files' ) );
+					}
 					if ( is_admin() ) {
 						require_once PERDITA_CORE_DIR . 'inc/class-perdita-seo-admin.php';
 						new Perdita_SEO_Admin( $core->seo );

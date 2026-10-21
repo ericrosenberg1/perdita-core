@@ -96,6 +96,7 @@ class Perdita_Caching_Admin {
 			'ttl_hours'     => isset( $_POST['ttl_hours'] ) ? (int) $_POST['ttl_hours'] : 10,
 			'exclude_paths' => isset( $_POST['exclude_paths'] ) ? sanitize_textarea_field( wp_unslash( $_POST['exclude_paths'] ) ) : '',
 			'browser_cache' => isset( $_POST['browser_cache'] ) ? 1 : 0,
+			'early_serve'   => isset( $_POST['early_serve'] ) ? 1 : 0,
 		);
 
 		$clean = Perdita_Caching::sanitize( $raw );
@@ -120,7 +121,36 @@ class Perdita_Caching_Admin {
 			$msg = __( 'Settings saved and browser-cache rules removed from .htaccess.', 'perdita-core' );
 		}
 
+		$dropin = Perdita_Caching::sync_dropin();
+		if ( $clean['early_serve'] && $clean['enabled'] ) {
+			$msg .= ' ' . $this->dropin_message( $dropin );
+		}
+
 		$this->redirect( $msg );
+	}
+
+	/**
+	 * One sentence for a sync_dropin() result.
+	 *
+	 * @param string $status Result.
+	 * @return string
+	 */
+	private function dropin_message( $status ) {
+		switch ( $status ) {
+			case 'installed':
+			case 'current':
+				return __( 'Cached pages are now served before WordPress loads.', 'perdita-core' );
+			case 'other_cache':
+				/* translators: %s: plugin name. */
+				return sprintf( __( '%s is still active, so Perdita is not serving pages yet. Deactivate it first.', 'perdita-core' ), Perdita_Caching::other_page_cache() );
+			case 'foreign':
+				return __( 'wp-content/advanced-cache.php belongs to another cache plugin, so early serving is off. Deactivate that plugin, or delete the file if the plugin is already gone, then save again.', 'perdita-core' );
+			case 'no_wp_cache':
+				return __( 'Early serving needs define( \'WP_CACHE\', true ); in wp-config.php, above the "That\'s all" line. Add it, then save again.', 'perdita-core' );
+			case 'unwritable':
+				return __( 'wp-content/advanced-cache.php could not be written. Check that wp-content is writable by WordPress.', 'perdita-core' );
+		}
+		return '';
 	}
 
 	/**
@@ -156,6 +186,8 @@ class Perdita_Caching_Admin {
 		$s      = Perdita_Caching::settings();
 		$stats  = Perdita_Caching::stats();
 		$apache = Perdita_Caching::server_is_apache();
+		$other  = Perdita_Caching::other_page_cache();
+		$dropin = Perdita_Caching::dropin_state();
 		?>
 		<style>.perdita-recommended-flag{display:inline-block;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600;background:#edfaef;color:#005c12;}</style>
 		<div class="wrap">
@@ -169,8 +201,27 @@ class Perdita_Caching_Admin {
 			?>
 
 			<p style="max-width:760px;">
-				<?php esc_html_e( 'This is a lightweight page cache. It saves each guest page as a static file and serves it on the next visit, which cuts server work for anonymous visitors. It runs inside WordPress, so a host-level cache or a CDN is still faster and can layer on top of it. Logged-in users, carts, forms, searches, and any page with a query string are never cached.', 'perdita-core' ); ?>
+				<?php esc_html_e( 'This is a lightweight page cache. It saves each guest page as a static file and serves it on the next visit, which cuts server work for anonymous visitors. By default it answers from inside WordPress. Turn on "Serve before WordPress loads" for the speed of a drop-in cache. Logged-in users, carts, forms, searches, and any page with a query string are never cached.', 'perdita-core' ); ?>
 			</p>
+
+			<?php if ( '' !== $other ) : ?>
+				<div class="notice notice-warning inline" style="max-width:760px;">
+					<p>
+						<?php
+						printf(
+							/* translators: %s: plugin name such as WP Super Cache. */
+							esc_html__( '%s is active. Two page caches on one site serve each other\'s stale copies, so Perdita\'s cache stays off while it runs. Turn the settings below on, then deactivate %s on the Plugins screen. Perdita starts serving on the next visit.', 'perdita-core' ),
+							esc_html( $other ),
+							esc_html( $other )
+						);
+						?>
+					</p>
+				</div>
+			<?php elseif ( $s['enabled'] && 'foreign' === $dropin ) : ?>
+				<div class="notice notice-warning inline" style="max-width:760px;">
+					<p><?php esc_html_e( 'wp-content/advanced-cache.php was left by another cache plugin that is no longer active. WordPress still loads it on every request. Delete it, then save these settings again.', 'perdita-core' ); ?></p>
+				</div>
+			<?php endif; ?>
 
 			<div class="card" style="max-width:760px;margin-bottom:16px;">
 				<h2 style="margin-top:0;"><?php esc_html_e( 'Cache status', 'perdita-core' ); ?></h2>
@@ -201,6 +252,29 @@ class Perdita_Caching_Admin {
 								<?php esc_html_e( 'Save and serve static copies of guest pages', 'perdita-core' ); ?>
 							</label> <span class="perdita-recommended-flag"><?php esc_html_e( '(Recommended)', 'perdita-core' ); ?></span>
 							<p class="description"><?php esc_html_e( 'When on, the cache is cleared automatically when you publish or edit content, change the design, or switch themes.', 'perdita-core' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Serve before WordPress loads', 'perdita-core' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="early_serve" value="1" <?php checked( $s['early_serve'] ); ?> />
+								<?php esc_html_e( 'Answer cached pages from wp-content/advanced-cache.php', 'perdita-core' ); ?>
+							</label>
+							<p class="description"><?php esc_html_e( 'The fastest setting, and the way WP Super Cache and most cache plugins work. A cached page goes out before any plugin or theme loads. Perdita writes the drop-in and removes it when you turn this or the cache off. It needs define( \'WP_CACHE\', true ); in wp-config.php, which Perdita never edits.', 'perdita-core' ); ?></p>
+							<?php if ( $s['early_serve'] && $s['enabled'] ) : ?>
+								<p class="description"><strong>
+									<?php
+									if ( 'ours' === $dropin && Perdita_Caching::wp_cache_on() && '' === $other ) {
+										esc_html_e( 'Status: on. Cached pages are served before WordPress loads.', 'perdita-core' );
+									} elseif ( ! Perdita_Caching::wp_cache_on() ) {
+										esc_html_e( 'Status: waiting for WP_CACHE. Add define( \'WP_CACHE\', true ); to wp-config.php, or run: wp config set WP_CACHE true --raw', 'perdita-core' );
+									} else {
+										esc_html_e( 'Status: not active yet. See the note above.', 'perdita-core' );
+									}
+									?>
+								</strong></p>
+							<?php endif; ?>
 						</td>
 					</tr>
 					<tr>
@@ -247,7 +321,7 @@ class Perdita_Caching_Admin {
 
 			<div class="card" style="max-width:760px;border-left:4px solid #2563eb;">
 				<h2 style="margin-top:0;"><?php esc_html_e( 'What is and is not here', 'perdita-core' ); ?></h2>
-				<p><?php esc_html_e( 'These simple settings should work well for the majority of small WordPress sites. It saves each guest page as a static file and serves it right back on the next visit, which is exactly the boost a small site on modest hosting benefits from most. It never touches wp-config.php, so it can never break how your site boots.', 'perdita-core' ); ?></p>
+				<p><?php esc_html_e( 'These simple settings should work well for the majority of small WordPress sites. It saves each guest page as a static file and serves it right back on the next visit, which is exactly the boost a small site on modest hosting benefits from most. It never touches wp-config.php, and the optional early-serve drop-in only answers pages it already cached.', 'perdita-core' ); ?></p>
 				<p class="description">
 					<?php
 					printf(

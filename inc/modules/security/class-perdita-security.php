@@ -139,18 +139,22 @@ class Perdita_Security {
 	/* ---------- 1. login rate limiting ---------- */
 
 	/**
-	 * The client IP for rate limiting. Defaults to REMOTE_ADDR and never trusts
-	 * a forwarded header on its own. Sites behind a proxy or load balancer can
+	 * The client IP for rate limiting. Defaults to REMOTE_ADDR, or the
+	 * visitor address a verified Cloudflare edge reports, and never trusts any
+	 * other forwarded header on its own. Sites behind a proxy or load balancer can
 	 * wire in the real client IP through the filter.
 	 *
 	 * @return string
 	 */
 	public function client_ip() {
-		$ip = isset( $_SERVER['REMOTE_ADDR'] ) ? wp_unslash( $_SERVER['REMOTE_ADDR'] ) : '';
+		// Behind Cloudflare, REMOTE_ADDR is an edge shared by every visitor
+		// on it. Perdita_Client_IP takes CF-Connecting-IP, but only from a
+		// connection inside Cloudflare's published ranges.
+		$ip = Perdita_Client_IP::get();
 		/**
 		 * Filter the resolved client IP used for login rate limiting.
 		 *
-		 * @param string $ip The REMOTE_ADDR value (untrusted headers are ignored by default).
+		 * @param string $ip REMOTE_ADDR, or a verified Cloudflare visitor address (other forwarded headers are ignored).
 		 */
 		$ip = apply_filters( 'perdita_security_client_ip', $ip );
 		return is_string( $ip ) ? trim( $ip ) : '';

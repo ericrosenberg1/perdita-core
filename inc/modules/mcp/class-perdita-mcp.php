@@ -753,7 +753,7 @@ class Perdita_MCP {
 	 * @return string
 	 */
 	public static function client_ip() {
-		$ip = isset( $_SERVER['REMOTE_ADDR'] ) ? wp_unslash( $_SERVER['REMOTE_ADDR'] ) : '';
+		$ip = Perdita_Client_IP::get(); // REMOTE_ADDR, or a verified Cloudflare edge's CF-Connecting-IP.
 		/**
 		 * Filter the resolved client IP used for MCP endpoint rate limiting.
 		 * REMOTE_ADDR is the connecting peer, which is the load balancer's

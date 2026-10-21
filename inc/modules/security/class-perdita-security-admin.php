@@ -106,7 +106,7 @@ class Perdita_Security_Admin {
 	 */
 	private function section_login( $s ) {
 		echo '<hr /><h2>' . esc_html__( 'Login rate limiting', 'perdita-core' ) . '</h2>';
-		echo '<p class="description" style="max-width:760px;">' . esc_html__( 'Safety note: this blocks a client IP after too many failed logins, and it always self-expires. Add your own IP to the allowlist below so you can never lock yourself out. Behind a proxy or CDN, wire the real client IP through the perdita_security_client_ip filter, since the default only reads REMOTE_ADDR.', 'perdita-core' ) . '</p>';
+		echo '<p class="description" style="max-width:760px;">' . esc_html__( 'Safety note: this blocks a client IP after too many failed logins, and it always self-expires. Add your own IP to the allowlist below so you can never lock yourself out. Behind Cloudflare the real visitor address is read automatically. Behind another proxy or CDN, wire it in through the perdita_security_client_ip filter, since the default otherwise reads REMOTE_ADDR.', 'perdita-core' ) . '</p>';
 
 		echo '<table class="form-table" role="presentation">';
 

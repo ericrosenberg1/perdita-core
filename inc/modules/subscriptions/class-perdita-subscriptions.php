@@ -570,7 +570,7 @@ class Perdita_Subscriptions {
 	 * @return string
 	 */
 	private function client_ip() {
-		$ip = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '';
+		$ip = Perdita_Client_IP::get();
 		return (string) apply_filters( 'perdita_subscriptions_client_ip', $ip );
 	}
 
@@ -582,6 +582,9 @@ class Perdita_Subscriptions {
 	 * @return bool
 	 */
 	public static function behind_forwarding_proxy() {
+		if ( '' !== Perdita_Client_IP::from_cloudflare() ) {
+			return false;
+		}
 		return ! empty( $_SERVER['HTTP_CF_CONNECTING_IP'] ) || ! empty( $_SERVER['HTTP_X_FORWARDED_FOR'] ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- presence check only, the value is never read or trusted.
 	}
 

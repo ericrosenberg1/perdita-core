@@ -590,7 +590,9 @@ class Perdita_Forms {
 	 * @return string
 	 */
 	private function client_ip() {
-		$ip = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '';
+		// A Cloudflare edge's CF-Connecting-IP is believed only when the
+		// connection came from Cloudflare's own ranges (Perdita_Client_IP).
+		$ip = Perdita_Client_IP::get();
 		return (string) apply_filters( 'perdita_form_client_ip', $ip );
 	}
 
@@ -603,6 +605,10 @@ class Perdita_Forms {
 	 * @return bool
 	 */
 	public static function behind_forwarding_proxy() {
+		// A verified Cloudflare request already has the real address.
+		if ( '' !== Perdita_Client_IP::from_cloudflare() ) {
+			return false;
+		}
 		return ! empty( $_SERVER['HTTP_CF_CONNECTING_IP'] ) || ! empty( $_SERVER['HTTP_X_FORWARDED_FOR'] ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- presence check only, the value is never read or trusted.
 	}
 

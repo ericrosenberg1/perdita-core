@@ -193,14 +193,14 @@ class Perdita_Pagespeed {
 			return new WP_Error( 'perdita_psi_no_key', __( 'No PageSpeed Insights API key is set yet.', 'perdita-core' ) );
 		}
 
-		// add_query_arg() already URL-encodes every value it's given; passing
-		// pre-encoded strings here double-encodes them (a URL like
-		// "https://example.com/" becomes "https%3A%2F%2F..." instead of the
-		// real address), so PSI receives a garbled url/key and the test fails.
+		// add_query_arg() does NOT encode values, so each one is encoded here
+		// exactly once. Left raw, a home URL carrying its own query string
+		// (a language plugin's "?lang=fr&x=1") had its "&" read as the start
+		// of a new PSI parameter and PSI tested the wrong page.
 		$request_url = add_query_arg(
 			array(
-				'url'      => $url,
-				'key'      => $api_key,
+				'url'      => rawurlencode( $url ),
+				'key'      => rawurlencode( $api_key ),
 				'strategy' => $strategy,
 				'category' => 'performance',
 			),
