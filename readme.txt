@@ -4,7 +4,7 @@ Tags: forms, seo, caching, security, newsletter
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.19.8-beta
+Stable tag: 0.19.9-beta
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -76,6 +76,18 @@ Form entries, subscribers, orders, products, form definitions, the SMTP log, you
 Yes, that's what Pro is built on. Pro registers its own modules into this plugin's registry, so they appear on the same Modules screen and behave the same way.
 
 == Changelog ==
+
+= 0.19.9-beta =
+* Moving off All in One SEO keeps your titles. The settings import now carries the home page, post type and taxonomy templates, noindex rules, logo, default share image, verification codes and RSS footers, and turns AIOSEO's tags into Perdita's.
+* New: "Serve before WordPress loads" on the Caching screen answers cached pages from a drop-in, the way WP Super Cache does. Perdita's cache waits while another page cache plugin is active.
+* Fix: titles print as written, so a "-" separator stays a hyphen.
+* Fix: archive canonicals drop tracking and cache-buster query strings.
+* Fix: a hand-written excerpt is no longer cut off at 155 characters in the meta description.
+* Fix: login lockouts and form throttles use the visitor's own address behind Cloudflare.
+* Fix: an llms.txt left behind by AIOSEO or Yoast no longer hides Perdita's.
+* Fix: the cookie consent banner no longer covers half a phone screen.
+* Fix: the page cache clears after a theme, plugin or WordPress update.
+* Fix: PageSpeed Insights tests the right page when the home URL carries its own query string, such as a language plugin's ?lang=fr.
 
 = 0.19.8-beta =
 * Fix: Stripe charges in JPY, KRW and other zero-decimal currencies use whole units. They were 100 times the price.

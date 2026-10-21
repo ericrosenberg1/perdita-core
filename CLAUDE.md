@@ -25,6 +25,9 @@ Open, waiting on Eric (don't change without his answer):
 
 ## Behavior other code relies on
 
+- Caching early serve: `wp-content/advanced-cache.php` is Perdita's only when its first lines carry `Perdita_Caching::DROPIN_MARKER`, and it serves nothing unless `uploads/perdita-cache/early-serve.on` exists. `sync_dropin()` runs on admin_init, on any plugin (de)activation and on save, and never writes over another plugin's file or edits wp-config.php. WP Super Cache's deactivation deletes the `WP_CACHE` line from wp-config.php, so moving off it means adding that line back (`wp config set WP_CACHE true --raw`).
+- `Perdita_Client_IP::get()` is the one place that reads a visitor address. It trusts CF-Connecting-IP only from Cloudflare's published ranges (list in the class, filter `perdita_cloudflare_ip_ranges`).
+
 - Sales: every amount sent to or read from Stripe goes through `Perdita_Sales::to_minor_units()` / `from_minor_units()` with the currency, never `* 100`. Zero-decimal (JPY), three-decimal (KWD) and whole-unit two-decimal (ISK, UGX) currencies each convert differently. Pro calls these too.
 - Analytics: the consent default carries the visitor's stored choice and runs before every `gtag('config')`, with no consent update on page load. `tests/smoke-analytics-order.php` renders the actual head and footer for six settings paths and runs the inline scripts in node. A blank measurement ID with "manage consent for other Google tags" off prints nothing, and a live site's mu-plugin depends on that.
 - Analytics adopts Simple Consent Manager's settings once on `admin_init` for a site that never chose a consent model, and unhooks SCM's head script while Perdita's consent layer is on.
@@ -34,14 +37,12 @@ Open, waiting on Eric (don't change without his answer):
 
 Fixes merged to main since the last release go here, one `readme.txt` line each. At the next lock-step bump, move them into that version's changelog entry and empty this list.
 
-- Fix: the page cache clears after a theme, plugin or WordPress update, so pages stop pointing at the old version's files.
-- Fix: the cookie consent banner no longer covers half a phone screen. On screens 600px wide and under, the message keeps its natural height.
-- Fix: PageSpeed Insights tests the right page when the home URL carries its own query string, such as a language plugin's `?lang=fr`.
+(empty since 0.19.9-beta)
 
 ## Tests
 
 - `bash tests/run.sh /path/to/wordpress` (see `tests/README.md`). The node tests (`*.test.mjs`) run from `smoke.php` when node is on PATH.
-- 931 passing at 0.19.8-beta on WordPress 7.1.3 with PHP 8.5 and 8.4, zero notices.
+- 995 passing at 0.19.9-beta on WordPress 7.1.3 with PHP 8.5 and 8.4, zero notices. `tests/smoke-migration.php` runs the page cache drop-in in a child PHP process, so the suite needs a CLI PHP binary (it skips that block without one).
 - The `--wporg` build takes its changelog from `bin/wporg-changelog/<version>.txt` when that file exists. 0.19.7-beta needed it, since the automatic-update default lives in the updater the directory build strips. 0.19.8-beta's file also carries 0.19.7's directory lines, because no 0.19.7 zip reached the directory.
 - Plugin Check 2.1.0 on the `--wporg` zip: 0 errors, 81 warnings. Those are the baseline. WPCS reports 278 errors and 217 warnings on the directory build, all pre-existing, so compare against those numbers rather than zero.
 - Rig recipes are in the Mac's memory files `reference_perdita_review_tooling` and `reference_headless_wp_test_rig`.
