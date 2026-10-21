@@ -35,6 +35,7 @@ Open, waiting on Eric (don't change without his answer):
 Fixes merged to main since the last release go here, one `readme.txt` line each. At the next lock-step bump, move them into that version's changelog entry and empty this list.
 
 - Fix: the page cache clears after a theme, plugin or WordPress update, so pages stop pointing at the old version's files.
+- Fix: the cookie consent banner no longer covers half a phone screen. On screens 600px wide and under, the message keeps its natural height.
 
 ## Tests
 
