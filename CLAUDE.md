@@ -20,8 +20,9 @@ Decisions that look like bugs but aren't:
 - OAuth option blobs (grants, clients, connections) only change through `mutate_option()`, a per-option database lock. Don't add a plain `update_option()` on them.
 - MCP one-click OAuth connect is free in Core with no license check (Eric, 2026-10-12). Its admin section is titled "One-click connect from claude.ai or ChatGPT" and a test fails on a "Pro:" label.
 
-Open, waiting on Eric (don't change without his answer):
-- Forms Turnstile (`check_turnstile()` in `inc/class-perdita-forms.php`): a secret Cloudflare rejects turns every visitor away with "did not pass" and the owner is never told. Pro's Spam Pro treats a rejected secret like an outage and raises an admin notice. Whether Core fails open or closed is his call, and the admin notice is wanted either way.
+- Forms Turnstile fails open on a secret Cloudflare rejects (`invalid-input-secret`, `missing-input-secret`) and flags `perdita_forms_turnstile_key_error`, which shows the owner an admin notice until a good verdict or a settings save (Eric, item 82, 0.19.10-beta). Forms Pro sets the same flag. A failed challenge on a good secret still blocks, and `perdita_forms_turnstile_fail_open` lets a site fail closed. An unreadable (undecryptable) secret still fails closed, on purpose.
+- No heredoc or nowdoc anywhere in shipped PHP. wordpress.org's Plugin Check refuses them, and `tests/smoke-migration.php` fails on one. The cache drop-in template is a list of single-quoted lines in `dropin_source()`. Bump `DROPIN_VERSION` whenever its output changes, or live drop-ins keep the old code.
+- Run Plugin Check on the `--wporg` zip before it goes on the Desktop for Eric. 0.19.9-beta shipped 3 errors that would have bounced the upload (0.19.11-beta cleared them).
 
 ## Behavior other code relies on
 
