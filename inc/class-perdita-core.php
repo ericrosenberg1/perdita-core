@@ -338,7 +338,26 @@ final class Perdita_Core {
 			$state['modules'] = array();
 		}
 		$state['modules'][ $id ] = (bool) $enabled;
-		return self::save_state( $state );
+		$saved                   = self::save_state( $state );
+		if ( 'caching' === $id && ! $enabled ) {
+			self::remove_cache_dropin();
+		}
+		return $saved;
+	}
+
+	/**
+	 * Take out the page cache's early-serve drop-in, if it's Perdita's. Runs
+	 * when the caching module or this plugin goes off, because a drop-in
+	 * left behind keeps serving pages that nothing purges any more.
+	 */
+	public static function remove_cache_dropin() {
+		$file = PERDITA_CORE_DIR . 'inc/modules/caching/class-perdita-caching.php';
+		if ( ! class_exists( 'Perdita_Caching' ) && is_readable( $file ) ) {
+			require_once $file;
+		}
+		if ( class_exists( 'Perdita_Caching' ) ) {
+			Perdita_Caching::remove_dropin();
+		}
 	}
 
 	/**
@@ -430,6 +449,7 @@ final class Perdita_Core {
 		foreach ( self::CRON_HOOKS as $hook ) {
 			wp_clear_scheduled_hook( $hook );
 		}
+		self::remove_cache_dropin();
 		delete_transient( 'perdita_core_update_manifest' );
 	}
 

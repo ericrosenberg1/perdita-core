@@ -131,6 +131,15 @@ class Perdita_Caching {
 		add_action( 'added_option', array( $this, 'purge_on_option_change' ) );
 		add_action( 'updated_option', array( $this, 'purge_on_option_change' ) );
 		add_action( 'deleted_option', array( $this, 'purge_on_option_change' ) );
+
+		// Keep wp-content/advanced-cache.php in step with the settings: put
+		// it back after another plugin removed it, take it out when another
+		// page cache comes on. Admin and WP-CLI only, never a visitor request.
+		if ( is_admin() || ( defined( 'WP_CLI' ) && WP_CLI ) ) {
+			add_action( 'admin_init', array( __CLASS__, 'sync_dropin' ) );
+		}
+		add_action( 'activated_plugin', array( __CLASS__, 'sync_dropin_later' ) );
+		add_action( 'deactivated_plugin', array( __CLASS__, 'sync_dropin_later' ) );
 	}
 
 	/* ---------- settings ---------- */
@@ -146,6 +155,7 @@ class Perdita_Caching {
 			'ttl_hours'       => 10,             // Cache lifetime in hours.
 			'exclude_paths'   => array(),        // Extra URL paths to never cache.
 			'browser_cache'   => false,          // Write the .htaccess rules block.
+			'early_serve'     => false,          // Serve hits from wp-content/advanced-cache.php.
 		);
 	}
 
@@ -163,6 +173,7 @@ class Perdita_Caching {
 		// Normalize shapes so callers never have to guard.
 		$s['enabled']       = ! empty( $s['enabled'] );
 		$s['browser_cache'] = ! empty( $s['browser_cache'] );
+		$s['early_serve']   = ! empty( $s['early_serve'] );
 		$s['ttl_hours']     = max( 1, (int) $s['ttl_hours'] );
 		$s['exclude_paths'] = is_array( $s['exclude_paths'] ) ? array_values( $s['exclude_paths'] ) : array();
 		return $s;
@@ -207,6 +218,7 @@ class Perdita_Caching {
 			'ttl_hours'     => $ttl,
 			'exclude_paths' => $paths,
 			'browser_cache' => ! empty( $input['browser_cache'] ),
+			'early_serve'   => ! empty( $input['early_serve'] ),
 		);
 	}
 
@@ -415,6 +427,12 @@ class Perdita_Caching {
 		if ( empty( $settings['enabled'] ) ) {
 			return;
 		}
+		// Two page caches on one site each serve the other's stale copies
+		// and neither purges the other's, so Perdita waits until the other
+		// one is off. The Caching screen says which plugin it's waiting on.
+		if ( '' !== self::other_page_cache() ) {
+			return;
+		}
 		if ( ! $this->is_cacheable( $settings ) ) {
 			return;
 		}
@@ -586,6 +604,54 @@ class Perdita_Caching {
 		}
 
 		$this->store( $this->cache_file, self::filter_output_html( $html ) );
+		$this->store_headers( $this->cache_file );
+	}
+
+	/**
+	 * Headers a cached page is replayed with when the drop-in serves it.
+	 * Security and content headers only: never a cookie, never a caching
+	 * header (the hit sets its own).
+	 *
+	 * @return string[] Lowercase header names.
+	 */
+	public static function replay_headers() {
+		/**
+		 * Response headers saved beside a cached page and sent again when
+		 * the early-serve drop-in answers before WordPress loads.
+		 *
+		 * @param string[] $names Lowercase header names.
+		 */
+		return array_map(
+			'strtolower',
+			(array) apply_filters(
+				'perdita_cache_replay_headers',
+				array( 'content-type', 'x-frame-options', 'x-content-type-options', 'referrer-policy', 'permissions-policy', 'strict-transport-security', 'content-security-policy', 'content-security-policy-report-only', 'cross-origin-opener-policy', 'cross-origin-resource-policy', 'cross-origin-embedder-policy', 'x-robots-tag', 'link' )
+			)
+		);
+	}
+
+	/**
+	 * Save this response's replayable headers next to its cache file, so a
+	 * page the drop-in serves carries the same security headers WordPress
+	 * sent the first time. Without it an early hit would drop every header a
+	 * plugin adds on send_headers (the Security module's CSP among them).
+	 *
+	 * @param string $file Cache file just written.
+	 */
+	private function store_headers( $file ) {
+		if ( '' === $file || ! is_file( $file ) || ! function_exists( 'headers_list' ) ) {
+			return;
+		}
+		$keep = self::replay_headers();
+		$out  = array();
+		foreach ( headers_list() as $line ) {
+			$name = strtolower( trim( (string) strtok( $line, ':' ) ) );
+			if ( in_array( $name, $keep, true ) ) {
+				$out[] = $line;
+			}
+		}
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents, WordPress.WP.AlternativeFunctions.file_put_contents_file_put_contents, WordPress.PHP.NoSilencedErrors.Discouraged -- a small sidecar next to our own cache file.
+		@file_put_contents( $file . '.json', (string) wp_json_encode( $out ), LOCK_EX );
 	}
 
 	/**
@@ -766,28 +832,11 @@ class Perdita_Caching {
 		if ( empty( $_COOKIE ) || ! is_array( $_COOKIE ) ) {
 			return false;
 		}
-		$needles = array(
-			'wordpress_logged_in',
-			// A visitor who entered a post password sees that post (and any
-			// archive listing it) unlocked, so nothing they load is safe to
-			// store or to serve them from the shared cache.
-			'wp-postpass_',
-			'comment_author',
-			'woocommerce_',
-			'wp_woocommerce_session',
-			'edd_items_in_cart',
-			'perdita_cart',
-			// The Pro cart cookie, under both its old and new names. Matching
-			// is by substring, so 'perdita_cart' already covers
-			// 'perdita_cart_pro'; naming it here anyway means a later edit to
-			// the free cookie name can never silently un-cover the Pro one.
-			'perdita_cart_pro',
-			'perdita_sales_pro_cart',
-		);
+		$needles = self::no_cache_cookies();
 		foreach ( array_keys( $_COOKIE ) as $name ) {
 			$name = (string) $name;
 			foreach ( $needles as $needle ) {
-				if ( false !== stripos( $name, $needle ) ) {
+				if ( '' !== $needle && false !== stripos( $name, $needle ) ) {
 					return true;
 				}
 			}
@@ -990,6 +1039,9 @@ class Perdita_Caching {
 			if ( @unlink( $real ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.unlink_unlink -- the return value drives the removed-count; wp_delete_file() returns nothing.
 				++$removed;
 			}
+			if ( is_file( $real . '.json' ) ) {
+				wp_delete_file( $real . '.json' );
+			}
 		}
 		return $removed;
 	}
@@ -1018,15 +1070,16 @@ class Perdita_Caching {
 			if ( 'index.php' === basename( $file ) ) {
 				continue;
 			}
-			// Only ever touch our own artifacts.
-			if ( ! preg_match( '/\.(html|tmp)$/', $file ) ) {
+			// Only ever touch our own artifacts: pages, their header
+			// sidecars, and half-written temp files.
+			if ( ! preg_match( '/\.(html|tmp|html\.json)$/', $file ) ) {
 				continue;
 			}
 			$real = realpath( $file );
 			if ( false === $real || 0 !== strpos( $real, $real_dir ) ) {
 				continue;
 			}
-			if ( @unlink( $real ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.unlink_unlink -- the return value drives the removed-count; wp_delete_file() returns nothing.
+			if ( @unlink( $real ) && '.json' !== substr( $real, -5 ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.unlink_unlink -- the return value drives the removed-count; wp_delete_file() returns nothing.
 				++$removed;
 			}
 		}
@@ -1104,6 +1157,335 @@ class Perdita_Caching {
 			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents, WordPress.WP.AlternativeFunctions.file_put_contents_file_put_contents -- writing a static guard file.
 			@file_put_contents( $index, "<?php // Silence is golden.\n" ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
 		}
+	}
+
+	/* ---------- other page caches ---------- */
+
+	/**
+	 * The name of another page-cache plugin that is active, or ''.
+	 *
+	 * @return string
+	 */
+	public static function other_page_cache() {
+		$known = array(
+			'wp-super-cache/wp-cache.php'          => 'WP Super Cache',
+			'w3-total-cache/w3-total-cache.php'    => 'W3 Total Cache',
+			'wp-rocket/wp-rocket.php'              => 'WP Rocket',
+			'litespeed-cache/litespeed-cache.php'  => 'LiteSpeed Cache',
+			'wp-fastest-cache/wpFastestCache.php'  => 'WP Fastest Cache',
+			'cache-enabler/cache-enabler.php'      => 'Cache Enabler',
+			'wp-optimize/wp-optimize.php'          => 'WP-Optimize',
+			'breeze/breeze.php'                    => 'Breeze',
+			'sg-cachepress/sg-cachepress.php'      => 'Speed Optimizer',
+			'hummingbird-performance/wp-hummingbird.php' => 'Hummingbird',
+		);
+		$active = (array) get_option( 'active_plugins', array() );
+		if ( is_multisite() ) {
+			$active = array_merge( $active, array_keys( (array) get_site_option( 'active_sitewide_plugins', array() ) ) );
+		}
+		foreach ( $known as $basename => $label ) {
+			if ( in_array( $basename, $active, true ) ) {
+				return $label;
+			}
+		}
+		return '';
+	}
+
+	/* ---------- early serve (wp-content/advanced-cache.php) ---------- */
+
+	/**
+	 * First line of every drop-in this module writes, so it never touches
+	 * an advanced-cache.php that belongs to another plugin.
+	 */
+	const DROPIN_MARKER = 'Perdita Cache early-serve drop-in';
+
+	/**
+	 * Drop-in format version. Bump when dropin_source() changes, and the
+	 * next admin request rewrites the file.
+	 */
+	const DROPIN_VERSION = '1';
+
+	/**
+	 * @return string Absolute path to wp-content/advanced-cache.php.
+	 */
+	public static function dropin_path() {
+		return trailingslashit( WP_CONTENT_DIR ) . 'advanced-cache.php';
+	}
+
+	/**
+	 * What sits at advanced-cache.php: none, ours (current), stale (ours,
+	 * older settings or format), or foreign (another plugin's).
+	 *
+	 * @return string
+	 */
+	public static function dropin_state() {
+		$path = self::dropin_path();
+		if ( ! is_file( $path ) ) {
+			return 'none';
+		}
+		$head = (string) file_get_contents( $path, false, null, 0, 4096 ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- local file.
+		if ( false === strpos( $head, self::DROPIN_MARKER ) ) {
+			return 'foreign';
+		}
+		return (string) file_get_contents( $path ) === self::dropin_source() ? 'ours' : 'stale'; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- local file.
+	}
+
+	/**
+	 * Whether WordPress will load advanced-cache.php at all.
+	 *
+	 * @return bool
+	 */
+	public static function wp_cache_on() {
+		return defined( 'WP_CACHE' ) && WP_CACHE;
+	}
+
+	/**
+	 * The drop-in's PHP. Everything it needs is written into it as plain
+	 * values, because it runs before WordPress has a database connection.
+	 *
+	 * It answers only a request the in-WordPress cache would have answered
+	 * for the same visitor: a GET with no form body, this site's own host,
+	 * no login, post-password, comment or cart cookie, and no query argument
+	 * outside the tracking list and the pagination whitelist. Everything
+	 * page-related (404s, searches, feeds, previews, excluded paths, the
+	 * perdita_cache_exclude filter) already decided whether a file exists,
+	 * so a page that may not be cached never has one to find.
+	 *
+	 * @return string
+	 */
+	public static function dropin_source() {
+		$settings = self::settings();
+		$config   = array(
+			'dir'     => self::cache_dir(),
+			'host'    => self::site_host(),
+			'ttl'     => (int) $settings['ttl_hours'] * HOUR_IN_SECONDS,
+			'ignore'  => array_values( self::ignored_query_args() ),
+			'allow'   => array_values( array_map( 'strval', (array) apply_filters( 'perdita_cache_query_whitelist', array( 'page', 'paged' ) ) ) ),
+			'cookies' => array_values( self::no_cache_cookies() ),
+			'max_age' => self::CLIENT_CACHE_MAX_AGE,
+			'charset' => (string) get_option( 'blog_charset', 'UTF-8' ),
+		);
+		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_var_export -- building PHP source, not debugging.
+		$export = var_export( $config, true );
+		$marker = self::DROPIN_MARKER;
+		$ver    = self::DROPIN_VERSION;
+		return <<<PHP
+<?php
+/**
+ * {$marker} v{$ver}.
+ *
+ * Perdita Core wrote this file and rewrites or removes it from the Caching
+ * screen. Edits here are lost. It serves a page Perdita already cached before
+ * WordPress loads, and hands every other request to WordPress unchanged.
+ */
+
+defined( 'ABSPATH' ) || exit;
+
+( function () {
+	\$c = {$export};
+	if ( ( defined( 'WP_CLI' ) && WP_CLI ) || ! is_file( \$c['dir'] . 'early-serve.on' ) ) {
+		return;
+	}
+	if ( 'GET' !== strtoupper( (string) ( \$_SERVER['REQUEST_METHOD'] ?? 'GET' ) ) || ! empty( \$_POST ) ) {
+		return;
+	}
+	\$host = strtolower( (string) preg_replace( '/:\\d+\$/', '', (string) ( \$_SERVER['HTTP_HOST'] ?? '' ) ) );
+	if ( \$host !== \$c['host'] ) {
+		return;
+	}
+	foreach ( array_keys( \$_COOKIE ) as \$name ) {
+		foreach ( \$c['cookies'] as \$needle ) {
+			if ( false !== stripos( (string) \$name, \$needle ) ) {
+				return;
+			}
+		}
+	}
+	\$pairs = array();
+	foreach ( \$_GET as \$k => \$v ) {
+		if ( in_array( (string) \$k, \$c['ignore'], true ) ) {
+			continue;
+		}
+		if ( ! in_array( (string) \$k, \$c['allow'], true ) || ! is_string( \$v ) || ! preg_match( '/^[A-Za-z0-9_-]*\$/', \$v ) ) {
+			return;
+		}
+		\$pairs[ (string) \$k ] = \$v;
+	}
+	ksort( \$pairs );
+	\$query = array();
+	foreach ( \$pairs as \$k => \$v ) {
+		\$query[] = rawurlencode( \$k ) . '=' . rawurlencode( \$v );
+	}
+	\$path = (string) parse_url( (string) ( \$_SERVER['REQUEST_URI'] ?? '/' ), PHP_URL_PATH );
+	\$path = '' === \$path ? '/' : \$path;
+	\$https = ( isset( \$_SERVER['HTTPS'] ) && ( 'on' === strtolower( (string) \$_SERVER['HTTPS'] ) || '1' === (string) \$_SERVER['HTTPS'] ) ) || ( isset( \$_SERVER['SERVER_PORT'] ) && '443' === (string) \$_SERVER['SERVER_PORT'] );
+	\$key  = ( \$https ? 'https' : 'http' ) . '://' . \$c['host'] . \$path . ( \$query ? '?' . implode( '&', \$query ) : '' );
+	\$file = \$c['dir'] . sha1( \$key ) . '.html';
+	\$mtime = (int) @filemtime( \$file );
+	if ( \$mtime <= 0 || time() - \$mtime > \$c['ttl'] || headers_sent() ) {
+		return;
+	}
+	\$size = (int) @filesize( \$file );
+	\$etag = '"' . \$mtime . '-' . \$size . '"';
+	\$sent = array();
+	\$side = @file_get_contents( \$file . '.json' );
+	foreach ( (array) json_decode( (string) \$side, true ) as \$line ) {
+		if ( is_string( \$line ) && false === strpbrk( \$line, "\\r\\n" ) ) {
+			\$name = strtolower( trim( (string) strtok( \$line, ':' ) ) );
+			header( \$line, 'link' !== \$name );
+			\$sent[ \$name ] = true;
+		}
+	}
+	if ( empty( \$sent['content-type'] ) ) {
+		header( 'Content-Type: text/html; charset=' . \$c['charset'] );
+	}
+	header( 'X-Cache: HIT' );
+	header( 'X-Perdita-Cache: early' );
+	header( 'Cache-Control: max-age=' . (int) \$c['max_age'] . ', public' );
+	header( 'Age: ' . max( 0, time() - \$mtime ) );
+	header( 'ETag: ' . \$etag );
+	header( 'Last-Modified: ' . gmdate( 'D, d M Y H:i:s', \$mtime ) . ' GMT' );
+	\$inm = (string) ( \$_SERVER['HTTP_IF_NONE_MATCH'] ?? '' );
+	\$ims = isset( \$_SERVER['HTTP_IF_MODIFIED_SINCE'] ) ? strtotime( (string) \$_SERVER['HTTP_IF_MODIFIED_SINCE'] ) : false;
+	if ( ( '' !== \$inm && \$inm === \$etag ) || ( false !== \$ims && \$ims >= \$mtime ) ) {
+		http_response_code( 304 );
+		exit;
+	}
+	readfile( \$file );
+	exit;
+} )();
+
+PHP;
+	}
+
+	/**
+	 * Cookie name fragments that keep a visitor out of the cache. One list
+	 * for has_no_cache_cookie() and the drop-in, so the two can't disagree.
+	 *
+	 * @return string[]
+	 */
+	public static function no_cache_cookies() {
+		/**
+		 * Cookie name fragments (matched case-insensitively anywhere in the
+		 * name) that mark a personalized visitor the page cache must skip.
+		 *
+		 * @param string[] $needles Fragments.
+		 */
+		return array_map(
+			'strval',
+			(array) apply_filters(
+				'perdita_cache_no_cache_cookies',
+				array(
+					'wordpress_logged_in',
+					// A visitor who entered a post password sees that post (and any
+					// archive listing it) unlocked, so nothing they load is safe to
+					// store or to serve them from the shared cache.
+					'wp-postpass_',
+					'comment_author',
+					'woocommerce_',
+					'wp_woocommerce_session',
+					'edd_items_in_cart',
+					'perdita_cart',
+					// The Pro cart cookie, under both its old and new names. Matching
+					// is by substring, so 'perdita_cart' already covers
+					// 'perdita_cart_pro'; naming it here anyway means a later edit to
+					// the free cookie name can never silently un-cover the Pro one.
+					'perdita_cart_pro',
+					'perdita_sales_pro_cart',
+				)
+			)
+		);
+	}
+
+	/**
+	 * Bring advanced-cache.php in line with the settings, and say how it went.
+	 *
+	 * Writes the drop-in when the page cache and early serving are both on,
+	 * no other page-cache plugin is active, WP_CACHE is true and the file is
+	 * free or already Perdita's. Removes Perdita's drop-in in every other
+	 * case. Never touches another plugin's file, and never wp-config.php.
+	 *
+	 * @return string installed, current, removed, off, other_cache, foreign, no_wp_cache or unwritable.
+	 */
+	public static function sync_dropin() {
+		$settings = self::settings();
+		$want     = ! empty( $settings['enabled'] ) && ! empty( $settings['early_serve'] ) && self::module_is_on();
+		$state    = self::dropin_state();
+		$flag     = self::cache_dir() . 'early-serve.on';
+
+		if ( ! $want || '' !== self::other_page_cache() || ! self::wp_cache_on() ) {
+			$why = ! $want ? 'off' : ( '' !== self::other_page_cache() ? 'other_cache' : 'no_wp_cache' );
+			if ( is_file( $flag ) ) {
+				wp_delete_file( $flag );
+			}
+			if ( in_array( $state, array( 'ours', 'stale' ), true ) ) {
+				wp_delete_file( self::dropin_path() );
+				return is_file( self::dropin_path() ) ? 'unwritable' : ( 'off' === $why ? 'removed' : $why );
+			}
+			return $why;
+		}
+		if ( 'foreign' === $state ) {
+			if ( is_file( $flag ) ) {
+				wp_delete_file( $flag );
+			}
+			return 'foreign';
+		}
+		if ( 'ours' !== $state ) {
+			$path = self::dropin_path();
+			$tmp  = $path . '.' . wp_generate_password( 8, false ) . '.tmp';
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents, WordPress.WP.AlternativeFunctions.file_put_contents_file_put_contents, WordPress.PHP.NoSilencedErrors.Discouraged -- the drop-in has to be a real file WordPress includes before it loads.
+			if ( false === @file_put_contents( $tmp, self::dropin_source(), LOCK_EX ) || ! @rename( $tmp, $path ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.rename_rename -- atomic swap so a request never includes half a file.
+				if ( is_file( $tmp ) ) {
+					wp_delete_file( $tmp );
+				}
+				return 'unwritable';
+			}
+			if ( function_exists( 'opcache_invalidate' ) ) {
+				@opcache_invalidate( $path, true ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- opcache may be restricted.
+			}
+		}
+		self::install();
+		if ( ! is_file( $flag ) ) {
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents, WordPress.WP.AlternativeFunctions.file_put_contents_file_put_contents, WordPress.PHP.NoSilencedErrors.Discouraged -- the switch the drop-in checks before serving anything.
+			@file_put_contents( $flag, (string) time() );
+		}
+		return 'ours' === $state ? 'current' : 'installed';
+	}
+
+	/**
+	 * Re-sync once the plugin list has changed, at the end of the request
+	 * that changed it.
+	 */
+	public static function sync_dropin_later() {
+		if ( ! has_action( 'shutdown', array( __CLASS__, 'sync_dropin' ) ) ) {
+			add_action( 'shutdown', array( __CLASS__, 'sync_dropin' ) );
+		}
+	}
+
+	/**
+	 * Remove Perdita's drop-in and its switch, whatever the settings say.
+	 * Runs when the module or the plugin goes off, so nothing keeps serving
+	 * pages no one is purging any more.
+	 */
+	public static function remove_dropin() {
+		$flag = self::cache_dir() . 'early-serve.on';
+		if ( is_file( $flag ) ) {
+			wp_delete_file( $flag );
+		}
+		if ( in_array( self::dropin_state(), array( 'ours', 'stale' ), true ) ) {
+			wp_delete_file( self::dropin_path() );
+		}
+	}
+
+	/**
+	 * Whether the caching module is switched on in Perdita's module list.
+	 *
+	 * @return bool
+	 */
+	private static function module_is_on() {
+		if ( function_exists( 'perdita_core' ) && isset( perdita_core()->modules ) && method_exists( perdita_core()->modules, 'is_enabled' ) ) {
+			return (bool) perdita_core()->modules->is_enabled( 'caching' );
+		}
+		return true;
 	}
 
 	/* ---------- browser cache / gzip via .htaccess ---------- */
