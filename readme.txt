@@ -4,7 +4,7 @@ Tags: forms, seo, caching, security, newsletter
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.19.9-beta
+Stable tag: 0.19.10-beta
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -76,6 +76,9 @@ Form entries, subscribers, orders, products, form definitions, the SMTP log, you
 Yes, that's what Pro is built on. Pro registers its own modules into this plugin's registry, so they appear on the same Modules screen and behave the same way.
 
 == Changelog ==
+
+= 0.19.10-beta =
+* Fix: when Cloudflare rejects your Turnstile secret key, your forms keep taking messages and you see an admin notice asking you to fix the key. Visitors were turned away with "did not pass" before.
 
 = 0.19.9-beta =
 * Moving off All in One SEO keeps your titles. The settings import now carries the home page, post type and taxonomy templates, noindex rules, logo, default share image, verification codes and RSS footers, and turns AIOSEO's tags into Perdita's.

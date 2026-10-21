@@ -99,9 +99,10 @@ function perdita_core_uninstall_options() {
 		'perdita_forms_db_version',
 		'perdita_subscriptions_db_version',
 
-		// Dismissed-notice flags.
+		// Notice flags (dismissed notices and the Turnstile key error).
 		'perdita_forms_proxy_ip_notice',
 		'perdita_subscriptions_proxy_ip_notice',
+		'perdita_forms_turnstile_key_error',
 	);
 }
 

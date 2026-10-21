@@ -6,9 +6,9 @@
  * WP_REST_Request, intercepts the siteverify call at pre_http_request,
  * asserts what goes out, and answers in Cloudflare's documented shapes.
  *
- * Pinned on purpose, pending Eric's decision: a secret Cloudflare rejects
- * (invalid-input-secret) still turns the visitor away. If that changes to
- * fail open, change that one assertion with it.
+ * A secret Cloudflare rejects (invalid-input-secret, missing-input-secret)
+ * fails open and flags the owner's admin notice (Eric, item 82, 2026-10-21).
+ * A failed challenge on a good secret still turns the visitor away.
  *
  * @package Perdita_Core
  */
@@ -88,8 +88,42 @@ $ts_answer = $ts_json( 200, array( 'success' => false, 'error-codes' => array( '
 $ok( '' !== $ts_run( 'bad-token' ), 'turnstile: a failed verdict on a bad token rejects the message' );
 $ts_answer = $ts_json( 200, array( 'success' => false, 'error-codes' => array( 'timeout-or-duplicate' ) ) );
 $ok( '' !== $ts_run( 'reused-token' ), 'turnstile: a replayed token is rejected' );
+$ok( false === get_option( Perdita_Forms::TURNSTILE_KEY_ERROR_OPTION, false ), 'turnstile: a failed challenge on a good secret raises no key-error flag' );
+
+$ts_notice = function () {
+	ob_start();
+	Perdita_Forms::turnstile_key_error_notice();
+	return (string) ob_get_clean();
+};
+$ts_prev_user = get_current_user_id();
+$ts_admins    = get_users( array( 'role' => 'administrator', 'number' => 1, 'fields' => 'ID' ) );
+wp_set_current_user( $ts_admins ? (int) $ts_admins[0] : 0 );
+$ok( '' === $ts_notice(), 'turnstile: no key-error notice while Cloudflare accepts the secret' );
+
 $ts_answer = $ts_json( 200, array( 'success' => false, 'error-codes' => array( 'invalid-input-secret' ) ) );
-$ok( '' !== $ts_run( 'XXXX.DUMMY.TOKEN' ), 'turnstile: a secret Cloudflare rejects still turns the visitor away (open decision, see header)' );
+$ok( '' === $ts_run( 'XXXX.DUMMY.TOKEN' ), 'turnstile: a secret Cloudflare rejects lets the message through (fail open, item 82)' );
+$ok( 1 === (int) get_option( Perdita_Forms::TURNSTILE_KEY_ERROR_OPTION ), 'turnstile: a rejected secret flags the owner notice' );
+$ok( false !== strpos( $ts_notice(), 'rejected your Turnstile secret key' ) && false !== strpos( $ts_notice(), 'page=perdita-forms-settings' ), 'turnstile: the admin sees a notice that links to the Spam Protection screen' );
+wp_set_current_user( 0 );
+$ok( '' === $ts_notice(), 'turnstile: a visitor without manage_options never sees the key notice' );
+wp_set_current_user( $ts_admins ? (int) $ts_admins[0] : 0 );
+
+$ts_answer = $ts_json( 200, array( 'success' => false, 'error-codes' => array( 'missing-input-secret' ) ) );
+$ok( '' === $ts_run( 'XXXX.DUMMY.TOKEN' ), 'turnstile: missing-input-secret fails open too' );
+
+$ts_answer = $ts_json( 200, array( 'success' => false, 'error-codes' => array( 'invalid-input-response' ) ) );
+$ok( '' !== $ts_run( 'bad-token' ), 'turnstile: with the key flag set, a failed challenge still rejects' );
+$ok( 1 === (int) get_option( Perdita_Forms::TURNSTILE_KEY_ERROR_OPTION ), 'turnstile: a failed challenge leaves the key flag alone' );
+
+add_filter( 'perdita_forms_turnstile_fail_open', '__return_false' );
+$ts_answer = $ts_json( 200, array( 'success' => false, 'error-codes' => array( 'invalid-input-secret' ) ) );
+$ok( '' !== $ts_run( 'XXXX.DUMMY.TOKEN' ), 'turnstile: a site that filters perdita_forms_turnstile_fail_open to false still rejects on a rejected secret' );
+remove_filter( 'perdita_forms_turnstile_fail_open', '__return_false' );
+
+$ts_answer = $ts_json( 200, array( 'success' => true, 'error-codes' => array() ) );
+$ok( '' === $ts_run( 'XXXX.DUMMY.TOKEN' ) && false === get_option( Perdita_Forms::TURNSTILE_KEY_ERROR_OPTION, false ), 'turnstile: the next good verdict clears the key flag' );
+$ok( '' === $ts_notice(), 'turnstile: the notice goes away once the flag clears' );
+wp_set_current_user( $ts_prev_user );
 
 $ts_answer = new WP_Error( 'http_request_failed', 'cURL error 28: Operation timed out' );
 $ok( '' === $ts_run( 'XXXX.DUMMY.TOKEN' ), 'turnstile: a transport failure fails open' );
@@ -106,9 +140,10 @@ $ts_seen = array();
 $ok( '' === $ts_run( null ) && array() === $ts_seen, 'turnstile: with no keys configured the check is off and nothing is sent' );
 
 remove_filter( 'pre_http_request', $ts_hook, 10 );
+delete_option( Perdita_Forms::TURNSTILE_KEY_ERROR_OPTION );
 if ( null === $ts_orig ) {
 	delete_option( 'perdita_forms_settings' );
 } else {
 	update_option( 'perdita_forms_settings', $ts_orig );
 }
-unset( $ts_orig, $ts_forms, $ts_check, $ts_secret, $ts_seen, $ts_answer, $ts_hook, $ts_json, $ts_run, $ts_req );
+unset( $ts_notice, $ts_prev_user, $ts_admins, $ts_orig, $ts_forms, $ts_check, $ts_secret, $ts_seen, $ts_answer, $ts_hook, $ts_json, $ts_run, $ts_req );
