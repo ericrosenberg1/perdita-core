@@ -209,9 +209,8 @@ class Perdita_Caching_Admin {
 					<p>
 						<?php
 						printf(
-							/* translators: %s: plugin name such as WP Super Cache. */
-							esc_html__( '%s is active. Two page caches on one site serve each other\'s stale copies, so Perdita\'s cache stays off while it runs. Turn the settings below on, then deactivate %s on the Plugins screen. Perdita starts serving on the next visit.', 'perdita-core' ),
-							esc_html( $other ),
+							/* translators: %1$s: plugin name such as WP Super Cache. */
+							esc_html__( '%1$s is active. Two page caches on one site serve each other\'s stale copies, so Perdita\'s cache stays off while it runs. Turn the settings below on, then deactivate %1$s on the Plugins screen. Perdita starts serving on the next visit.', 'perdita-core' ),
 							esc_html( $other )
 						);
 						?>
