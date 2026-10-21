@@ -191,7 +191,8 @@ $mig_php = defined( 'PHP_BINARY' ) && is_executable( PHP_BINARY ) && 'cli' === P
 $mig_dir = trailingslashit( get_temp_dir() ) . 'perdita-dropin-' . wp_generate_password( 6, false ) . '/';
 if ( '' !== $mig_php && wp_mkdir_p( $mig_dir ) ) {
 	// The same source, pointed at a scratch cache directory.
-	$mig_src  = str_replace( var_export( Perdita_Caching::cache_dir(), true ), var_export( $mig_dir, true ), $mig_src ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_var_export
+	$mig_src  = str_replace( wp_json_encode( Perdita_Caching::cache_dir(), JSON_UNESCAPED_SLASHES ), wp_json_encode( $mig_dir, JSON_UNESCAPED_SLASHES ), $mig_src );
+	$ok( false !== strpos( $mig_src, $mig_dir ), 'cache drop-in: the scratch directory replaced the real one in the source under test' );
 	$mig_drop = $mig_dir . 'advanced-cache.php';
 	file_put_contents( $mig_drop, $mig_src ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
 	file_put_contents( $mig_dir . 'early-serve.on', '1' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents

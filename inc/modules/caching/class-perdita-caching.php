@@ -1265,8 +1265,11 @@ class Perdita_Caching {
 			'max_age' => self::CLIENT_CACHE_MAX_AGE,
 			'charset' => (string) get_option( 'blog_charset', 'UTF-8' ),
 		);
-		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_var_export -- building PHP source, not debugging.
-		$export = var_export( $config, true );
+		// The settings go into the PHP source as a JSON string literal:
+		// json_decode() needs nothing WordPress provides, and a
+		// single-quoted literal only has to escape \\ and '.
+		$json   = (string) wp_json_encode( $config, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+		$export = "json_decode( '" . str_replace( array( '\\', "'" ), array( '\\\\', "\\'" ), $json ) . "', true )";
 		$marker = self::DROPIN_MARKER;
 		$ver    = self::DROPIN_VERSION;
 		return <<<PHP
