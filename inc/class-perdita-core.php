@@ -657,6 +657,26 @@ final class Perdita_Core {
 					require_once PERDITA_CORE_DIR . 'inc/class-perdita-seo-llms.php';
 					require_once PERDITA_CORE_DIR . 'inc/class-perdita-seo.php';
 					new Perdita_SEO( $core->seo );
+					// A static llms.txt left by AIOSEO or Yoast would shadow
+					// Perdita's own. Clear it once the old plugin is off, and
+					// on admin pages in case it went without a deactivation
+					// (its folder deleted by hand).
+					add_action(
+						'deactivated_plugin',
+						function ( $plugin ) {
+							if ( 0 === strpos( (string) $plugin, 'all-in-one-seo-pack' ) || 0 === strpos( (string) $plugin, 'wordpress-seo' ) ) {
+								add_action(
+									'shutdown',
+									function () {
+										Perdita_SEO_Llms::remove_foreign_static_files( true );
+									}
+								);
+							}
+						}
+					);
+					if ( is_admin() && ! Perdita_SEO::other_seo_active() ) {
+						add_action( 'admin_init', array( 'Perdita_SEO_Llms', 'remove_foreign_static_files' ) );
+					}
 					if ( is_admin() ) {
 						require_once PERDITA_CORE_DIR . 'inc/class-perdita-seo-admin.php';
 						new Perdita_SEO_Admin( $core->seo );

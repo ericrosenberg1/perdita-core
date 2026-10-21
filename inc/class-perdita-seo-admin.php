@@ -512,7 +512,19 @@ class Perdita_SEO_Admin {
 		$has_yoast   = (bool) get_option( 'wpseo_titles' ) || defined( 'WPSEO_VERSION' );
 		$has_aioseo  = (bool) get_option( 'aioseo_options' ) || defined( 'AIOSEO_VERSION' );
 		$has_genesis = (bool) get_option( 'genesis-seo-settings' );
-		echo '<p>' . esc_html__( 'Bring your global SEO settings over from another plugin or from the Genesis Framework. This imports site-wide titles, social profiles, default images, and noindex rules. Per-post meta import is a Premium feature.', 'perdita-core' ) . '</p>';
+		echo '<p>' . esc_html__( 'Bring your global SEO settings over from another plugin or from the Genesis Framework. This imports the separator, home page and post type title and description templates, noindex rules, your organization name and logo, the default share image, social profiles, search engine verification codes and RSS footers.', 'perdita-core' ) . '</p>';
+		/**
+		 * Where a site imports per-post titles and descriptions, when an
+		 * add-on provides that screen. Empty means nothing does.
+		 *
+		 * @param string $url Admin URL.
+		 */
+		$per_post = (string) apply_filters( 'perdita_seo_per_post_import_url', '' );
+		if ( '' !== $per_post ) {
+			echo '<p><strong>' . esc_html__( 'Each page\'s own title and description are a separate import.', 'perdita-core' ) . '</strong> <a href="' . esc_url( $per_post ) . '">' . esc_html__( 'Import per-post SEO', 'perdita-core' ) . '</a></p>';
+		} else {
+			echo '<p>' . esc_html__( 'Each page\'s own title and description are not part of this import. Perdita Pro imports those. Without it, deactivating the old plugin drops them and each page falls back to the templates above.', 'perdita-core' ) . '</p>';
+		}
 
 		echo '<h2>' . esc_html__( 'Import from Yoast SEO', 'perdita-core' ) . '</h2>';
 		echo '<p>' . ( $has_yoast ? esc_html__( 'Yoast settings detected.', 'perdita-core' ) : esc_html__( 'No Yoast settings found on this site.', 'perdita-core' ) ) . '</p>';
@@ -827,6 +839,13 @@ class Perdita_SEO_Admin {
 		$msg = $n
 			? sprintf( /* translators: 1: count, 2: source */ __( 'Imported %1$d settings from %2$s.', 'perdita-core' ), $n, $labels[ $source ] )
 			: __( 'Nothing to import (no settings found).', 'perdita-core' );
+		if ( $n && 'genesis' !== $source && Perdita_SEO::other_seo_active() ) {
+			$msg .= ' ' . sprintf(
+				/* translators: %s: plugin name. */
+				__( 'Perdita SEO stays quiet while %s is active. Once per-post SEO is imported too, deactivate it and Perdita takes over titles, schema and the sitemap.', 'perdita-core' ),
+				$labels[ $source ]
+			);
+		}
 		$this->redirect( 'perdita-seo-import', $msg );
 	}
 

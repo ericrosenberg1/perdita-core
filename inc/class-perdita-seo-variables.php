@@ -20,6 +20,12 @@ class Perdita_SEO_Variables {
 	const EXCERPT_LENGTH = 155;
 
 	/**
+	 * Longest a hand-written excerpt gets as %excerpt%, in characters. Well
+	 * past what a search result shows, so only a runaway excerpt is cut.
+	 */
+	const MANUAL_EXCERPT_LENGTH = 320;
+
+	/**
 	 * Resolve every %token% in a template for the given view.
 	 *
 	 * $ctx is the array Perdita_SEO::context() builds: type (singular, front,
@@ -108,6 +114,74 @@ class Perdita_SEO_Variables {
 		return array( 'title', 'sitename', 'sep', 'tagline', 'excerpt', 'category', 'tag', 'author', 'currentyear', 'currentmonth', 'currentdate', 'archive_title', 'term_title', 'term_description', 'post_type_singular', 'post_type_plural', 'page', 'search_term' );
 	}
 
+	/**
+	 * All in One SEO smart tags and the Perdita token each one means.
+	 *
+	 * Only tags with a same-meaning token are here. #post_content maps to
+	 * %excerpt% because that's what AIOSEO prints for it in a description: the
+	 * body, cut short. Anything else (#author_bio, #custom_field-x, #categories)
+	 * has no exact twin, so a value carrying it isn't translated.
+	 *
+	 * @return array<string,string> AIOSEO tag name, no '#' => Perdita token.
+	 */
+	public static function aioseo_tag_map() {
+		return array(
+			'site_title'           => '%sitename%',
+			'tagline'              => '%tagline%',
+			'separator_sa'         => '%sep%',
+			'post_title'           => '%title%',
+			'post_excerpt'         => '%excerpt%',
+			'post_excerpt_only'    => '%excerpt%',
+			'post_content'         => '%excerpt%',
+			'attachment_caption'   => '%excerpt%',
+			'author_name'          => '%author%',
+			'taxonomy_title'       => '%term_title%',
+			'taxonomy_description' => '%term_description%',
+			'archive_title'        => '%archive_title%',
+			'archive_date'         => '%archive_title%',
+			'search_term'          => '%search_term%',
+			'page_number'          => '%page%',
+			'current_year'         => '%currentyear%',
+			'current_month'        => '%currentmonth%',
+			'current_date'         => '%currentdate%',
+		);
+	}
+
+	/**
+	 * Translate an All in One SEO title or description into a Perdita
+	 * template, so "#post_title #separator_sa #site_title" imports as
+	 * "%title% %sep% %sitename%" and keeps working, instead of being dropped.
+	 *
+	 * A '#' that isn't followed by a letter ("Top #1 tips") is plain text and
+	 * stays as it is. A tag with no Perdita twin returns null, and the caller
+	 * leaves that field to Perdita's own default rather than print a stray
+	 * "#author_bio" on the live site.
+	 *
+	 * @param string $text AIOSEO value.
+	 * @return string|null Perdita template, or null when a tag can't be translated.
+	 */
+	public static function from_aioseo( $text ) {
+		$text = (string) $text;
+		if ( false === strpos( $text, '#' ) ) {
+			return $text;
+		}
+		$map     = self::aioseo_tag_map();
+		$unknown = false;
+		$out     = preg_replace_callback(
+			'/#([a-z][a-z0-9_]*)/i',
+			function ( $m ) use ( $map, &$unknown ) {
+				$key = strtolower( $m[1] );
+				if ( isset( $map[ $key ] ) ) {
+					return $map[ $key ];
+				}
+				$unknown = true;
+				return $m[0];
+			},
+			$text
+		);
+		return $unknown ? null : (string) $out;
+	}
+
 	/* ---------- token resolvers ---------- */
 
 	/**
@@ -143,7 +217,12 @@ class Perdita_SEO_Variables {
 
 	/**
 	 * %excerpt%: the manual excerpt, else the first sentence-ish of the body,
-	 * no HTML, capped at EXCERPT_LENGTH characters on a word boundary.
+	 * no HTML. A body-derived excerpt is capped at EXCERPT_LENGTH characters
+	 * on a word boundary. A manual excerpt is something the author wrote to
+	 * be read whole, so it only stops at MANUAL_EXCERPT_LENGTH: cutting it at
+	 * 155 ended hand-written descriptions mid-sentence ("...and common"),
+	 * where the SEO plugins sites move from (AIOSEO's #post_excerpt, Yoast's
+	 * %%excerpt%%) print it in full.
 	 *
 	 * @param array $ctx View context.
 	 * @return string
@@ -160,8 +239,10 @@ class Perdita_SEO_Variables {
 		if ( '' !== (string) $post->post_password ) {
 			return '';
 		}
-		$text = '' !== trim( (string) $post->post_excerpt ) ? $post->post_excerpt : $post->post_content;
-		return self::trim_chars( self::plain( (string) $text ), self::EXCERPT_LENGTH );
+		if ( '' !== trim( (string) $post->post_excerpt ) ) {
+			return self::trim_chars( self::plain( (string) $post->post_excerpt ), self::MANUAL_EXCERPT_LENGTH );
+		}
+		return self::trim_chars( self::plain( (string) $post->post_content ), self::EXCERPT_LENGTH );
 	}
 
 	/**
