@@ -34,6 +34,7 @@ define( 'PERDITA_CORE_DIR', plugin_dir_path( __FILE__ ) );
 define( 'PERDITA_CORE_URL', plugin_dir_url( __FILE__ ) );
 
 require_once PERDITA_CORE_DIR . 'inc/perdita-notices.php';
+require_once PERDITA_CORE_DIR . 'inc/class-perdita-client-ip.php';
 require_once PERDITA_CORE_DIR . 'inc/class-perdita-core.php';
 
 /**
