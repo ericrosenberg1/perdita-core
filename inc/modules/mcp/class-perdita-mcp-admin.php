@@ -326,7 +326,7 @@ class Perdita_MCP_Admin {
 			return; // Defensive: the module always loads this alongside Perdita_MCP (see its constructor), but never assume that from an admin-rendering context.
 		}
 
-		echo '<div class="card" style="max-width:760px;border-left:4px solid #2563eb;margin-top:24px;padding:1px 20px;">';
+		echo '<div class="card" style="max-width:760px;border-left:4px solid #3f6b5e;margin-top:24px;padding:1px 20px;">';
 		echo '<h2>' . esc_html__( 'One-click connect from claude.ai or ChatGPT', 'perdita-core' ) . '</h2>';
 		echo '<p>' . esc_html__( 'Instead of generating and pasting an API key, an AI client that supports remote MCP servers with OAuth can connect with one click. It sends you through a normal WordPress login (if you are not already signed in) and a consent screen, then connects using your own account\'s permissions.', 'perdita-core' ) . '</p>';
 

@@ -1,7 +1,7 @@
 .perdita-form { max-width: var(--perdita-measure, 65ch); }
 .perdita-form__field { margin-bottom: 1.1rem; }
 .perdita-form__field label { display: block; font-weight: 600; margin-bottom: .35rem; }
-.perdita-form__req { color: var(--perdita-color-primary, #2563eb); }
+.perdita-form__req { color: var(--perdita-color-primary, #3f6b5e); }
 .perdita-form input[type=text],
 .perdita-form input[type=email],
 .perdita-form input[type=tel],
@@ -22,7 +22,7 @@
 .perdita-form__choices { display: flex; flex-direction: column; gap: .35rem; }
 .perdita-form__choice { font-weight: 400; }
 .perdita-form__submit {
-	background: var(--perdita-color-primary, #2563eb);
+	background: var(--perdita-color-primary, #3f6b5e);
 	color: #fff;
 	border: 0;
 	border-radius: var(--perdita-radius, 8px);

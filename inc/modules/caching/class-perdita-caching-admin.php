@@ -318,7 +318,7 @@ class Perdita_Caching_Admin {
 				</div>
 			<?php endif; ?>
 
-			<div class="card" style="max-width:760px;border-left:4px solid #2563eb;">
+			<div class="card" style="max-width:760px;border-left:4px solid #3f6b5e;">
 				<h2 style="margin-top:0;"><?php esc_html_e( 'What is and is not here', 'perdita-core' ); ?></h2>
 				<p><?php esc_html_e( 'These simple settings should work well for the majority of small WordPress sites. It saves each guest page as a static file and serves it right back on the next visit, which is exactly the boost a small site on modest hosting benefits from most. It never touches wp-config.php, and the optional early-serve drop-in only answers pages it already cached.', 'perdita-core' ); ?></p>
 				<p class="description">

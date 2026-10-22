@@ -2,6 +2,10 @@
 
 This is the free plugin half of Perdita. It ships in lock step with the Perdita theme, Perdita Pro and the license server. This is the one public repo of the four, so keep host names, server paths and anything else about private infrastructure out of it. A pre-push hook (infra-leak-guard) blocks the common patterns. The release recipe, live-site notes and the full landmine list are in `~/Code/perdita/CLAUDE.md`, which lives in a private repo.
 
+## Brand tokens
+
+Fallback colors and fonts come from the theme's default preset. See "Brand tokens" in `~/Code/perdita/CLAUDE.md`. Never use a framework default like #2563eb.
+
 ## Rules that bite
 
 - **One version number across theme, Core and Pro.** Bump with `../perdita/bin/bump-version.sh <version>` (or this repo's copy), never by hand. Labels are -alpha, -beta or -rc only, and the script refuses a downgrade. `bin/build-release.sh` refuses a version the siblings don't share.

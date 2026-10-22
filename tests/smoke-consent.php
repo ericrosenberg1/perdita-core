@@ -133,6 +133,17 @@ $__cs_set( array( 'measurement_id' => 'G-SMOKE1', 'accent_color' => 'red;}</styl
 $__cs_scm_color = defined( 'SCM_ACCENT_COLOR' ) ? Perdita_Analytics::sanitize_accent_color( SCM_ACCENT_COLOR ) : '';
 $ok( $__cs_scm_color === $__cs->accent_color(), 'accent: an invalid stored color is ignored' );
 
+// With no accent anywhere, the banner takes the theme's primary color.
+if ( '' === $__cs_scm_color ) {
+	$__cs_primary = Perdita_Analytics::sanitize_accent_color( perdita()->settings->get( 'colors.primary', '' ) );
+	$__cs->enqueue_assets();
+	$__cs_inline = implode( '', (array) wp_styles()->get_data( 'perdita-analytics-banner', 'after' ) );
+	$ok( '' !== $__cs_primary && $__cs_primary === $__cs->theme_accent_color() && false !== strpos( $__cs_inline, '--perdita-consent-accent:' . $__cs_primary . ';' ), 'accent: a blank setting falls back to the theme primary color' );
+	wp_dequeue_script( 'perdita-analytics-banner' );
+	wp_dequeue_style( 'perdita-analytics-banner' );
+	wp_deregister_style( 'perdita-analytics-banner' );
+}
+
 if ( ! defined( 'SCM_ACCENT_COLOR' ) ) {
 	define( 'SCM_ACCENT_COLOR', '#1D4ED8' );
 }
