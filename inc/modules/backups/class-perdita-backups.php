@@ -53,6 +53,15 @@ class Perdita_Backups {
 	const CHUNK = 500;
 
 	/**
+	 * First comment line of every dump written since 0.19.13-beta. Dumps
+	 * before it ran values through esc_sql() alone, and WordPress's
+	 * esc_sql() swaps every "%" for a random per-request placeholder, so
+	 * those dumps hold "{64 hex}" where the site had "%". import_database()
+	 * turns the placeholder back into "%" for any dump without this line.
+	 */
+	const DUMP_FORMAT_LINE = '-- Perdita-Dump-Format: 2';
+
+	/**
 	 * The Perdita core singleton.
 	 *
 	 * @var Perdita
@@ -488,6 +497,23 @@ class Perdita_Backups {
 	}
 
 	/**
+	 * One value as a SQL literal for a dump: NULL, or a quoted, escaped
+	 * string. esc_sql() replaces "%" with $wpdb's placeholder escape, which
+	 * only $wpdb->prepare() and query() inside the same request undo, so it
+	 * has to come off before the value is written to a file.
+	 *
+	 * @param string|null $value Column value from $wpdb.
+	 * @return string
+	 */
+	public static function sql_value( $value ) {
+		global $wpdb;
+		if ( null === $value ) {
+			return 'NULL';
+		}
+		return "'" . $wpdb->remove_placeholder_escape( esc_sql( (string) $value ) ) . "'";
+	}
+
+	/**
 	 * Stream a full mysqldump-style .sql file to disk.
 	 *
 	 * For each table: DROP TABLE IF EXISTS, the SHOW CREATE TABLE statement, then
@@ -506,6 +532,7 @@ class Perdita_Backups {
 			return new WP_Error( 'perdita_backups_sql_open', __( 'Could not open the database dump file for writing.', 'perdita-core' ) );
 		}
 
+		fwrite( $fh, self::DUMP_FORMAT_LINE . "\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite
 		fwrite( $fh, "-- Perdita Backups database dump\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite
 		fwrite( $fh, '-- Generated: ' . gmdate( 'c' ) . "\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite
 		fwrite( $fh, '-- Site: ' . home_url() . "\n\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite
@@ -554,12 +581,7 @@ class Perdita_Backups {
 					$vals = array();
 					foreach ( $row as $col => $value ) {
 						$cols[] = '`' . str_replace( '`', '``', $col ) . '`';
-						if ( null === $value ) {
-							$vals[] = 'NULL';
-						} else {
-							// $wpdb->prepare-style escaping of a single value.
-							$vals[] = "'" . esc_sql( (string) $value ) . "'";
-						}
+						$vals[] = self::sql_value( $value );
 					}
 					$line = 'INSERT INTO ' . $table_q . ' (' . implode( ', ', $cols ) . ') VALUES (' . implode( ', ', $vals ) . ");\n";
 					if ( false === fwrite( $fh, $line ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite
@@ -771,6 +793,10 @@ class Perdita_Backups {
 			return $this->restore_failure( 'unexpected', new WP_Error( 'perdita_backups_restore_exception', $e->getMessage() ), $snapshot );
 		}
 
+		// Every cached option, post and user now describes the old database.
+		// A persistent object cache would keep serving them until expiry.
+		wp_cache_flush();
+
 		return true;
 	}
 
@@ -815,8 +841,16 @@ class Perdita_Backups {
 
 		$statement = '';
 		$suppress  = $wpdb->suppress_errors( true );
+		// A dump without the format line came from a build that wrote
+		// esc_sql()'s "%" placeholder into the file. See DUMP_FORMAT_LINE.
+		$repair = true;
+		$first  = true;
 
 		while ( false !== ( $line = fgets( $fh ) ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fgets
+			if ( $first ) {
+				$first  = false;
+				$repair = self::DUMP_FORMAT_LINE !== rtrim( $line );
+			}
 			$trimmed = ltrim( $line );
 
 			// Skip standalone comment and blank lines only when not mid-statement.
@@ -838,6 +872,9 @@ class Perdita_Backups {
 				$statement = '';
 				if ( '' === $sql || ';' === $sql ) {
 					continue;
+				}
+				if ( $repair ) {
+					$sql = (string) preg_replace( '/\{[0-9a-f]{64}\}/', '%', $sql );
 				}
 				$result = $wpdb->query( $sql ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared
 				if ( false === $result && '' !== (string) $wpdb->last_error ) {
