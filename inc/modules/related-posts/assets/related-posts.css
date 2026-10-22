@@ -24,7 +24,7 @@
 }
 .perdita-related__card:hover .perdita-related__title,
 .perdita-related__card:focus .perdita-related__title {
-	color: var(--perdita-color-primary, #2563eb);
+	color: var(--perdita-color-primary, #3f6b5e);
 }
 .perdita-related__thumb {
 	display: block;

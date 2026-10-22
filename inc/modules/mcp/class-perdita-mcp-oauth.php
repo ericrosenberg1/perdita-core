@@ -925,7 +925,7 @@ class Perdita_MCP_OAuth {
 		get_template_part( 'templates/header' );
 		?>
 		<main id="main" class="site-main" tabindex="-1">
-		<div class="perdita-mcp-oauth-consent" style="max-width:640px;margin:48px auto;padding:32px;border:1px solid #dcdcde;border-radius:8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+		<div class="perdita-mcp-oauth-consent" style="max-width:640px;margin:48px auto;padding:32px;border:1px solid #dcdcde;border-radius:8px;font-family:var(--perdita-font-body,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif);">
 			<h1 style="margin-top:0;font-size:1.4em;">
 				<?php
 				printf(

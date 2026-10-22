@@ -254,6 +254,20 @@ class Perdita_Analytics {
 	}
 
 	/**
+	 * The color the banner uses when no accent is set: the theme's primary
+	 * color, so a site that never picks one still gets its own brand color.
+	 * '' when the theme's token document can't be read.
+	 *
+	 * @return string
+	 */
+	public function theme_accent_color() {
+		if ( ! function_exists( 'perdita' ) || ! isset( perdita()->settings ) || ! is_object( perdita()->settings ) ) {
+			return '';
+		}
+		return self::sanitize_accent_color( perdita()->settings->get( 'colors.primary', '' ) );
+	}
+
+	/**
 	 * Text color for the accept button: white or near-black, whichever
 	 * contrasts more with the accent.
 	 *
@@ -539,6 +553,9 @@ class Perdita_Analytics {
 			PERDITA_CORE_VERSION
 		);
 		$accent = $this->accent_color();
+		if ( '' === $accent ) {
+			$accent = $this->theme_accent_color();
+		}
 		if ( '' !== $accent ) {
 			// Both values are validated hex colors (sanitize_accent_color() and
 			// a fixed pair), so nothing else can reach this style block.

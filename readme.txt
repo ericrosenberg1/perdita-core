@@ -4,7 +4,7 @@ Tags: forms, seo, caching, security, newsletter
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.19.13-beta
+Stable tag: 0.19.14-beta
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -76,6 +76,10 @@ Form entries, subscribers, orders, products, form definitions, the SMTP log, you
 Yes, that's what Pro is built on. Pro registers its own modules into this plugin's registry, so they appear on the same Modules screen and behave the same way.
 
 == Changelog ==
+
+= 0.19.14-beta =
+* Forms, related posts, subscriptions and admin cards fall back to Perdita's default palette instead of blue.
+* The cookie consent banner uses the theme's primary color when no accent is set, and Perdita's fonts and colors.
 
 = 0.19.13-beta =
 * Fix: restoring a backup brings back every % in the database. Backups made earlier held a placeholder code in place of each %, which broke permalinks and saved settings. Those older backups now restore correctly too.

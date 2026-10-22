@@ -333,7 +333,7 @@ class Perdita_Subscriptions_Admin {
 	 */
 	private function premium() {
 		?>
-		<div class="card" style="max-width:760px;border-left:4px solid #2563eb;">
+		<div class="card" style="max-width:760px;border-left:4px solid #3f6b5e;">
 			<h2 style="margin-top:0;"><?php esc_html_e( 'Coming in Perdita Premium', 'perdita-core' ); ?></h2>
 			<ul style="list-style:disc;padding-left:20px;color:#3c434a;">
 				<li><?php esc_html_e( 'Weekly and monthly roundup digest emails, instead of (or alongside) a notification for every single post.', 'perdita-core' ); ?></li>

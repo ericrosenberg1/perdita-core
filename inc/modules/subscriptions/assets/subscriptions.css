@@ -15,7 +15,7 @@
 	color: inherit;
 }
 .perdita-subscribe__submit {
-	background: var(--perdita-color-primary, #2563eb);
+	background: var(--perdita-color-primary, #3f6b5e);
 	color: #fff;
 	border: 0;
 	border-radius: var(--perdita-radius, 8px);

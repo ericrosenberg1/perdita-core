@@ -313,12 +313,12 @@ class Perdita_Analytics_Admin {
 								class="small-text"
 								style="width:8em;"
 								value="<?php echo esc_attr( $s['accent_color'] ); ?>"
-								placeholder="<?php echo esc_attr( '' !== $scm_fallback ? $scm_fallback : '#2563eb' ); ?>"
+								placeholder="<?php echo esc_attr( '' !== $scm_fallback ? $scm_fallback : ( '' !== $this->main->theme_accent_color() ? $this->main->theme_accent_color() : '#3f6b5e' ) ); ?>"
 								pattern="#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})"
 								aria-describedby="perdita-analytics-accent-help"
 							/>
 							<p class="description" id="perdita-analytics-accent-help">
-								<?php esc_html_e( 'A hex color like #2e6b29 for the Accept button and the focus ring. Leave blank for the default.', 'perdita-core' ); ?>
+								<?php esc_html_e( 'A hex color like #2e6b29 for the Accept button and the focus ring. Leave blank to use the theme\'s primary color.', 'perdita-core' ); ?>
 								<?php if ( '' !== $scm_fallback ) : ?>
 									<?php
 									/* translators: %s: hex color. */
