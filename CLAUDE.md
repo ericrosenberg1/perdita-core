@@ -57,3 +57,7 @@ Fixes merged to main since the last release go here, one `readme.txt` line each.
 ## Page cache and WordPress's own output buffer
 
 WordPress 6.9+ opens a template enhancement buffer right before the template (`wp_start_template_enhancement_output_buffer()`, inside the page cache's capture buffer) and fills its placeholders, late block styles among them, in that buffer's callback. `Perdita_Caching::write_buffer()` closes every buffer above its own level before reading, then reads its own. Until 0.19.12-beta it read the innermost buffer at shutdown 0, so every cached page lacked WordPress's per-block CSS while the first visitor's copy had it. To see what a visitor really gets, compare a cached fetch (`x-cache: HIT`) with one carrying an unknown query arg, which skips the cache.
+
+## Writing voice
+
+Every word of prose in this repo follows Eric's voice card at `~/Code/content-toolkit/voice/voice-card.md`. That covers UI copy, emails, docs, release notes, store listings, commit messages, and PR bodies. Point at the card and never paste its rules here, since a copy drifts. Gate short copy with `python3 ~/Code/content-toolkit/scorer/ai_tells.py FILE --profile article|email|social|title|description --brief` (zero blocks, 80 or higher) and long-form with `content-voice FILE` (90 or higher, 85 is the floor).
