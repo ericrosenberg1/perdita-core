@@ -698,6 +698,19 @@ perdita()->settings->apply_patch( array( 'footer.established_year' => '' ) );
 $sc_credit = do_shortcode( '[perdita_credit]' );
 $ok( false !== strpos( $sc_credit, '©' ) && false !== strpos( $sc_credit, wp_date( 'Y' ) ) && false !== strpos( $sc_credit, get_bloginfo( 'name' ) ), 'shortcodes: [perdita_credit] composes copyright symbol + year + site name' );
 
+// The theme no longer runs do_shortcode() on the saved footer credit
+// (wordpress.org theme review 294240). Core expands the shortcodes through
+// the theme's perdita_footer_credit_text filter instead.
+$ok( 10 === has_filter( 'perdita_footer_credit_text', 'do_shortcode' ), 'shortcodes: Core hooks do_shortcode onto the theme\'s perdita_footer_credit_text filter' );
+$ok( 'Since ' . wp_date( 'Y' ) . ' ©' === apply_filters( 'perdita_footer_credit_text', 'Since [perdita_year] [perdita_copyright]' ), 'shortcodes: the filter expands [perdita_year] and [perdita_copyright] in a saved credit line' );
+if ( function_exists( 'perdita_footer_credit_html' ) ) {
+	$__orig_credit_text = perdita()->settings->get( 'footer.credit_text' );
+	perdita()->settings->apply_patch( array( 'footer.credit_text' => '[perdita_credit] &middot; By <a href="https://example.com">Example</a>' ) );
+	$__credit_html = perdita_footer_credit_html();
+	$ok( false !== strpos( $__credit_html, '©' ) && false !== strpos( $__credit_html, wp_date( 'Y' ) ) && false !== strpos( $__credit_html, '<a href="https://example.com">Example</a>' ) && false === strpos( $__credit_html, '[perdita_' ), 'shortcodes: the theme\'s rendered credit line expands [perdita_credit] next to a custom link' );
+	perdita()->settings->apply_patch( array( 'footer.credit_text' => (string) $__orig_credit_text ) );
+}
+
 perdita()->settings->apply_patch( array( 'footer.established_year' => 'not-a-year' ) );
 $ok( '' === perdita()->settings->get( 'footer.established_year' ), 'shortcodes: established_year sanitizer drops non-4-digit garbage rather than storing it' );
 
