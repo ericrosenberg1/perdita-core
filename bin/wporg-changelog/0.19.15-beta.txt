@@ -1,0 +1,1 @@
+* The footer credit shortcodes ([perdita_year], [perdita_credit] and friends) expand through the Perdita theme's perdita_footer_credit_text filter.
