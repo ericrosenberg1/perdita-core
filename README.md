@@ -5,6 +5,15 @@ theme. It carries everything the theme can't: SEO, forms, page caching,
 security hardening, analytics, email, backups, a small store, an MCP server,
 and the module registry that turns each of those on and off.
 
+## Install
+
+The newest release is always at one address:
+<https://pro.perdita.ericrosenberg.com/api/download/core>. Download the zip and
+upload it under Plugins, Add New, Upload Plugin. On a site that already runs the
+Perdita theme, the Install Perdita Core button on the Perdita screen fetches the
+same release and checks its signature first. Either way, the plugin updates
+itself from then on.
+
 ## Why it exists
 
 Perdita is going to the wordpress.org theme directory, and the theme review
