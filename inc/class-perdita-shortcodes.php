@@ -5,10 +5,15 @@
  * Registered as real WordPress shortcodes (not a closed one-off token parser)
  * so they also work if pasted into ordinary post/page content or a widget,
  * not just the footer credit field. [perdita_credit] composes the full
- * default line, and is the single source of truth for what "default" means:
- * templates/footer.php runs the (possibly blank, falling back to
- * [perdita_credit]) credit_text setting through do_shortcode() rather than
- * re-deriving the default line itself.
+ * default line.
+ *
+ * The Perdita theme never runs shortcodes on the saved footer credit text
+ * itself (a theme may not execute shortcodes on user-controlled text under
+ * the wordpress.org theme rules). It hands the text to the
+ * `perdita_footer_credit_text` filter, and this class hooks do_shortcode()
+ * there, so the shortcodes expand in the footer only while Core is active.
+ * The theme falls back to its own default line when a [perdita_*] tag is
+ * left unexpanded.
  *
  * @package Perdita_Core
  */
@@ -37,6 +42,10 @@ class Perdita_Shortcodes {
 		add_shortcode( 'perdita_trademark', array( $this, 'shortcode_trademark' ) );
 		add_shortcode( 'perdita_site_name', array( $this, 'shortcode_site_name' ) );
 		add_shortcode( 'perdita_credit', array( $this, 'shortcode_credit' ) );
+
+		// The theme's footer applies this filter to the saved credit text
+		// instead of calling do_shortcode() itself (see the class docblock).
+		add_filter( 'perdita_footer_credit_text', 'do_shortcode' );
 	}
 
 	/**
