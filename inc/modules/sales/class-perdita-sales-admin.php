@@ -167,7 +167,7 @@ class Perdita_Sales_Admin {
 			return;
 		}
 
-		$price = isset( $_POST['perdita_sales_price'] ) ? Perdita_Sales::normalize_amount( wp_unslash( $_POST['perdita_sales_price'] ) ) : 0.0;
+		$price = isset( $_POST['perdita_sales_price'] ) ? Perdita_Sales::price_amount( wp_unslash( $_POST['perdita_sales_price'] ) ) : 0.0;
 		update_post_meta( $post_id, '_perdita_sales_price', $price );
 
 		$type = isset( $_POST['perdita_sales_type'] ) ? sanitize_key( wp_unslash( $_POST['perdita_sales_type'] ) ) : 'digital';
@@ -186,7 +186,7 @@ class Perdita_Sales_Admin {
 		$stock = isset( $_POST['perdita_sales_stock'] ) ? absint( wp_unslash( $_POST['perdita_sales_stock'] ) ) : 0;
 		update_post_meta( $post_id, '_perdita_sales_stock', $stock );
 
-		$shipping = isset( $_POST['perdita_sales_shipping'] ) ? Perdita_Sales::normalize_amount( wp_unslash( $_POST['perdita_sales_shipping'] ) ) : 0.0;
+		$shipping = isset( $_POST['perdita_sales_shipping'] ) ? Perdita_Sales::price_amount( wp_unslash( $_POST['perdita_sales_shipping'] ) ) : 0.0;
 		update_post_meta( $post_id, '_perdita_sales_shipping', $shipping );
 	}
 
