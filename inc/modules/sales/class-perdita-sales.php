@@ -361,12 +361,12 @@ class Perdita_Sales {
 		return array(
 			'id'         => $product_id,
 			'title'      => get_the_title( $product_id ),
-			'price'      => self::normalize_amount( get_post_meta( $product_id, '_perdita_sales_price', true ) ),
+			'price'      => self::price_amount( get_post_meta( $product_id, '_perdita_sales_price', true ) ),
 			'type'       => $type,
 			'file_id'    => (int) get_post_meta( $product_id, '_perdita_sales_file_id', true ),
 			'file_path'  => (string) get_post_meta( $product_id, '_perdita_sales_file_path', true ),
 			'stock'      => (int) get_post_meta( $product_id, '_perdita_sales_stock', true ),
-			'shipping'   => self::normalize_amount( get_post_meta( $product_id, '_perdita_sales_shipping', true ) ),
+			'shipping'   => self::price_amount( get_post_meta( $product_id, '_perdita_sales_shipping', true ) ),
 		);
 	}
 
@@ -384,6 +384,20 @@ class Perdita_Sales {
 			$n = 0.0;
 		}
 		return round( $n, 2 );
+	}
+
+	/**
+	 * A price as the buyer pays it: normalize_amount(), then rounded to the
+	 * currency's own decimals, so 1500.4 yen is 1500 and 19.99 dollars stays
+	 * 19.99. Stripe takes a whole number per unit, so a fraction kept here
+	 * made the recorded order total differ from the charge (2026-10-30).
+	 *
+	 * @param mixed  $raw      Raw value.
+	 * @param string $currency 3-letter code, or '' for the store currency.
+	 * @return float
+	 */
+	public static function price_amount( $raw, $currency = '' ) {
+		return round( self::normalize_amount( $raw ), self::currency_decimals( $currency ) );
 	}
 
 	/**

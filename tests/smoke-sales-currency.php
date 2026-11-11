@@ -78,10 +78,39 @@ $ok( 'jpy' === ( $scu_body['line_items[0][price_data][currency]'] ?? '' ), 'curr
 $ok( '1500' === ( $scu_body['line_items[0][price_data][unit_amount]'] ?? '' ), 'currency: a 1500 JPY item goes to Stripe as unit_amount 1500' );
 $ok( 7145 === $scu_charged && 7145.0 === (float) $scu_totals['total'], 'currency: Stripe charges 7145 JPY, the same as the stored order total' );
 
+// A fractional price in a whole-unit currency. Stripe takes unit_amount per
+// unit, so 1500.4 yen went out as 1500 while the order recorded 3000.8 for
+// two. The stored total sat above the charge, and a full refund of it asked
+// Stripe for more than was paid (the perdita-pro#10 failure, from the price
+// side this time). Until 2026-10-30 product prices kept 2 places in every
+// currency.
+update_post_meta( $scu_product, '_perdita_sales_price', '1500.4' );
+update_post_meta( $scu_product, '_perdita_sales_shipping', '300.6' );
+$scu_frac = $scu_sales->compute_totals( array( $scu_product => 2 ) );
+$ok( 1500.0 === (float) Perdita_Sales::product( $scu_product )['price'] && 301.0 === (float) Perdita_Sales::product( $scu_product )['shipping'], 'currency: a JPY product priced 1500.4 with 300.6 shipping reads as 1500 and 301' );
+$ok( 3000.0 === (float) $scu_frac['subtotal'] && 602.0 === (float) $scu_frac['shipping'], 'currency: two of them total 3000 plus 602 shipping, whole yen' );
+
+$scu_body = array();
+add_filter( 'pre_http_request', $scu_intercept, 10, 3 );
+$scu_session->invoke( $scu_sales, 4243, $scu_frac, 'buyer@example.test' );
+remove_filter( 'pre_http_request', $scu_intercept, 10 );
+$scu_charged = 0;
+for ( $i = 0; isset( $scu_body[ "line_items[$i][quantity]" ] ); $i++ ) {
+	$scu_charged += (int) $scu_body[ "line_items[$i][price_data][unit_amount]" ] * (int) $scu_body[ "line_items[$i][quantity]" ];
+}
+$ok( $scu_charged > 0 && Perdita_Sales::to_minor_units( $scu_frac['total'], 'JPY' ) === $scu_charged && (float) $scu_charged === (float) $scu_frac['total'], 'currency: with a fractional JPY price the stored order total still equals what Stripe charges (' . $scu_charged . ' vs ' . $scu_frac['total'] . ')' );
+
+// The product editor stores what the buyer will pay, so the screen and the
+// charge agree.
+$scu_settings['currency'] = 'USD';
+update_option( Perdita_Sales::OPTION, $scu_settings );
+$ok( 1500.4 === (float) Perdita_Sales::product( $scu_product )['price'], 'currency: the same meta in a USD store keeps its cents (1500.40)' );
+$ok( 19.99 === Perdita_Sales::price_amount( '19.994' ) && 1500.0 === Perdita_Sales::price_amount( '1500.4', 'JPY' ) && 500.0 === Perdita_Sales::price_amount( '499.6', 'ISK' ), 'currency: price_amount() rounds to the currency\'s own decimals' );
+
 wp_delete_post( $scu_product, true );
 if ( null === $scu_orig_opt ) {
 	delete_option( Perdita_Sales::OPTION );
 } else {
 	update_option( Perdita_Sales::OPTION, $scu_orig_opt );
 }
-unset( $scu_orig_opt, $scu_settings, $scu_sales, $scu_session, $scu_product, $scu_totals, $scu_body, $scu_intercept, $scu_charged, $i );
+unset( $scu_frac, $scu_orig_opt, $scu_settings, $scu_sales, $scu_session, $scu_product, $scu_totals, $scu_body, $scu_intercept, $scu_charged, $i );
