@@ -158,22 +158,10 @@ class Perdita_SEO_Admin {
 	}
 
 	/**
-	 * The card listing what Perdita Premium adds.
+	 * One line about what Perdita Pro adds to SEO.
 	 */
 	private function premium() {
-		?>
-		<div class="card" style="max-width:760px;border-left:4px solid #3f6b5e;">
-			<h2 style="margin-top:0;"><?php esc_html_e( 'Coming in Perdita Premium', 'perdita-core' ); ?></h2>
-			<ul style="list-style:disc;padding-left:20px;color:#3c434a;">
-				<li><?php esc_html_e( 'Per-post SEO editor with live Google and social previews', 'perdita-core' ); ?></li>
-				<li><?php esc_html_e( 'Richer schema (Product, FAQ, HowTo, LocalBusiness, Recipe) and breadcrumbs', 'perdita-core' ); ?></li>
-				<li><?php esc_html_e( 'Redirect manager and 404 monitor, with automatic redirects on slug changes', 'perdita-core' ); ?></li>
-				<li><?php esc_html_e( 'Import per-post titles, descriptions, canonical URLs, and noindex flags from Yoast, AIOSEO, and Genesis', 'perdita-core' ); ?></li>
-				<li><?php esc_html_e( 'AI bulk meta-description generation and internal-link suggestions', 'perdita-core' ); ?></li>
-			</ul>
-			<p class="description"><?php esc_html_e( 'Everything on this page is free, forever. Premium adds depth for bigger sites.', 'perdita-core' ); ?></p>
-		</div>
-		<?php
+		echo '<p class="description">' . esc_html__( 'Everything on this page is free. With Perdita Pro, you also get a per-post SEO editor, a redirect manager, a 404 log, richer schema, and per-post imports.', 'perdita-core' ) . '</p>';
 	}
 
 	/**

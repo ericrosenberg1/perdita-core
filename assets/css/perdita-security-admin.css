@@ -1,0 +1,13 @@
+/*
+ * Security screen (Perdita, Security): layout only. Badges, buttons and
+ * focus rings come from the shared admin sheet, perdita-admin.css.
+ */
+
+.perdita-security .perdita-security-note {
+	max-width: 760px;
+}
+.perdita-security .perdita-security-list {
+	list-style: disc;
+	margin: 8px 0 4px 20px;
+	color: var(--perdita-ui-text, #33312c);
+}

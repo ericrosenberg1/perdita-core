@@ -4,7 +4,7 @@ Tags: forms, seo, caching, security, newsletter
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.19.20-beta
+Stable tag: 0.19.21-beta
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -22,7 +22,7 @@ Everything is a module, and a module that's off costs you one option read. Its c
 
 * **SEO.** Titles, meta descriptions, Open Graph and Twitter cards, schema, canonical URLs, and a one-click import from Yoast or All in One SEO.
 * **Forms.** Build a contact form, store the entries in your own database, and keep the spam out with a honeypot and rate limiting.
-* **Caching and performance.** Page caching with smart clearing, plus browser cache headers. It skips carts, logged-in users, and any page with a form on it.
+* **Caching and performance.** Page caching plus browser cache headers. You can serve cached pages before WordPress loads, through a drop-in like WP Super Cache's, and choose whether a post save clears the whole cache or only the pages that show that post. You can also preload the cache in the background, store gzip copies, serve the old copy while a page rebuilds, keep a separate cache for phones, cache your feeds, cap the cache's size on disk, and point static files at a CDN. You get a searchable list of cached pages, a scheduled cleanup, a debug log, and `wp perdita cache` commands. Carts, logged-in visitors, pages that set a cookie, and pages a plugin marks as private never get a cached copy.
 * **Security hardening.** Login rate limiting, security headers, a locked-down file editor, and blocks for XML-RPC and author enumeration.
 * **Email delivery (SMTP).** Send site mail through your own SMTP server so it reaches the inbox. Credentials are encrypted at rest.
 * **Email subscriptions.** Let readers subscribe and get a note when you publish. Double opt-in, one-click unsubscribe.
@@ -33,6 +33,7 @@ Everything is a module, and a module that's off costs you one option read. Its c
 * **Search Console.** Clicks, impressions, and top queries in wp-admin, using your own Google Cloud OAuth app.
 * **PageSpeed Insights.** Core Web Vitals for your homepage, straight from Google, so you can see what a setting actually did.
 * **MCP server.** Let Claude, ChatGPT, or any MCP client manage posts and pages over a secure API instead of only through wp-admin.
+* **Switch to Perdita.** Bring your settings over from WP Super Cache, W3 Total Cache, WP Fastest Cache, LiteSpeed Cache, Cache Enabler, Yoast SEO, All in One SEO, Rank Math, SEOPress, WP Mail SMTP, FluentSMTP, Post SMTP, Site Kit, MonsterInsights, GA Google Analytics, Simple Consent Manager, Limit Login Attempts Reloaded, or Loginizer. You can preview every setting first, undo an import, and deactivate the old plugin when you're ready. For a caching plugin, you can also clear out what it leaves behind, its drop-in and its .htaccess rules, and you get a backup copy of each file in a protected folder first. `wp perdita switch` gives you the same tools on the command line.
 
 **Defaults**
 
@@ -76,6 +77,19 @@ Form entries, subscribers, orders, products, form definitions, the SMTP log, you
 Yes, that's what Pro is built on. Pro registers its own modules into this plugin's registry, so they appear on the same Modules screen and behave the same way.
 
 == Changelog ==
+
+= 0.19.21-beta =
+* New: in Caching, you get preload, gzip copies, serve stale while rebuilding, a separate copy for phones, rejected user agents and cookies, scheduled cleanup with a size cap, a list of cached pages, CDN URL rewriting, feed caching, and `wp perdita cache`.
+* New: Switch to Perdita, under Perdita in the admin menu. You can preview and import your settings from 23 caching, SEO, email, analytics, and login-security plugins, undo an import, and then deactivate the old plugin. You can do the same from the command line with `wp perdita switch`.
+* New: you get Perdita's own colors on every Perdita admin screen.
+* Fix: visitors never get a cached copy of a page that sets a cookie, defines `DONOTCACHEPAGE`, or changes mid-load.
+* Fix: you get a fresh page cache after you change a plugin, widget, menu, category, tag, the site title, or permalinks.
+* Fix: a CDN or proxy in front of your site can no longer share a page that Perdita chose not to cache.
+* Fix: visitors on tablets and phones get the right cached copy, matched to WordPress's own mobile test.
+* Fix: you keep a long-dash title separator when you import from Yoast.
+* Fix: you get a label on every field of the form builder, form entries, and Image SEO screens, and you can use the form builder, sales orders, IndexNow, Email, and PageSpeed screens on a phone.
+* New: when your Perdita versions are out of step, you get an update button for each older piece.
+* Fix: you get a fresh Perdita Core offer when you click Check again on the Updates screen, not one up to 12 hours old.
 
 = 0.19.20-beta =
 * Fix: Sales rounds a product's price and shipping to the currency's own decimals. A fractional price in a whole-unit currency like JPY no longer makes the recorded order total differ from the Stripe charge.

@@ -19,7 +19,7 @@ defined( 'ABSPATH' ) || exit;
 return array(
 	'id'          => 'caching',
 	'label'       => __( 'Caching and performance', 'perdita-core' ),
-	'description' => __( 'Simple page caching with smart clearing, plus browser-cache headers. Skips carts, logged-in users, and forms automatically.', 'perdita-core' ),
+	'description' => __( 'Page caching with smart clearing, preload, gzip copies, a CDN option, and browser-cache headers. Logged-in users, carts, and forms get a fresh page by default.', 'perdita-core' ),
 	'group'       => 'performance',
 	'default'     => false,
 	'contexts'    => array( 'always' ),

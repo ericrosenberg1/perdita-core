@@ -52,10 +52,21 @@ class Perdita_Security_Admin {
 	}
 
 	/**
+	 * The screen's layout sheet. Controls and badges come from the shared
+	 * admin sheet.
+	 */
+	public function assets() {
+		if ( class_exists( 'Perdita_Core_Admin_UI' ) ) {
+			Perdita_Core_Admin_UI::enqueue_assets();
+		}
+		wp_enqueue_style( 'perdita-security-admin', PERDITA_CORE_URL . 'assets/css/perdita-security-admin.css', array(), PERDITA_CORE_VERSION );
+	}
+
+	/**
 	 * Register the Security submenu under the Perdita menu.
 	 */
 	public function menu() {
-		add_submenu_page(
+		$hook = add_submenu_page(
 			'perdita',
 			__( 'Security', 'perdita-core' ),
 			__( 'Security', 'perdita-core' ),
@@ -63,6 +74,9 @@ class Perdita_Security_Admin {
 			self::PAGE,
 			array( $this, 'render' )
 		);
+		if ( $hook ) {
+			add_action( 'admin_print_styles-' . $hook, array( $this, 'assets' ) );
+		}
 	}
 
 	/* ---------- render ---------- */
@@ -76,8 +90,7 @@ class Perdita_Security_Admin {
 		}
 		$s = Perdita_Security::get_settings();
 
-		echo '<style>.perdita-recommended-flag{display:inline-block;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600;background:#edfaef;color:#005c12;}.perdita-advanced-flag{display:inline-block;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600;background:#f0f0f1;color:#50575e;}</style>';
-		echo '<div class="wrap">';
+		echo '<div class="wrap perdita-security">';
 		echo '<h1>' . esc_html__( 'Security hardening', 'perdita-core' ) . '</h1>';
 		echo '<p>' . esc_html__( 'Each protection is off until you turn it on, so nothing changes on your site until you choose it. The two that can lock people out or break a page have safety notes below.', 'perdita-core' ) . '</p>';
 
@@ -106,12 +119,12 @@ class Perdita_Security_Admin {
 	 */
 	private function section_login( $s ) {
 		echo '<hr /><h2>' . esc_html__( 'Login rate limiting', 'perdita-core' ) . '</h2>';
-		echo '<p class="description" style="max-width:760px;">' . esc_html__( 'Safety note: this blocks a client IP after too many failed logins, and it always self-expires. Add your own IP to the allowlist below so you can never lock yourself out. Behind Cloudflare the real visitor address is read automatically. Behind another proxy or CDN, wire it in through the perdita_security_client_ip filter, since the default otherwise reads REMOTE_ADDR.', 'perdita-core' ) . '</p>';
+		echo '<p class="description perdita-security-note">' . esc_html__( 'Safety note: with this on, you lock out an IP address after too many failed logins, and every lockout expires. Add your own IP address to the allowlist below so you never lock yourself out. Behind Cloudflare, you get each visitor\'s own address automatically. Behind another proxy or CDN, pass the visitor\'s address through the perdita_security_client_ip filter, since you get REMOTE_ADDR otherwise.', 'perdita-core' ) . '</p>';
 
 		echo '<table class="form-table" role="presentation">';
 
 		echo '<tr><th scope="row">' . esc_html__( 'Enable', 'perdita-core' ) . '</th><td>';
-		echo '<label><input type="checkbox" name="login_limit" value="1" ' . checked( ! empty( $s['login_limit'] ), true, false ) . ' /> ' . esc_html__( 'Limit failed login attempts', 'perdita-core' ) . '</label> <span class="perdita-recommended-flag">' . esc_html__( '(Recommended)', 'perdita-core' ) . '</span>';
+		echo '<label><input type="checkbox" name="login_limit" value="1" ' . checked( ! empty( $s['login_limit'] ), true, false ) . ' /> ' . esc_html__( 'Limit failed login attempts', 'perdita-core' ) . '</label> <span class="perdita-badge is-ok">' . esc_html__( 'Recommended', 'perdita-core' ) . '</span>';
 		echo '</td></tr>';
 
 		echo '<tr><th scope="row"><label for="ps-login-max">' . esc_html__( 'Allowed failures', 'perdita-core' ) . '</label></th><td>';
@@ -154,14 +167,14 @@ class Perdita_Security_Admin {
 	 * @param array $s Settings.
 	 */
 	private function section_headers( $s ) {
-		echo '<hr /><h2>' . esc_html__( 'Security headers', 'perdita-core' ) . ' <span class="perdita-advanced-flag">' . esc_html__( '(Advanced)', 'perdita-core' ) . '</span></h2>';
-		echo '<p class="description" style="max-width:760px;">' . esc_html__( 'Safety note: the Content-Security-Policy can break a site if it is too strict, so it starts in Report-Only. Report-Only logs violations in the browser console without blocking anything. Only switch to Enforce once the console is clean.', 'perdita-core' ) . '</p>';
+		echo '<hr /><h2>' . esc_html__( 'Security headers', 'perdita-core' ) . ' <span class="perdita-badge">' . esc_html__( 'Advanced', 'perdita-core' ) . '</span></h2>';
+		echo '<p class="description perdita-security-note">' . esc_html__( 'Safety note: with a Content-Security-Policy that\'s too strict, parts of your site stop working, so you start in Report-Only. In Report-Only, you see each violation in the browser console and block nothing yet. Switch to Enforce once the console is clean.', 'perdita-core' ) . '</p>';
 
 		echo '<table class="form-table" role="presentation">';
 
 		echo '<tr><th scope="row">' . esc_html__( 'Enable', 'perdita-core' ) . '</th><td>';
-		echo '<label><input type="checkbox" name="headers" value="1" ' . checked( ! empty( $s['headers'] ), true, false ) . ' /> ' . esc_html__( 'Send security response headers on the front end', 'perdita-core' ) . '</label> <span class="perdita-recommended-flag">' . esc_html__( '(Recommended)', 'perdita-core' ) . '</span>';
-		echo '<ul style="list-style:disc;margin:8px 0 4px 20px;color:#3c434a;">';
+		echo '<label><input type="checkbox" name="headers" value="1" ' . checked( ! empty( $s['headers'] ), true, false ) . ' /> ' . esc_html__( 'Send security response headers on the front end', 'perdita-core' ) . '</label> <span class="perdita-badge is-ok">' . esc_html__( 'Recommended', 'perdita-core' ) . '</span>';
+		echo '<ul class="perdita-security-list">';
 		echo '<li>' . esc_html__( 'X-Frame-Options: stops your pages from being loaded inside an iframe on someone else\'s site, which blocks clickjacking attacks that trick a visitor into clicking something they cannot actually see.', 'perdita-core' ) . '</li>';
 		echo '<li>' . esc_html__( 'X-Content-Type-Options: stops the browser from guessing a file\'s type, which closes off a class of attack where a file disguised as an image or text file gets executed as script instead.', 'perdita-core' ) . '</li>';
 		echo '<li>' . esc_html__( 'Referrer-Policy: limits how much of your URL gets sent as the "referrer" when a visitor clicks a link to another site, so page paths and query strings do not leak to third parties.', 'perdita-core' ) . '</li>';
@@ -204,7 +217,7 @@ class Perdita_Security_Admin {
 		echo '<table class="form-table" role="presentation">';
 
 		echo '<tr><th scope="row">' . esc_html__( 'File editor', 'perdita-core' ) . '</th><td>';
-		echo '<label><input type="checkbox" name="disable_file_edit" value="1" ' . checked( ! empty( $s['disable_file_edit'] ), true, false ) . ' /> ' . esc_html__( 'Disable the dashboard file editor', 'perdita-core' ) . '</label> <span class="perdita-recommended-flag">' . esc_html__( '(Recommended)', 'perdita-core' ) . '</span>';
+		echo '<label><input type="checkbox" name="disable_file_edit" value="1" ' . checked( ! empty( $s['disable_file_edit'] ), true, false ) . ' /> ' . esc_html__( 'Disable the dashboard file editor', 'perdita-core' ) . '</label> <span class="perdita-badge is-ok">' . esc_html__( 'Recommended', 'perdita-core' ) . '</span>';
 		echo '<p class="description">' . esc_html__( 'Hides and blocks Appearance > Theme File Editor and Plugins > Plugin File Editor, so a stolen admin login cannot edit theme or plugin code.', 'perdita-core' ) . '</p>';
 		echo '</td></tr>';
 
@@ -241,11 +254,20 @@ class Perdita_Security_Admin {
 		$out['disable_xmlrpc']    = ! empty( $_POST['disable_xmlrpc'] );
 		$out['block_author_enum'] = ! empty( $_POST['block_author_enum'] );
 
-		$out['login_max']     = isset( $_POST['login_max'] ) ? max( 1, min( 100, (int) $_POST['login_max'] ) ) : 5;
-		$out['login_window']  = isset( $_POST['login_window'] ) ? max( 1, min( 1440, (int) $_POST['login_window'] ) ) : 15;
-		$out['login_lockout'] = isset( $_POST['login_lockout'] ) ? max( 1, min( 1440, (int) $_POST['login_lockout'] ) ) : 15;
-
-		$out['ip_allowlist'] = $this->parse_allowlist( isset( $_POST['ip_allowlist'] ) ? wp_unslash( $_POST['ip_allowlist'] ) : '' ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- validated per-line below.
+		// The login limits and the allowlist go through the same check the
+		// Switch to Perdita import uses.
+		$out = array_merge(
+			$out,
+			Perdita_Security::sanitize_login(
+				array(
+					'login_limit'   => $out['login_limit'],
+					'login_max'     => isset( $_POST['login_max'] ) ? (int) $_POST['login_max'] : 5,
+					'login_window'  => isset( $_POST['login_window'] ) ? (int) $_POST['login_window'] : 15,
+					'login_lockout' => isset( $_POST['login_lockout'] ) ? (int) $_POST['login_lockout'] : 15,
+					'ip_allowlist'  => isset( $_POST['ip_allowlist'] ) ? wp_unslash( $_POST['ip_allowlist'] ) : '', // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- validated per line in sanitize_login().
+				)
+			)
+		);
 
 		$mode                = isset( $_POST['csp_mode'] ) ? sanitize_key( wp_unslash( $_POST['csp_mode'] ) ) : 'report-only';
 		$out['csp_mode']     = in_array( $mode, array( 'off', 'report-only', 'enforce' ), true ) ? $mode : 'report-only';
@@ -261,28 +283,6 @@ class Perdita_Security_Admin {
 			)
 		);
 		exit;
-	}
-
-	/**
-	 * Parse the allowlist textarea into a clean list of valid IPs, one per line.
-	 * Anything that is not a valid IPv4/IPv6 address is dropped.
-	 *
-	 * @param string $raw Raw textarea value.
-	 * @return array
-	 */
-	private function parse_allowlist( $raw ) {
-		$lines = preg_split( '/[\r\n]+/', (string) $raw );
-		$ips   = array();
-		foreach ( (array) $lines as $line ) {
-			$ip = trim( sanitize_text_field( $line ) );
-			if ( '' === $ip ) {
-				continue;
-			}
-			if ( false !== filter_var( $ip, FILTER_VALIDATE_IP ) && ! in_array( $ip, $ips, true ) ) {
-				$ips[] = $ip;
-			}
-		}
-		return $ips;
 	}
 
 	/**

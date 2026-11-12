@@ -286,19 +286,16 @@ class Perdita_Sales_Admin {
 		$last30 = Perdita_Sales::revenue_report( 30 );
 		$all    = Perdita_Sales::revenue_report( 0 );
 
-		echo '<div class="perdita-sales-report" style="display:flex;gap:16px;margin:16px 0;">';
-		echo '<div class="card" style="padding:12px 16px;border:1px solid #ccd0d4;background:#fff;">';
-		echo '<strong>' . esc_html__( 'Paid orders (30 days)', 'perdita-core' ) . '</strong><br />';
-		echo '<span style="font-size:22px;">' . esc_html( (string) $last30['count'] ) . '</span>';
-		echo '</div>';
-		echo '<div class="card" style="padding:12px 16px;border:1px solid #ccd0d4;background:#fff;">';
-		echo '<strong>' . esc_html__( 'Revenue (30 days)', 'perdita-core' ) . '</strong><br />';
-		echo '<span style="font-size:22px;">' . esc_html( $this->main->format_money( $last30['revenue'] ) ) . '</span>';
-		echo '</div>';
-		echo '<div class="card" style="padding:12px 16px;border:1px solid #ccd0d4;background:#fff;">';
-		echo '<strong>' . esc_html__( 'Revenue (all time)', 'perdita-core' ) . '</strong><br />';
-		echo '<span style="font-size:22px;">' . esc_html( $this->main->format_money( $all['revenue'] ) ) . '</span>';
-		echo '</div>';
+		$cards = array(
+			array( __( 'Paid orders (30 days)', 'perdita-core' ), number_format_i18n( (int) $last30['count'] ) ),
+			array( __( 'Revenue (30 days)', 'perdita-core' ), $this->main->format_money( $last30['revenue'] ) ),
+			array( __( 'Revenue (all time)', 'perdita-core' ), $this->main->format_money( $all['revenue'] ) ),
+		);
+		echo '<div class="perdita-sales-report perdita-stats">';
+		foreach ( $cards as $card ) {
+			echo '<div class="card perdita-stat"><strong>' . esc_html( $card[0] ) . '</strong>';
+			echo '<span class="perdita-stat-value">' . esc_html( (string) $card[1] ) . '</span></div>';
+		}
 		echo '</div>';
 	}
 
@@ -322,7 +319,7 @@ class Perdita_Sales_Admin {
 			return;
 		}
 
-		echo '<table class="widefat striped"><thead><tr>';
+		echo '<table class="widefat striped perdita-stack"><thead><tr>';
 		echo '<th>' . esc_html__( 'Order', 'perdita-core' ) . '</th>';
 		echo '<th>' . esc_html__( 'Date', 'perdita-core' ) . '</th>';
 		echo '<th>' . esc_html__( 'Email', 'perdita-core' ) . '</th>';
@@ -348,11 +345,11 @@ class Perdita_Sales_Admin {
 			);
 
 			echo '<tr>';
-			echo '<td><a href="' . esc_url( $view_url ) . '">#' . esc_html( (string) $id ) . '</a></td>';
-			echo '<td style="white-space:nowrap;">' . esc_html( $created ) . '</td>';
-			echo '<td>' . esc_html( $email ) . '</td>';
-			echo '<td>' . esc_html( $this->main->format_money( $total, $currency ) ) . '</td>';
-			echo '<td>' . $this->status_badge( $status ) . '</td>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- status_badge returns pre-escaped, kses-safe markup.
+			echo '<td data-label="' . esc_attr__( 'Order', 'perdita-core' ) . '"><a href="' . esc_url( $view_url ) . '">#' . esc_html( (string) $id ) . '</a></td>';
+			echo '<td class="perdita-num" data-label="' . esc_attr__( 'Date', 'perdita-core' ) . '">' . esc_html( $created ) . '</td>';
+			echo '<td class="perdita-break" data-label="' . esc_attr__( 'Email', 'perdita-core' ) . '">' . esc_html( $email ) . '</td>';
+			echo '<td class="perdita-num" data-label="' . esc_attr__( 'Total', 'perdita-core' ) . '">' . esc_html( $this->main->format_money( $total, $currency ) ) . '</td>';
+			echo '<td data-label="' . esc_attr__( 'Status', 'perdita-core' ) . '">' . $this->status_badge( $status ) . '</td>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- status_badge returns pre-escaped, kses-safe markup.
 			echo '</tr>';
 		}
 		wp_reset_postdata();

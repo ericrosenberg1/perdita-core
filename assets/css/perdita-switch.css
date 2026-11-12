@@ -1,0 +1,153 @@
+/*
+ * Switch to Perdita screen (Perdita, Switch to Perdita): layout only.
+ * Buttons, badges, links and focus rings come from the shared admin sheet,
+ * perdita-admin.css. Colors are the --perdita-ui-* tokens with the default
+ * preset as fallbacks, and the pds-* class names are a contract: Perdita Pro
+ * prints pds-meta, pds-card and pds-actions inside its own panels.
+ */
+
+.perdita-switch .pds-intro {
+	max-width: 760px;
+}
+.perdita-switch .pds-group {
+	margin: 24px 0 8px;
+}
+.perdita-switch .pds-card {
+	background: #fff;
+	border: 1px solid var(--perdita-ui-border, #e4e1d8);
+	border-radius: var(--perdita-ui-radius, 8px);
+	padding: 16px;
+	margin: 0 0 16px;
+	max-width: 1100px;
+	box-sizing: border-box;
+	overflow-wrap: anywhere;
+}
+.perdita-switch .pds-card-title {
+	margin: 0 0 8px;
+	font-size: 15px;
+}
+.perdita-switch .pds-head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	margin: 0 0 8px;
+}
+.perdita-switch .pds-head h3 {
+	margin: 0;
+	font-size: 15px;
+}
+.perdita-switch .pds-meta {
+	color: #6b675f;
+	margin: 0 0 8px;
+}
+.perdita-switch .pds-note {
+	border-left: 4px solid #dba617;
+	background: #fcf9e8;
+	padding: 8px 12px;
+	margin: 8px 0;
+}
+.perdita-switch .pds-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+	margin: 12px 0 0;
+}
+.perdita-switch .pds-actions form {
+	margin: 0;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+}
+.perdita-switch details {
+	margin: 8px 0;
+}
+.perdita-switch summary {
+	cursor: pointer;
+	font-weight: 600;
+}
+.perdita-switch table.pds-table {
+	border-collapse: collapse;
+	width: 100%;
+	margin: 8px 0;
+	table-layout: fixed;
+}
+.perdita-switch .pds-table th,
+.perdita-switch .pds-table td {
+	border-bottom: 1px solid var(--perdita-ui-border, #e4e1d8);
+	padding: 6px 8px;
+	text-align: left;
+	vertical-align: top;
+	overflow-wrap: anywhere;
+}
+.perdita-switch .pds-st-import {
+	color: #005c12;
+	font-weight: 600;
+}
+.perdita-switch .pds-st-skip {
+	color: var(--perdita-ui-danger, #b32d2e);
+	font-weight: 600;
+}
+.perdita-switch .pds-st-none {
+	color: #6b675f;
+	font-weight: 600;
+}
+.perdita-switch .pds-left {
+	border-top: 1px solid var(--perdita-ui-border, #e4e1d8);
+	margin-top: 12px;
+	padding-top: 8px;
+}
+.perdita-switch .pds-backups {
+	margin: 8px 0;
+	padding: 0;
+	list-style: none;
+}
+.perdita-switch .pds-backups li {
+	margin: 0 0 6px;
+}
+.perdita-switch .pds-backups .pds-meta {
+	margin: 0;
+}
+.perdita-switch code {
+	overflow-wrap: anywhere;
+}
+.perdita-switch progress {
+	width: 100%;
+	max-width: 400px;
+}
+
+@media (max-width: 600px) {
+	.perdita-switch .pds-table thead {
+		display: none;
+	}
+	.perdita-switch .pds-table,
+	.perdita-switch .pds-table tbody,
+	.perdita-switch .pds-table tr,
+	.perdita-switch .pds-table td {
+		display: block;
+		width: 100%;
+	}
+	.perdita-switch .pds-table tr {
+		border-bottom: 1px solid var(--perdita-ui-border, #e4e1d8);
+		padding: 6px 0;
+	}
+	.perdita-switch .pds-table td {
+		border: 0;
+		padding: 2px 0;
+		display: grid;
+		grid-template-columns: 7.5em minmax(0, 1fr);
+		gap: 8px;
+		overflow-wrap: anywhere;
+	}
+	.perdita-switch .pds-table td::before {
+		content: attr(data-label);
+		color: #6b675f;
+		font-size: 12px;
+	}
+	.perdita-switch .pds-actions .button {
+		white-space: normal;
+		height: auto;
+	}
+}

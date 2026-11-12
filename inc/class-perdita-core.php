@@ -55,6 +55,7 @@ final class Perdita_Core {
 	const CRON_HOOKS = array(
 		'perdita_backups_run',            // Perdita_Backups::CRON_HOOK.
 		'perdita_subscriptions_send_batch', // Perdita_Subscriptions::CRON_HOOK.
+		'perdita_switch_batch',           // Perdita_Switch::CRON.
 	);
 
 	/**
@@ -564,6 +565,11 @@ final class Perdita_Core {
 			require_once PERDITA_CORE_DIR . 'inc/class-perdita-core-admin.php';
 			new Perdita_Core_Admin( $this );
 			add_action( 'admin_init', array( $this, 'maybe_upgrade' ) );
+		}
+
+		// Switch to Perdita: the screen, its WP-CLI command and its batch.
+		if ( is_admin() || wp_doing_cron() || ( defined( 'WP_CLI' ) && WP_CLI ) ) {
+			require_once PERDITA_CORE_DIR . 'inc/switch/switch.php';
 		}
 
 		// Copy the theme's module toggles across on the first request after

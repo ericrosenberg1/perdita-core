@@ -104,8 +104,8 @@ class Perdita_IndexNow_Admin {
 		// Key and key file.
 		echo '<h2>' . esc_html__( 'Key file', 'perdita-core' ) . '</h2>';
 		echo '<table class="form-table" role="presentation">';
-		echo '<tr><th scope="row">' . esc_html__( 'Key', 'perdita-core' ) . '</th><td><code>' . esc_html( $key ) . '</code></td></tr>';
-		echo '<tr><th scope="row">' . esc_html__( 'Key file URL', 'perdita-core' ) . '</th><td><a href="' . esc_url( $key_url ) . '" target="_blank" rel="noopener">' . esc_html( $key_url ) . '</a><p class="description">' . esc_html__( 'Served by this plugin, no file to upload. Engines fetch it to confirm the key belongs to this site.', 'perdita-core' ) . '</p></td></tr>';
+		echo '<tr><th scope="row">' . esc_html__( 'Key', 'perdita-core' ) . '</th><td><code class="perdita-break">' . esc_html( $key ) . '</code></td></tr>';
+		echo '<tr><th scope="row">' . esc_html__( 'Key file URL', 'perdita-core' ) . '</th><td><a class="perdita-break" href="' . esc_url( $key_url ) . '" target="_blank" rel="noopener">' . esc_html( $key_url ) . '</a><p class="description">' . esc_html__( 'Served by this plugin, no file to upload. Engines fetch it to confirm the key belongs to this site.', 'perdita-core' ) . '</p></td></tr>';
 		echo '</table>';
 		echo '<p>';
 		$this->form_open( 'perdita_indexnow_check' );
@@ -139,16 +139,16 @@ class Perdita_IndexNow_Admin {
 		if ( empty( $s['log'] ) ) {
 			echo '<p>' . esc_html__( 'Nothing submitted yet.', 'perdita-core' ) . '</p>';
 		} else {
-			echo '<table class="widefat striped"><thead><tr><th>' . esc_html__( 'When', 'perdita-core' ) . '</th><th>' . esc_html__( 'Engine', 'perdita-core' ) . '</th><th>' . esc_html__( 'URLs', 'perdita-core' ) . '</th><th>' . esc_html__( 'Status', 'perdita-core' ) . '</th><th>' . esc_html__( 'First URLs', 'perdita-core' ) . '</th></tr></thead><tbody>';
+			echo '<table class="widefat striped perdita-stack"><thead><tr><th>' . esc_html__( 'When', 'perdita-core' ) . '</th><th>' . esc_html__( 'Engine', 'perdita-core' ) . '</th><th>' . esc_html__( 'URLs', 'perdita-core' ) . '</th><th>' . esc_html__( 'Status', 'perdita-core' ) . '</th><th>' . esc_html__( 'First URLs', 'perdita-core' ) . '</th></tr></thead><tbody>';
 			foreach ( $s['log'] as $row ) {
 				$status = $row['status'] ? (string) $row['status'] : ( '' !== $row['error'] ? $row['error'] : '?' );
 				$label  = self::status_label( (int) $row['status'] );
 				echo '<tr>';
-				echo '<td>' . esc_html( $row['time'] ? wp_date( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), (int) $row['time'] ) : '' ) . '</td>';
-				echo '<td>' . esc_html( $row['engine'] ) . '</td>';
-				echo '<td>' . esc_html( (string) (int) $row['count'] ) . '</td>';
-				echo '<td>' . esc_html( $status . ( $label ? ' ' . $label : '' ) ) . '</td>';
-				echo '<td>' . esc_html( implode( ' ', (array) $row['urls'] ) ) . '</td>';
+				echo '<td data-label="' . esc_attr__( 'When', 'perdita-core' ) . '">' . esc_html( $row['time'] ? wp_date( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), (int) $row['time'] ) : '' ) . '</td>';
+				echo '<td data-label="' . esc_attr__( 'Engine', 'perdita-core' ) . '">' . esc_html( $row['engine'] ) . '</td>';
+				echo '<td class="perdita-num" data-label="' . esc_attr__( 'URLs', 'perdita-core' ) . '">' . esc_html( number_format_i18n( (int) $row['count'] ) ) . '</td>';
+				echo '<td data-label="' . esc_attr__( 'Status', 'perdita-core' ) . '">' . esc_html( $status . ( $label ? ' ' . $label : '' ) ) . '</td>';
+				echo '<td class="perdita-break" data-label="' . esc_attr__( 'First URLs', 'perdita-core' ) . '">' . esc_html( implode( ' ', (array) $row['urls'] ) ) . '</td>';
 				echo '</tr>';
 			}
 			echo '</tbody></table>';

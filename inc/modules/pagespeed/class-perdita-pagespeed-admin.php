@@ -251,7 +251,7 @@ class Perdita_Pagespeed_Admin {
 					printf(
 						/* translators: %s: link to the PageSpeed Insights API library page */
 						esc_html__( 'Enable the "PageSpeed Insights API" for that project: %s', 'perdita-core' ),
-						'<a href="https://console.cloud.google.com/apis/library/pagespeedonline.googleapis.com" target="_blank" rel="noopener noreferrer">console.cloud.google.com/apis/library/pagespeedonline.googleapis.com</a>' // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- static trusted link markup, no user input.
+						'<a class="perdita-break" href="https://console.cloud.google.com/apis/library/pagespeedonline.googleapis.com" target="_blank" rel="noopener noreferrer">console.cloud.google.com/apis/library/pagespeedonline.googleapis.com</a>' // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- static trusted link markup, no user input.
 					);
 					?>
 				</li>

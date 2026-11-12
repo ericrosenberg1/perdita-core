@@ -129,7 +129,7 @@ class Perdita_SEO {
 	 * @return bool
 	 */
 	public static function other_seo_active() {
-		return defined( 'WPSEO_VERSION' ) || defined( 'AIOSEO_VERSION' ) || defined( 'RANK_MATH_VERSION' ) || class_exists( 'AIOSEO\\Plugin\\AIOSEO' );
+		return defined( 'WPSEO_VERSION' ) || defined( 'AIOSEO_VERSION' ) || defined( 'RANK_MATH_VERSION' ) || defined( 'SEOPRESS_VERSION' ) || class_exists( 'AIOSEO\\Plugin\\AIOSEO' );
 	}
 
 	/* ---------- context ---------- */

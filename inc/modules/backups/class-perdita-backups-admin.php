@@ -245,7 +245,7 @@ class Perdita_Backups_Admin {
 				<strong><?php esc_html_e( 'Using nginx?', 'perdita-core' ); ?></strong>
 				<?php esc_html_e( 'nginx ignores .htaccess, so add this to your server block to deny direct access. Even without it, the unguessable filenames and authenticated-only download are the real protection.', 'perdita-core' ); ?>
 			</p>
-			<pre style="max-width:760px; overflow:auto; background:#fff; border:1px solid #dcdcde; padding:12px;"><code>location ~* /wp-content/uploads/<?php echo esc_html( Perdita_Backups::DIR_NAME ); ?>/ {
+			<pre class="perdita-code" tabindex="0" role="region" aria-label="<?php esc_attr_e( 'nginx rule to block direct access to the backups folder', 'perdita-core' ); ?>"><code>location ~* /wp-content/uploads/<?php echo esc_html( Perdita_Backups::DIR_NAME ); ?>/ {
     deny all;
     return 403;
 }</code></pre>
