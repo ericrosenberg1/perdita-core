@@ -496,6 +496,8 @@ $chd_inst       = new Perdita_Caching( perdita_core() );
 remove_filter( 'wp_doing_cron', '__return_true' );
 $ok( 20 === has_action( 'init', array( 'Perdita_Caching', 'sync_schedules' ) ), 'cache hardening 6: a WP-Cron request books the cleanup schedule, with no wp-admin visit needed' );
 remove_action( 'init', array( 'Perdita_Caching', 'sync_schedules' ), 20 );
+$ok( 21 === has_action( 'init', array( 'Perdita_Caching', 'sync_dropin' ) ), 'cache hardening 16: a WP-Cron request rewrites an out-of-date drop-in, with no wp-admin visit needed' );
+remove_action( 'init', array( 'Perdita_Caching', 'sync_dropin' ), 21 );
 $chd_seed       = static function () use ( $chd_page ) {
 	$chd_page( '/' );
 	$chd_page( '/hard-unrelated/' );
