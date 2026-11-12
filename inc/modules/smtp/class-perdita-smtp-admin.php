@@ -213,7 +213,7 @@ class Perdita_SMTP_Admin {
 		submit_button( __( 'Clear log', 'perdita-core' ), 'delete', 'submit', false );
 		echo '</form>';
 
-		echo '<table class="widefat striped"><thead><tr>';
+		echo '<table class="widefat striped perdita-stack"><thead><tr>';
 		echo '<th>' . esc_html__( 'Date', 'perdita-core' ) . '</th>';
 		echo '<th>' . esc_html__( 'Recipient', 'perdita-core' ) . '</th>';
 		echo '<th>' . esc_html__( 'Subject', 'perdita-core' ) . '</th>';
@@ -224,14 +224,14 @@ class Perdita_SMTP_Admin {
 		foreach ( $rows as $row ) {
 			$is_sent = ( 'sent' === $row->status );
 			$badge   = $is_sent
-				? '<span style="color:#008a20;">' . esc_html__( 'Sent', 'perdita-core' ) . '</span>'
-				: '<span style="color:#b32d2e;">' . esc_html__( 'Failed', 'perdita-core' ) . '</span>';
+				? '<span class="perdita-badge is-ok">' . esc_html__( 'Sent', 'perdita-core' ) . '</span>'
+				: '<span class="perdita-badge is-error">' . esc_html__( 'Failed', 'perdita-core' ) . '</span>';
 			echo '<tr>';
-			echo '<td style="white-space:nowrap;">' . esc_html( $row->created ) . '</td>';
-			echo '<td>' . esc_html( $row->recipient ) . '</td>';
-			echo '<td>' . esc_html( $row->subject ) . '</td>';
-			echo '<td>' . wp_kses( $badge, array( 'span' => array( 'style' => array() ) ) ) . '</td>';
-			echo '<td>' . esc_html( (string) $row->error ) . '</td>';
+			echo '<td class="perdita-num" data-label="' . esc_attr__( 'Date', 'perdita-core' ) . '">' . esc_html( $row->created ) . '</td>';
+			echo '<td class="perdita-break" data-label="' . esc_attr__( 'Recipient', 'perdita-core' ) . '">' . esc_html( $row->recipient ) . '</td>';
+			echo '<td data-label="' . esc_attr__( 'Subject', 'perdita-core' ) . '">' . esc_html( $row->subject ) . '</td>';
+			echo '<td data-label="' . esc_attr__( 'Status', 'perdita-core' ) . '">' . wp_kses( $badge, array( 'span' => array( 'class' => array() ) ) ) . '</td>';
+			echo '<td class="perdita-break" data-label="' . esc_attr__( 'Details', 'perdita-core' ) . '">' . esc_html( (string) $row->error ) . '</td>';
 			echo '</tr>';
 		}
 
@@ -247,44 +247,24 @@ class Perdita_SMTP_Admin {
 		}
 		check_admin_referer( 'perdita_smtp_save' );
 
-		$current = Perdita_SMTP::settings();
-
-		// Encryption is one of a fixed set.
-		$encryption = isset( $_POST['encryption'] ) ? sanitize_key( wp_unslash( $_POST['encryption'] ) ) : '';
-		if ( ! in_array( $encryption, array( '', 'tls', 'ssl' ), true ) ) {
-			$encryption = '';
-		}
-
-		$port = isset( $_POST['port'] ) ? absint( wp_unslash( $_POST['port'] ) ) : 587;
-		if ( $port < 1 || $port > 65535 ) {
-			$port = 587;
-		}
-
-		$from_email_raw = isset( $_POST['from_email'] ) ? sanitize_email( wp_unslash( $_POST['from_email'] ) ) : '';
-		$from_email     = is_email( $from_email_raw ) ? $from_email_raw : '';
-
-		$new = array(
-			'from_email' => $from_email,
-			'from_name'  => isset( $_POST['from_name'] ) ? sanitize_text_field( wp_unslash( $_POST['from_name'] ) ) : '',
-			'host'       => isset( $_POST['host'] ) ? sanitize_text_field( wp_unslash( $_POST['host'] ) ) : '',
-			'port'       => $port,
-			'encryption' => $encryption,
-			'auth'       => ! empty( $_POST['auth'] ),
-			'username'   => isset( $_POST['username'] ) ? sanitize_text_field( wp_unslash( $_POST['username'] ) ) : '',
-			'password'   => $current['password'], // Keep the stored blob unless changed below.
+		// Perdita_SMTP::sanitize() validates every field and encrypts a newly
+		// typed password, the same path the Switch to Perdita import takes.
+		$new = Perdita_SMTP::sanitize(
+			array(
+				'from_email'      => isset( $_POST['from_email'] ) ? sanitize_email( wp_unslash( $_POST['from_email'] ) ) : '',
+				'from_name'       => isset( $_POST['from_name'] ) ? sanitize_text_field( wp_unslash( $_POST['from_name'] ) ) : '',
+				'host'            => isset( $_POST['host'] ) ? sanitize_text_field( wp_unslash( $_POST['host'] ) ) : '',
+				'port'            => isset( $_POST['port'] ) ? absint( wp_unslash( $_POST['port'] ) ) : 587,
+				'encryption'      => isset( $_POST['encryption'] ) ? sanitize_key( wp_unslash( $_POST['encryption'] ) ) : '',
+				'auth'            => ! empty( $_POST['auth'] ),
+				'username'        => isset( $_POST['username'] ) ? sanitize_text_field( wp_unslash( $_POST['username'] ) ) : '',
+				// Do not sanitize a password through text filters, that can corrupt it.
+				// It is treated as an opaque secret and encrypted in sanitize().
+				'password_plain'  => isset( $_POST['password'] ) ? (string) wp_unslash( $_POST['password'] ) : '', // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- opaque secret, encrypted in sanitize(), never echoed.
+				'remove_password' => ! empty( $_POST['remove_password'] ),
+			),
+			Perdita_SMTP::settings()
 		);
-
-		// Password: remove takes priority, then a newly typed value, else keep.
-		if ( ! empty( $_POST['remove_password'] ) ) {
-			$new['password'] = '';
-		} else {
-			// Do not sanitize a password through text filters, that can corrupt it.
-			// It is treated as an opaque secret and encrypted immediately.
-			$typed = isset( $_POST['password'] ) ? (string) wp_unslash( $_POST['password'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- opaque secret, encrypted below, never echoed.
-			if ( '' !== $typed ) {
-				$new['password'] = Perdita_Crypto::encrypt( $typed );
-			}
-		}
 
 		update_option( Perdita_SMTP::OPTION, $new );
 

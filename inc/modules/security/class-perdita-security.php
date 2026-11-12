@@ -136,6 +136,41 @@ class Perdita_Security {
 		return array_merge( self::defaults(), $saved );
 	}
 
+	/**
+	 * Validate the login-limit settings: the switch, the attempt count
+	 * (1 to 100), the failure window and the lockout (1 to 1440 minutes
+	 * each), and the allowlist, which keeps exact IPv4 and IPv6 addresses
+	 * only. The settings screen and the Switch to Perdita import both save
+	 * through this.
+	 *
+	 * @param array $input login_limit, login_max, login_window, login_lockout,
+	 *                     ip_allowlist (one address per line, or an array).
+	 * @return array The same five keys, clean.
+	 */
+	public static function sanitize_login( array $input ) {
+		$minutes = function ( $key ) use ( $input ) {
+			return isset( $input[ $key ] ) && is_scalar( $input[ $key ] ) ? max( 1, min( 1440, (int) $input[ $key ] ) ) : 15;
+		};
+		$raw = isset( $input['ip_allowlist'] ) ? $input['ip_allowlist'] : '';
+		if ( is_array( $raw ) ) {
+			$raw = implode( "\n", array_filter( $raw, 'is_scalar' ) );
+		}
+		$ips = array();
+		foreach ( (array) preg_split( '/[\r\n]+/', is_scalar( $raw ) ? (string) $raw : '' ) as $line ) {
+			$ip = trim( sanitize_text_field( (string) $line ) );
+			if ( '' !== $ip && false !== filter_var( $ip, FILTER_VALIDATE_IP ) && ! in_array( $ip, $ips, true ) ) {
+				$ips[] = $ip;
+			}
+		}
+		return array(
+			'login_limit'   => ! empty( $input['login_limit'] ),
+			'login_max'     => isset( $input['login_max'] ) && is_scalar( $input['login_max'] ) ? max( 1, min( 100, (int) $input['login_max'] ) ) : 5,
+			'login_window'  => $minutes( 'login_window' ),
+			'login_lockout' => $minutes( 'login_lockout' ),
+			'ip_allowlist'  => $ips,
+		);
+	}
+
 	/* ---------- 1. login rate limiting ---------- */
 
 	/**

@@ -429,9 +429,21 @@ class Perdita_Analytics {
 		if ( ! self::scm_active() ) {
 			return false;
 		}
-		$stored = self::raw_settings();
+		$stored = self::scm_adoption( self::raw_settings() );
+		return null === $stored ? false : update_option( self::OPTION, $stored );
+	}
+
+	/**
+	 * What adopting Simple Consent Manager's behavior writes over the stored
+	 * settings, or null when the site already chose a consent model here.
+	 * maybe_adopt_scm() and the Switch to Perdita screen share it.
+	 *
+	 * @param array $stored The stored settings, from raw_settings().
+	 * @return array|null
+	 */
+	public static function scm_adoption( array $stored ) {
 		if ( array_key_exists( 'consent_model', $stored ) && array_key_exists( 'manage_without_id', $stored ) ) {
-			return false;
+			return null;
 		}
 		$had_id = isset( $stored['measurement_id'] ) && self::is_valid_measurement_id( $stored['measurement_id'] );
 		if ( ! array_key_exists( 'consent_model', $stored ) ) {
@@ -446,7 +458,7 @@ class Perdita_Analytics {
 		if ( empty( $stored['accent_color'] ) && defined( 'SCM_ACCENT_COLOR' ) ) {
 			$stored['accent_color'] = self::sanitize_accent_color( constant( 'SCM_ACCENT_COLOR' ) );
 		}
-		return update_option( self::OPTION, $stored );
+		return $stored;
 	}
 
 	/* ---------- front-end output ---------- */

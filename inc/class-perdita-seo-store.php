@@ -216,6 +216,18 @@ class Perdita_SEO_Store {
 	}
 
 	/**
+	 * The patch save() would merge in, cleaned by field role, without saving
+	 * it. The Switch to Perdita preview shows these values, and leaves out a
+	 * field whose value this changes.
+	 *
+	 * @param array $patch Partial doc.
+	 * @return array
+	 */
+	public function sanitize( array $patch ) {
+		return $this->sanitize_patch( $patch );
+	}
+
+	/**
 	 * Write to the option without the role-based sanitization in save().
 	 * Used only by cached_attachment() for its internal attachment cache,
 	 * whose shape is already fully controlled at the call site (id from an
@@ -360,6 +372,14 @@ class Perdita_SEO_Store {
 	}
 
 	/**
+	 * Forget the document read earlier in this request, so the next read
+	 * sees an option another writer restored (the Switch to Perdita undo).
+	 */
+	public function refresh() {
+		$this->doc = null;
+	}
+
+	/**
 	 * Reset to defaults.
 	 */
 	public function reset() {
@@ -470,10 +490,24 @@ class Perdita_SEO_Store {
 	 * @return int Number of fields imported.
 	 */
 	public function import_yoast() {
+		list( $patch, $n ) = $this->yoast_patch();
+		if ( $n ) {
+			$this->save( $patch );
+		}
+		return $n;
+	}
+
+	/**
+	 * What import_yoast() would save, without saving it: the patch and how
+	 * many fields it carries. The Switch to Perdita preview reads this.
+	 *
+	 * @return array { 0: array patch, 1: int field count }
+	 */
+	public function yoast_patch() {
 		$titles = get_option( 'wpseo_titles' );
 		$social = get_option( 'wpseo_social' );
 		if ( ! is_array( $titles ) && ! is_array( $social ) ) {
-			return 0;
+			return array( array(), 0 );
 		}
 		$titles = is_array( $titles ) ? $titles : array();
 		$social = is_array( $social ) ? $social : array();
@@ -483,7 +517,7 @@ class Perdita_SEO_Store {
 		$sep_map = array(
 			'sc-dash'   => '-',
 			'sc-ndash'  => '–',
-			'sc-mdash'  => '·',
+			'sc-mdash'  => '—',
 			'sc-middot' => '·',
 			'sc-bull'   => '•',
 			'sc-star'   => '*',
@@ -528,10 +562,7 @@ class Perdita_SEO_Store {
 				++$n;
 			}
 		}
-		if ( $n ) {
-			$this->save( $patch );
-		}
-		return $n;
+		return array( $patch, $n );
 	}
 
 	/**
@@ -588,13 +619,27 @@ class Perdita_SEO_Store {
 	 * @return int Number of fields imported.
 	 */
 	public function import_aioseo() {
+		list( $patch, $n ) = $this->aioseo_patch();
+		if ( $n ) {
+			$this->save( $patch );
+		}
+		return $n;
+	}
+
+	/**
+	 * What import_aioseo() would save, without saving it: the patch and how
+	 * many fields it carries. The Switch to Perdita preview reads this.
+	 *
+	 * @return array { 0: array patch, 1: int field count }
+	 */
+	public function aioseo_patch() {
 		$raw = get_option( 'aioseo_options' );
 		if ( empty( $raw ) ) {
-			return 0;
+			return array( array(), 0 );
 		}
 		$o = is_string( $raw ) ? json_decode( $raw, true ) : ( is_array( $raw ) ? $raw : null );
 		if ( ! is_array( $o ) ) {
-			return 0;
+			return array( array(), 0 );
 		}
 		// Post type and taxonomy templates live in a second option.
 		$dyn_raw = get_option( 'aioseo_options_dynamic' );
@@ -775,10 +820,7 @@ class Perdita_SEO_Store {
 			++$n;
 		}
 
-		if ( $n ) {
-			$this->save( $patch );
-		}
-		return $n;
+		return array( $patch, $n );
 	}
 
 	/**

@@ -93,6 +93,59 @@ class Perdita_SMTP {
 	}
 
 	/**
+	 * Validate a settings array on write. The settings screen and the Switch
+	 * to Perdita import both save through this.
+	 *
+	 * The password never arrives as a stored value: `password_plain` is a
+	 * newly typed secret, encrypted here with Perdita_Crypto, and
+	 * `remove_password` clears it. With neither, the stored blob in $current
+	 * stays as it is.
+	 *
+	 * @param array $input   Raw fields: from_email, from_name, host, port,
+	 *                       encryption, auth, username, password_plain,
+	 *                       remove_password.
+	 * @param array $current The stored settings, from settings().
+	 * @return array Clean settings, ready for update_option().
+	 */
+	public static function sanitize( array $input, array $current ) {
+		$encryption = isset( $input['encryption'] ) && is_scalar( $input['encryption'] ) ? sanitize_key( (string) $input['encryption'] ) : '';
+		if ( ! in_array( $encryption, array( '', 'tls', 'ssl' ), true ) ) {
+			$encryption = '';
+		}
+
+		$port = isset( $input['port'] ) && is_scalar( $input['port'] ) ? absint( $input['port'] ) : 587;
+		if ( $port < 1 || $port > 65535 ) {
+			$port = 587;
+		}
+
+		$from_email = isset( $input['from_email'] ) && is_scalar( $input['from_email'] ) ? sanitize_email( (string) $input['from_email'] ) : '';
+		$from_email = is_email( $from_email ) ? $from_email : '';
+
+		$text = function ( $key ) use ( $input ) {
+			return isset( $input[ $key ] ) && is_scalar( $input[ $key ] ) ? sanitize_text_field( (string) $input[ $key ] ) : '';
+		};
+
+		$clean = array(
+			'from_email' => $from_email,
+			'from_name'  => $text( 'from_name' ),
+			'host'       => $text( 'host' ),
+			'port'       => $port,
+			'encryption' => $encryption,
+			'auth'       => ! empty( $input['auth'] ),
+			'username'   => $text( 'username' ),
+			'password'   => isset( $current['password'] ) && is_string( $current['password'] ) ? $current['password'] : '',
+		);
+
+		// Password: remove takes priority, then a newly typed value, else keep.
+		if ( ! empty( $input['remove_password'] ) ) {
+			$clean['password'] = '';
+		} elseif ( isset( $input['password_plain'] ) && is_string( $input['password_plain'] ) && '' !== $input['password_plain'] ) {
+			$clean['password'] = Perdita_Crypto::encrypt( $input['password_plain'] );
+		}
+		return $clean;
+	}
+
+	/**
 	 * Whether SMTP is configured enough to send (a host is set).
 	 *
 	 * @return bool
