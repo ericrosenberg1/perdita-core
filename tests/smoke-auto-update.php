@@ -35,6 +35,35 @@ remove_filter( 'auto_update_plugin', array( $au_updater, 'auto_update' ) );
 remove_filter( 'upgrader_pre_download', array( $au_updater, 'verify_download' ) );
 remove_action( 'upgrader_process_complete', array( $au_updater, 'flush' ) );
 remove_action( 'init', array( $au_updater, 'maybe_default_auto_updates' ) );
+remove_action( 'load-update-core.php', array( $au_updater, 'flush_on_force_check' ) );
+
+// Dashboard, Updates, Check again drops the 12-hour manifest cache first, so the
+// out-of-step notice's "Check for updates" sees a release that went out since.
+$au_fc_user  = get_current_user_id();
+$au_fc_admin = get_users(
+	array(
+		'role'   => 'administrator',
+		'number' => 1,
+		'fields' => 'ID',
+	)
+);
+$au_fc_was   = get_transient( Perdita_Core_Updater::CACHE );
+if ( $au_fc_admin ) {
+	wp_set_current_user( (int) $au_fc_admin[0] );
+	set_transient( Perdita_Core_Updater::CACHE, array( 'version' => '0.0.1' ), MINUTE_IN_SECONDS );
+	$au_updater->flush_on_force_check();
+	$ok( false !== get_transient( Perdita_Core_Updater::CACHE ), 'core updater: an ordinary Updates screen load keeps the cached manifest' );
+	$_GET['force-check'] = '1'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+	$au_updater->flush_on_force_check();
+	unset( $_GET['force-check'] );
+	$ok( false === get_transient( Perdita_Core_Updater::CACHE ), 'core updater: a forced update check drops the cached manifest' );
+	wp_set_current_user( $au_fc_user );
+}
+if ( false === $au_fc_was ) {
+	delete_transient( Perdita_Core_Updater::CACHE );
+} else {
+	set_transient( Perdita_Core_Updater::CACHE, $au_fc_was, 12 * HOUR_IN_SECONDS );
+}
 
 $au_base    = plugin_basename( PERDITA_CORE_FILE );
 $au_item    = (object) array( 'plugin' => $au_base );

@@ -72,8 +72,7 @@ Perdita, Switch to Perdita (`admin.php?page=perdita-switch`, manage_options) and
 
 Fixes merged to main since the last release go here, one `readme.txt` line each. At the next lock-step bump, move them into that version's changelog entry and empty this list.
 
-* New: Switch to Perdita, under Perdita in the admin menu, brings your settings over from 18 caching, SEO, email, analytics, and login-security plugins, with a preview, Undo, and deactivate and reactivate buttons. `wp perdita switch` does the same from the command line.
-* Fix: importing from Yoast now keeps a long-dash title separator as a long dash. It used to arrive as a middle dot.
+(empty since 0.19.21-beta)
 
 ## Tests
 
@@ -89,4 +88,4 @@ WordPress 6.9+ opens a template enhancement buffer right before the template (`w
 
 ## Writing voice
 
-Every word of prose in this repo follows Eric's voice card at `~/Code/content-toolkit/voice/voice-card.md`. That covers UI copy, emails, docs, release notes, store listings, commit messages, and PR bodies. Point at the card and never paste its rules here, since a copy drifts. Gate short copy with `python3 ~/Code/content-toolkit/scorer/ai_tells.py FILE --profile article|email|social|title|description --brief` (zero blocks, 80 or higher) and long-form with `content-voice FILE` (90 or higher, 85 is the floor).
+Every word of prose in this repo follows Eric's voice card at `~/Code/content-toolkit/voice/voice-card.md`. That covers UI copy, emails, docs, release notes, store listings, commit messages, and PR bodies. Read the card for the rules, and its "The gate" section for the checks and the bar. Never paste either into this file, since a copy drifts.
