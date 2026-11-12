@@ -4,7 +4,7 @@ Tags: forms, seo, caching, security, newsletter
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.19.20-beta
+Stable tag: 0.19.21-beta
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -77,6 +77,19 @@ Form entries, subscribers, orders, products, form definitions, the SMTP log, you
 Yes, that's what Pro is built on. Pro registers its own modules into this plugin's registry, so they appear on the same Modules screen and behave the same way.
 
 == Changelog ==
+
+= 0.19.21-beta =
+* New: in Caching, you get preload, gzip copies, serve stale while rebuilding, a separate copy for phones, rejected user agents and cookies, scheduled cleanup with a size cap, a list of cached pages, CDN URL rewriting, feed caching, and `wp perdita cache`.
+* New: Switch to Perdita, under Perdita in the admin menu. You can preview and import your settings from 23 caching, SEO, email, analytics, and login-security plugins, undo an import, and then deactivate the old plugin. You can do the same from the command line with `wp perdita switch`.
+* New: you get Perdita's own colors on every Perdita admin screen.
+* Fix: visitors never get a cached copy of a page that sets a cookie, defines `DONOTCACHEPAGE`, or changes mid-load.
+* Fix: you get a fresh page cache after you change a plugin, widget, menu, category, tag, the site title, or permalinks.
+* Fix: a CDN or proxy in front of your site can no longer share a page that Perdita chose not to cache.
+* Fix: visitors on tablets and phones get the right cached copy, matched to WordPress's own mobile test.
+* Fix: you keep a long-dash title separator when you import from Yoast.
+* Fix: you get a label on every field of the form builder, form entries, and Image SEO screens, and you can use the form builder, sales orders, IndexNow, Email, and PageSpeed screens on a phone.
+* New: when your Perdita versions are out of step, you get an update button for each older piece.
+* Fix: you get a fresh Perdita Core offer when you click Check again on the Updates screen, not one up to 12 hours old.
 
 = 0.19.20-beta =
 * Fix: Sales rounds a product's price and shipping to the currency's own decimals. A fractional price in a whole-unit currency like JPY no longer makes the recorded order total differ from the Stripe charge.
