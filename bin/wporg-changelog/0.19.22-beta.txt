@@ -1,0 +1,11 @@
+* Fix: you get your page cache's daily cleanup on a site that updates itself, with no wp-admin visit needed.
+* Fix: after an automatic update, you get the new release's early-serve file in `wp-content` without opening wp-admin.
+* New: in Caching, you get preload, gzip copies, serve stale while rebuilding, a separate copy for phones, rejected user agents and cookies, scheduled cleanup with a size cap, a list of cached pages, CDN URL rewriting, feed caching, and `wp perdita cache`.
+* New: Switch to Perdita, under Perdita in the admin menu. You can preview and import your settings from 23 caching, SEO, email, analytics, and login-security plugins, undo an import, and then deactivate the old plugin. You can do the same from the command line with `wp perdita switch`.
+* New: you get Perdita's own colors on every Perdita admin screen.
+* Fix: visitors never get a cached copy of a page that sets a cookie, defines `DONOTCACHEPAGE`, or changes mid-load.
+* Fix: you get a fresh page cache after you change a plugin, widget, menu, category, tag, the site title, or permalinks.
+* Fix: a CDN or proxy in front of your site can no longer share a page that Perdita chose not to cache.
+* Fix: visitors on tablets and phones get the right cached copy, matched to WordPress's own mobile test.
+* Fix: you keep a long-dash title separator when you import from Yoast.
+* Fix: you get a label on every field of the form builder, form entries, and Image SEO screens, and you can use the form builder, sales orders, IndexNow, Email, and PageSpeed screens on a phone.
