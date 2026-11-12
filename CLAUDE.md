@@ -44,7 +44,8 @@ Decisions that look like bugs but aren't:
 
 Fixes merged to main since the last release go here, one `readme.txt` line each. At the next lock-step bump, move them into that version's changelog entry and empty this list.
 
-(empty since 0.19.9-beta)
+- You can update any Perdita piece that's behind with one click from the "Perdita versions are out of step" notice.
+- You get a fresh Perdita Core update offer when you click Check again on the Updates screen, not one up to 12 hours old.
 
 ## Tests
 

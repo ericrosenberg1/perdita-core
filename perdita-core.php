@@ -111,7 +111,9 @@ function perdita_core_version_notice() {
 }
 
 /**
- * The out-of-step warning markup for a version_drift() result.
+ * The out-of-step notice for a version_drift() result: which versions differ,
+ * then one button per piece that is behind ("Update Perdita Pro to match"),
+ * which runs WordPress's own updater for it.
  *
  * @param array $drift slug => version, from Perdita_Core::version_drift().
  */
@@ -129,16 +131,100 @@ function perdita_core_render_version_notice( array $drift ) {
 	echo esc_html(
 		sprintf(
 			/* translators: %s: list like "Perdita theme 0.18.0-alpha, Perdita Core 0.17.1-alpha" */
-			__( 'Perdita versions are out of step: %s. The theme, Perdita Core, and Perdita Pro are released together and should all be on the same version, so update whichever is behind.', 'perdita-core' ),
+			__( 'Perdita versions are out of step: %s.', 'perdita-core' ),
 			implode( ', ', $parts )
 		)
 	);
-	printf(
-		' <a href="%s">%s</a>',
-		esc_url( self_admin_url( 'update-core.php' ) ),
-		esc_html__( 'Check for updates', 'perdita-core' )
+	echo '</p><p>' . perdita_core_version_actions_html( $drift ) . '</p></div>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- built from esc_url() and esc_html() in perdita_core_version_actions_html().
+}
+
+/**
+ * One entry per piece below the newest version in $drift: the button text
+ * and WordPress's own nonced update link for it, or an empty url when
+ * WordPress has no update on offer for that piece yet or the current user
+ * may not run it.
+ *
+ * @param array $drift slug => version.
+ * @return array[] Each array( 'slug' => string, 'label' => string, 'url' => string ).
+ */
+function perdita_core_version_actions( array $drift ) {
+	$top = '';
+	foreach ( $drift as $version ) {
+		if ( '' === $top || version_compare( (string) $version, $top, '>' ) ) {
+			$top = (string) $version;
+		}
+	}
+	$labels  = array(
+		'theme' => __( 'Update the Perdita theme to match', 'perdita-core' ),
+		'core'  => __( 'Update Perdita Core to match', 'perdita-core' ),
+		'pro'   => __( 'Update Perdita Pro to match', 'perdita-core' ),
 	);
-	echo '</p></div>';
+	$actions = array();
+	foreach ( $drift as $slug => $version ) {
+		if ( ! isset( $labels[ $slug ] ) || version_compare( (string) $version, $top, '>=' ) ) {
+			continue;
+		}
+		$actions[] = array(
+			'slug'  => $slug,
+			'label' => $labels[ $slug ],
+			'url'   => perdita_core_version_update_url( $slug ),
+		);
+	}
+	return $actions;
+}
+
+/**
+ * WordPress's nonced one-click update link for one piece, or '' when the
+ * update transient holds no offer for it or the user can't update it.
+ *
+ * @param string $slug theme|core|pro.
+ * @return string
+ */
+function perdita_core_version_update_url( $slug ) {
+	if ( 'theme' === $slug ) {
+		$theme  = get_template();
+		$offers = get_site_transient( 'update_themes' );
+		if ( ! current_user_can( 'update_themes' ) || ! is_object( $offers ) || empty( $offers->response[ $theme ] ) ) {
+			return '';
+		}
+		return wp_nonce_url( self_admin_url( 'update.php?action=upgrade-theme&theme=' . rawurlencode( $theme ) ), 'upgrade-theme_' . $theme );
+	}
+	if ( 'core' === $slug ) {
+		$file = defined( 'PERDITA_CORE_FILE' ) ? plugin_basename( PERDITA_CORE_FILE ) : 'perdita-core/perdita-core.php';
+	} elseif ( 'pro' === $slug ) {
+		$file = defined( 'PERDITA_PRO_FILE' ) ? plugin_basename( PERDITA_PRO_FILE ) : 'perdita-pro/perdita-pro.php';
+	} else {
+		return '';
+	}
+	$offers = get_site_transient( 'update_plugins' );
+	if ( ! current_user_can( 'update_plugins' ) || ! is_object( $offers ) || empty( $offers->response[ $file ] ) ) {
+		return '';
+	}
+	return wp_nonce_url( self_admin_url( 'update.php?action=upgrade-plugin&plugin=' . rawurlencode( $file ) ), 'upgrade-plugin_' . $file );
+}
+
+/**
+ * The buttons for version_actions(): one per piece with an update on offer,
+ * plus "Check for updates" when a piece behind has none yet.
+ *
+ * @param array $drift slug => version.
+ * @return string HTML.
+ */
+function perdita_core_version_actions_html( array $drift ) {
+	$actions = perdita_core_version_actions( $drift );
+	$html    = '';
+	$check   = ! $actions;
+	foreach ( $actions as $action ) {
+		if ( '' === $action['url'] ) {
+			$check = true;
+			continue;
+		}
+		$html .= sprintf( '<a class="button button-primary" href="%s">%s</a> ', esc_url( $action['url'] ), esc_html( $action['label'] ) );
+	}
+	if ( $check ) {
+		$html .= sprintf( '<a class="button" href="%s">%s</a>', esc_url( self_admin_url( 'update-core.php?force-check=1' ) ), esc_html__( 'Check for updates', 'perdita-core' ) );
+	}
+	return $html;
 }
 
 /**

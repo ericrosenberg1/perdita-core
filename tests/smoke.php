@@ -116,6 +116,64 @@ perdita_core_render_version_notice( array( 'theme' => '0.18.0-alpha', 'core' => 
 $__vd_html = ob_get_clean();
 $ok( false !== strpos( $__vd_html, 'notice-warning' ) && false !== strpos( $__vd_html, 'Perdita Core 0.17.1-alpha' ) && false !== strpos( $__vd_html, 'update-core.php' ) && false === strpos( $__vd_html, 'is-dismissible' ), 'lock step: the warning names each version, links to Updates, and cannot be dismissed while it is true' );
 $ok( function_exists( 'perdita_core_version_notice' ), 'lock step: the admin_notices callback exists' );
+$ok( false === stripos( $__vd_html, 'should all be on the same version' ) && false === stripos( $__vd_html, 'may not work' ), 'lock step: the notice offers an action, not a warning' );
+
+// One click per piece that is behind, through WordPress's own updater, when WordPress holds an
+// offer for it. A piece with no offer yet gets "Check for updates" instead.
+$__vd_user  = get_current_user_id();
+$__vd_admin = get_users(
+	array(
+		'role'   => 'administrator',
+		'number' => 1,
+		'fields' => 'ID',
+	)
+);
+if ( $__vd_admin ) {
+	wp_set_current_user( (int) $__vd_admin[0] );
+	$__vd_pro    = defined( 'PERDITA_PRO_FILE' ) ? plugin_basename( PERDITA_PRO_FILE ) : 'perdita-pro/perdita-pro.php';
+	$__vd_offers = function () use ( $__vd_pro ) {
+		return (object) array(
+			'last_checked' => time(),
+			'response'     => array( $__vd_pro => (object) array( 'new_version' => '0.18.0-alpha' ) ),
+		);
+	};
+	$__vd_no_offers = function () {
+		return (object) array(
+			'last_checked' => time(),
+			'response'     => array(),
+		);
+	};
+	add_filter( 'pre_site_transient_update_plugins', $__vd_offers );
+	add_filter( 'pre_site_transient_update_themes', $__vd_no_offers );
+	$__vd2        = array( 'theme' => '0.17.1-alpha', 'core' => '0.18.0-alpha', 'pro' => '0.17.1-alpha' );
+	$__vd_actions = perdita_core_version_actions( $__vd2 );
+	$ok( array( 'theme', 'pro' ) === wp_list_pluck( $__vd_actions, 'slug' ), 'lock step: every piece behind the newest gets an action, the newest gets none' );
+	$__vd_u = html_entity_decode( $__vd_actions[1]['url'] );
+	$ok( false !== strpos( $__vd_u, 'update.php?action=upgrade-plugin&plugin=' . rawurlencode( $__vd_pro ) ) && false !== strpos( $__vd_u, '_wpnonce=' . wp_create_nonce( 'upgrade-plugin_' . $__vd_pro ) ), 'lock step: "Update Perdita Pro to match" is WordPress\'s own nonced one-click update' );
+	$ok( '' === $__vd_actions[0]['url'], 'lock step: a piece with no update on offer gets no update link' );
+	ob_start();
+	perdita_core_render_version_notice( $__vd2 );
+	$__vd_html = ob_get_clean();
+	$ok( false !== strpos( $__vd_html, 'Update Perdita Pro to match' ) && false !== strpos( $__vd_html, 'button-primary' ), 'lock step: the notice shows the one-click button' );
+	$ok( false !== strpos( $__vd_html, 'update-core.php?force-check=1' ) && false !== strpos( $__vd_html, 'Check for updates' ), 'lock step: a piece with no offer yet gets "Check for updates"' );
+	remove_filter( 'pre_site_transient_update_plugins', $__vd_offers );
+	add_filter( 'pre_site_transient_update_plugins', $__vd_no_offers );
+	$__vd_theme_offer = function () {
+		return (object) array(
+			'last_checked' => time(),
+			'response'     => array( get_template() => array( 'new_version' => '0.18.0-alpha' ) ),
+		);
+	};
+	remove_filter( 'pre_site_transient_update_themes', $__vd_no_offers );
+	add_filter( 'pre_site_transient_update_themes', $__vd_theme_offer );
+	$__vd_u = html_entity_decode( perdita_core_version_update_url( 'theme' ) );
+	$ok( false !== strpos( $__vd_u, 'update.php?action=upgrade-theme&theme=' . rawurlencode( get_template() ) ) && false !== strpos( $__vd_u, '_wpnonce=' . wp_create_nonce( 'upgrade-theme_' . get_template() ) ), 'lock step: "Update the Perdita theme to match" is WordPress\'s own nonced one-click update' );
+	remove_filter( 'pre_site_transient_update_themes', $__vd_theme_offer );
+	remove_filter( 'pre_site_transient_update_plugins', $__vd_no_offers );
+	wp_set_current_user( 0 );
+	$ok( '' === perdita_core_version_update_url( 'pro' ), 'lock step: no update link for a visitor who cannot update plugins' );
+	wp_set_current_user( $__vd_user );
+}
 
 $core = perdita_core();
 $ok( $core->modules instanceof Perdita_Modules, 'perdita_core()->modules is the registry' );

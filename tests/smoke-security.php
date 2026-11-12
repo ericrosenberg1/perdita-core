@@ -274,6 +274,7 @@ if ( ! file_exists( PERDITA_CORE_DIR . 'inc/class-perdita-core-updater.php' ) ) 
 		remove_filter( 'upgrader_pre_download', array( $u, 'verify_download' ) );
 		remove_action( 'upgrader_process_complete', array( $u, 'flush' ) );
 		remove_action( 'init', array( $u, 'maybe_default_auto_updates' ) );
+		remove_action( 'load-update-core.php', array( $u, 'flush_on_force_check' ) );
 	};
 	$psx_unhook( $psx_updater );
 
