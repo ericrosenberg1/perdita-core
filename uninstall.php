@@ -33,6 +33,10 @@
  *     the Perdita theme, which this plugin only reads.
  *   - Backup archives in uploads/perdita-backups/. They are the last copy of
  *     something, by definition.
+ *   - Switch to Perdita's backup copies in uploads/perdita-switch-backups/
+ *     (.htaccess, wp-config.php, and other plugins' files saved before a
+ *     leftover was removed). Same reason. The Switch screen's "Delete backup
+ *     copies" button clears them while the plugin is still installed.
  *   - Page cache files in uploads/perdita-cache/. Nothing serves them once the
  *     plugin is gone, and an uninstaller that recursively deletes a computed
  *     uploads path is exactly the kind of code that eats a media library when
@@ -67,6 +71,7 @@ function perdita_core_uninstall_options() {
 		'perdita_analytics_settings', // Every consent setting, model included. Visitors' perdita_consent cookies live in their browsers.
 		'perdita_backups_settings',
 		'perdita_caching_settings',
+		'perdita_cache_preload',     // Preload progress.
 		// perdita_forms_settings is kept, like perdita_seo: notification recipients and
 		// spam-provider configuration are site configuration, not plugin bookkeeping.
 		'perdita_mcp_settings',
@@ -103,6 +108,12 @@ function perdita_core_uninstall_options() {
 		'perdita_forms_proxy_ip_notice',
 		'perdita_subscriptions_proxy_ip_notice',
 		'perdita_forms_turnstile_key_error',
+
+		// Switch to Perdita: what was imported, skipped or deactivated, and
+		// the pre-import copies Undo restores. Bookkeeping for this screen.
+		'perdita_switch_state',
+		'perdita_switch_snapshots',
+		'perdita_switch_batch_lock',
 	);
 }
 
@@ -133,6 +144,8 @@ function perdita_core_uninstall_transient_prefixes() {
 		'perdita_indexnow_', // Sitemap ping throttle.
 		'perdita_image_sitemap', // Cached image sitemap XML.
 		'perdita_seo_llms_', // Cached llms.txt and llms-full.txt.
+		'perdita_cache_preload_', // The page cache preload's batch lock.
+		'perdita_switch_', // The Switch to Perdita screen's running meta batch.
 	);
 }
 
@@ -156,9 +169,17 @@ function perdita_core_uninstall_site() {
 			'perdita_backups_run',
 			'perdita_subscriptions_send_batch',
 			'perdita_indexnow_submit',
+			'perdita_cache_gc',
+			'perdita_cache_gc_soon',
+			'perdita_cache_preload_batch',
+			'perdita_cache_preload_start',
+			'perdita_switch_batch',
 		) as $hook
 	) {
-		wp_clear_scheduled_hook( $hook );
+		// Every event on the hook, whatever its arguments: the preload's
+		// scheduled refresh is booked with array( 'refresh' ), which
+		// wp_clear_scheduled_hook( $hook ) alone never matches.
+		wp_unschedule_hook( $hook );
 	}
 
 	// Transients, including the per-user and per-hash ones that cannot be
@@ -175,6 +196,11 @@ function perdita_core_uninstall_site() {
 			)
 		);
 	}
+
+	// Switch to Perdita's undo marks on terms. The SEO titles and
+	// descriptions an import wrote stay, like perdita_seo.
+	delete_metadata( 'term', 0, '_perdita_switch_from', '', true );
+	delete_metadata( 'term', 0, '_perdita_switch_wrote', '', true );
 
 	wp_cache_flush();
 }
@@ -198,3 +224,7 @@ if ( is_multisite() ) {
 // drops a deleted plugin from its auto-update list, so a reinstall starts
 // over with the same default a new install gets.
 delete_site_option( 'perdita_core_auto_updates_defaulted' );
+
+// Plugin notices each person dismissed on the Switch to Perdita screen.
+// User meta is network-wide, so this runs once.
+delete_metadata( 'user', 0, 'perdita_switch_dismissed', '', true );

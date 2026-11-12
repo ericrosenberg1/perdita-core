@@ -22,7 +22,7 @@ Everything is a module, and a module that's off costs you one option read. Its c
 
 * **SEO.** Titles, meta descriptions, Open Graph and Twitter cards, schema, canonical URLs, and a one-click import from Yoast or All in One SEO.
 * **Forms.** Build a contact form, store the entries in your own database, and keep the spam out with a honeypot and rate limiting.
-* **Caching and performance.** Page caching with smart clearing, plus browser cache headers. It skips carts, logged-in users, and any page with a form on it.
+* **Caching and performance.** Page caching plus browser cache headers. You can serve cached pages before WordPress loads, through a drop-in like WP Super Cache's, and choose whether a post save clears the whole cache or only the pages that show that post. You can also preload the cache in the background, store gzip copies, serve the old copy while a page rebuilds, keep a separate cache for phones, cache your feeds, cap the cache's size on disk, and point static files at a CDN. You get a searchable list of cached pages, a scheduled cleanup, a debug log, and `wp perdita cache` commands. Carts, logged-in visitors, pages that set a cookie, and pages a plugin marks as private never get a cached copy.
 * **Security hardening.** Login rate limiting, security headers, a locked-down file editor, and blocks for XML-RPC and author enumeration.
 * **Email delivery (SMTP).** Send site mail through your own SMTP server so it reaches the inbox. Credentials are encrypted at rest.
 * **Email subscriptions.** Let readers subscribe and get a note when you publish. Double opt-in, one-click unsubscribe.
@@ -33,6 +33,7 @@ Everything is a module, and a module that's off costs you one option read. Its c
 * **Search Console.** Clicks, impressions, and top queries in wp-admin, using your own Google Cloud OAuth app.
 * **PageSpeed Insights.** Core Web Vitals for your homepage, straight from Google, so you can see what a setting actually did.
 * **MCP server.** Let Claude, ChatGPT, or any MCP client manage posts and pages over a secure API instead of only through wp-admin.
+* **Switch to Perdita.** Bring your settings over from WP Super Cache, W3 Total Cache, WP Fastest Cache, LiteSpeed Cache, Cache Enabler, Yoast SEO, All in One SEO, Rank Math, SEOPress, WP Mail SMTP, FluentSMTP, Post SMTP, Site Kit, MonsterInsights, GA Google Analytics, Simple Consent Manager, Limit Login Attempts Reloaded, or Loginizer. You can preview every setting first, undo an import, and deactivate the old plugin when you're ready. For a caching plugin, you can also clear out what it leaves behind, its drop-in and its .htaccess rules, and you get a backup copy of each file in a protected folder first. `wp perdita switch` gives you the same tools on the command line.
 
 **Defaults**
 
