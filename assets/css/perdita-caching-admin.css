@@ -1,0 +1,85 @@
+/*
+ * Caching screen (Perdita, Caching): layout only. Buttons, badges, links and
+ * focus rings come from the shared admin sheet, perdita-admin.css.
+ */
+
+.perdita-caching .perdita-cache-intro,
+.perdita-caching .perdita-cache-narrow {
+	max-width: 760px;
+}
+.perdita-caching .perdita-cache-card {
+	max-width: 760px;
+	margin-bottom: 16px;
+	box-sizing: border-box;
+}
+.perdita-caching .perdita-cache-card--note {
+	border-left: 4px solid var(--perdita-ui-primary, #3f6b5e);
+}
+.perdita-caching .perdita-cache-card-title {
+	margin-top: 0;
+}
+.perdita-caching .perdita-cache-num {
+	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
+}
+.perdita-caching .perdita-cache-section {
+	max-width: 760px;
+	margin: 28px 0 0;
+	padding-top: 16px;
+	border-top: 1px solid var(--perdita-ui-border, #e4e1d8);
+}
+.perdita-caching .perdita-cache-actions form {
+	display: inline-block;
+	margin: 0 8px 8px 0;
+}
+.perdita-caching .perdita-cache-flush {
+	margin: 0;
+}
+.perdita-caching .perdita-cache-search {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	margin: 0 0 12px;
+}
+.perdita-caching .perdita-cache-search input[type="search"] {
+	max-width: 100%;
+}
+.perdita-caching .perdita-cache-logform {
+	margin: 8px 0 0;
+}
+.perdita-caching .perdita-cache-pager {
+	margin-bottom: 0;
+	white-space: nowrap;
+}
+.perdita-caching .perdita-cache-list td,
+.perdita-caching .perdita-cache-list th {
+	vertical-align: middle;
+}
+.perdita-caching .perdita-cache-list .perdita-cache-url {
+	overflow-wrap: anywhere;
+	word-break: break-word;
+}
+
+/* Phones: the cached pages list becomes one labeled block per page. */
+@media screen and (max-width: 600px) {
+	.perdita-caching .perdita-cache-list thead {
+		display: none;
+	}
+	.perdita-caching .perdita-cache-list,
+	.perdita-caching .perdita-cache-list tbody,
+	.perdita-caching .perdita-cache-list tr,
+	.perdita-caching .perdita-cache-list td {
+		display: block;
+		width: 100%;
+		box-sizing: border-box;
+	}
+	.perdita-caching .perdita-cache-list td[data-label]::before {
+		content: attr(data-label) " ";
+		color: #6b675f;
+		font-size: 12px;
+	}
+	.perdita-caching .perdita-cache-pager {
+		white-space: normal;
+	}
+}
