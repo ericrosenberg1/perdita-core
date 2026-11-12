@@ -326,6 +326,10 @@ class Perdita_Caching {
 			// its cleanup booked: WP-Cron and WP-CLI requests book it too.
 			// admin_init never fires on either one.
 			add_action( 'init', array( __CLASS__, 'sync_schedules' ), 20 );
+			// Same for the early-serve drop-in: after an automatic update the
+			// file on disk is the previous release's until one of these
+			// requests rewrites it.
+			add_action( 'init', array( __CLASS__, 'sync_dropin' ), 21 );
 		}
 
 		// CDN rewriting runs in its own buffer, opened right after the capture
