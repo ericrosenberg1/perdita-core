@@ -72,8 +72,7 @@ Perdita, Switch to Perdita (`admin.php?page=perdita-switch`, manage_options) and
 
 Fixes merged to main since the last release go here, one `readme.txt` line each. At the next lock-step bump, move them into that version's changelog entry and empty this list.
 
-* Fix: your page cache's daily cleanup is scheduled on a site that updates itself and where nobody opens wp-admin. Before, you had to open wp-admin once.
-* Fix: after an automatic update, the early-serve file in `wp-content` is rewritten for the new release without a wp-admin visit.
+(empty since 0.19.22-beta)
 
 ## Tests
 
