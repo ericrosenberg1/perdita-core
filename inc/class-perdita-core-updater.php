@@ -105,6 +105,7 @@ class Perdita_Core_Updater {
 		add_filter( 'upgrader_pre_download', array( $this, 'verify_download' ), 10, 3 );
 		add_action( 'upgrader_process_complete', array( $this, 'flush' ), 10, 0 );
 		add_action( 'init', array( $this, 'maybe_default_auto_updates' ) );
+		add_action( 'load-update-core.php', array( $this, 'flush_on_force_check' ) );
 	}
 
 	/**
@@ -440,6 +441,20 @@ class Perdita_Core_Updater {
 	 */
 	public function flush() {
 		delete_transient( self::CACHE );
+	}
+
+	/**
+	 * Dashboard, Updates, Check again (update-core.php?force-check=1) asks
+	 * WordPress for fresh offers, but this class would still answer from its
+	 * 12-hour manifest cache. Drop the cache first, so the check (and the
+	 * "Check for updates" button in the out-of-step notice) sees a release
+	 * that went out since.
+	 */
+	public function flush_on_force_check() {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only flag, core's own link carries no nonce.
+		if ( ! empty( $_GET['force-check'] ) && current_user_can( 'update_plugins' ) ) {
+			$this->flush();
+		}
 	}
 
 	/**
