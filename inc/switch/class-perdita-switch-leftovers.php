@@ -613,7 +613,10 @@ class Perdita_Switch_Leftovers {
 				'message' => __( 'The block is missing a marker or overlaps another block, so .htaccess is unchanged. Remove the block by hand.', 'perdita-core' ),
 			);
 		}
-		$backup = Perdita_Switch_Backups::save_file( $path, 'htaccess' );
+		// Only the removed block is kept. A whole .htaccess can hold paths to
+		// password files or tokens in rewrite rules, and the backup folder sits
+		// under uploads.
+		$backup = self::save_note( 'htaccess-block', self::block_lines( $body, $marker ) );
 		if ( '' === $backup ) {
 			return array(
 				'ok'      => false,
@@ -624,14 +627,40 @@ class Perdita_Switch_Leftovers {
 		if ( ! self::write_atomic( $path, $new, $body ) ) {
 			return array(
 				'ok'      => false,
-				'message' => __( '.htaccess couldn\'t be saved, so the file is unchanged. You\'ll find a copy under Backup copies.', 'perdita-core' ),
+				'message' => __( '.htaccess couldn\'t be saved, so the file is unchanged.', 'perdita-core' ),
 			);
 		}
 		return array(
 			'ok'      => true,
 			/* translators: 1: marker name, 2: backup file name. */
-			'message' => sprintf( __( 'Removed the "%1$s" block from .htaccess. You\'ll find the old file under Backup copies as %2$s.', 'perdita-core' ), $marker, $backup ),
+			'message' => sprintf( __( 'Removed the "%1$s" block from .htaccess. You\'ll find the removed block under Backup copies as %2$s.', 'perdita-core' ), $marker, $backup ),
 		);
+	}
+
+	/**
+	 * The lines of every "# BEGIN marker" ... "# END marker" block in $body,
+	 * markers included. Call it only after strip_block() accepted the body.
+	 *
+	 * @param string $body   File contents.
+	 * @param string $marker Marker name.
+	 * @return string[]
+	 */
+	private static function block_lines( $body, $marker ) {
+		$out    = array();
+		$inside = false;
+		foreach ( preg_split( '/\\r\\n|\\n|\\r/', (string) $body ) as $line ) {
+			$trim = trim( $line );
+			if ( '# BEGIN ' . $marker === $trim ) {
+				$inside = true;
+			}
+			if ( $inside ) {
+				$out[] = $line;
+			}
+			if ( '# END ' . $marker === $trim ) {
+				$inside = false;
+			}
+		}
+		return $out;
 	}
 
 	/* ---------- writing ---------- */

@@ -681,7 +681,7 @@ class Perdita_Switch {
 		try {
 			return self::run_batch_locked( $seconds );
 		} finally {
-			delete_option( self::LOCK );
+			self::unlock();
 		}
 	}
 
@@ -692,15 +692,34 @@ class Perdita_Switch {
 	 * @return bool
 	 */
 	private static function lock() {
-		if ( add_option( self::LOCK, time(), '', false ) ) {
+		global $wpdb;
+		$now = time();
+		// One INSERT IGNORE decides the winner in the database. add_option()
+		// checks first and writes second, so two requests could both pass.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- a lock has to skip the options cache.
+		$took = $wpdb->query( $wpdb->prepare( "INSERT IGNORE INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, %s, 'no')", self::LOCK, (string) $now ) );
+		if ( 1 === (int) $took ) {
 			return true;
 		}
-		$held = (int) get_option( self::LOCK, 0 );
-		if ( $held && $held < time() - 2 * MINUTE_IN_SECONDS ) {
-			delete_option( self::LOCK );
-			return add_option( self::LOCK, time(), '', false );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- same reason.
+		$held = (int) $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", self::LOCK ) );
+		if ( $held && $held < $now - 2 * MINUTE_IN_SECONDS ) {
+			// Take over a dead lock only if nobody else got there first.
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- same reason.
+			$swapped = $wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s", (string) $now, self::LOCK, (string) $held ) );
+			return 1 === (int) $swapped;
 		}
 		return false;
+	}
+
+	/**
+	 * Release the batch lock.
+	 */
+	private static function unlock() {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- written around the options cache, so removed the same way.
+		$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name = %s", self::LOCK ) );
+		wp_cache_delete( self::LOCK, 'options' );
 	}
 
 	/**

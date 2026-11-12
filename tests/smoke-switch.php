@@ -559,6 +559,7 @@ if ( $pdsw_stub_exists ) {
 	$ok( ! glob( dirname( $pdsw_ht ) . '/.htaccess.perdita-*' ) && ! glob( dirname( $pdsw_ht ) . '/.htaccess*.bak' ) && ! glob( dirname( $pdsw_ht ) . '/.*.tmp' ), 'leftovers: no backup copy or temp file sits beside .htaccess' );
 	$pdsw_hbk_last = (string) end( $pdsw_hbk );
 	$ok( '' !== $pdsw_hbk_last && false !== strpos( (string) file_get_contents( $pdsw_hbk_last ), '# BEGIN WPSuperCache' ) && '0600' === substr( sprintf( '%o', fileperms( $pdsw_hbk_last ) ), -4 ) && false !== strpos( $pdsw_fix['message'], basename( $pdsw_hbk_last ) ), 'leftovers: the .htaccess copy is the old file, 0600, and the message names it' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+	$ok( '' !== $pdsw_hbk_last && false === strpos( (string) file_get_contents( $pdsw_hbk_last ), 'keep me' ) && false !== strpos( basename( $pdsw_hbk_last ), 'htaccess-block-' ), 'leftovers: the backup holds only the removed block, never the rest of .htaccess' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
 	$pdsw_fix = Perdita_Switch::get( 'wp-super-cache' )->fix_leftover( 'htaccess:WordPress' );
 	$ok( ! $pdsw_fix['ok'] && false !== strpos( (string) file_get_contents( $pdsw_ht ), '# BEGIN WordPress' ), 'leftovers: a block the plugin doesn\'t own is refused' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
 	$pdsw_fix = Perdita_Switch::get( 'wp-super-cache' )->fix_leftover( 'dropin' );
