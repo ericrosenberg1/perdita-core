@@ -1,0 +1,356 @@
+/*
+ * Perdita admin UI: the brand on WordPress's own admin controls, on Perdita's
+ * screens only.
+ *
+ * Two copies ship, byte for byte the same: perdita-core/assets/css/perdita-admin.css
+ * and perdita/assets/css/perdita-admin.css (the theme runs without Core). Both
+ * register the style handle 'perdita-admin-ui', so a screen loads one of them.
+ * Each repo's tests fail when the copies differ or a fallback drifts from
+ * Perdita_Settings::theme_preset().
+ *
+ * Scope. Every rule sits under one of two wrappers, so nothing reaches the
+ * rest of wp-admin:
+ *   - body.perdita-admin-screen #wpbody-content: a whole Perdita screen. The
+ *     admin menu, the toolbar and the footer sit outside #wpbody-content.
+ *   - .perdita-admin: one Perdita element on a screen Perdita doesn't own (a
+ *     meta box, a Customizer section, a nav menu item field).
+ * The wrapper sits in :where(), so it adds no specificity. The leading
+ * .wp-core-ui (on every wp-admin and Customizer body) gives each rule the
+ * same weight as WordPress's own .wp-core-ui rules, and this sheet loads
+ * after them.
+ *
+ * Tokens. The --perdita-ui-* custom properties are printed at enqueue time
+ * from theme_preset() (an inline style on this handle). The literal values
+ * here are the same preset, as fallbacks. Admin screens always use Perdita's
+ * own palette, never the site's customized one: the admin is Perdita's
+ * product surface. Body text keeps WordPress's system font, and no web font
+ * loads in the admin.
+ */
+
+/* WordPress's own admin color variables, pointed at the brand inside the
+   wrapper. Every WordPress 7.1 control that reads them (buttons, focus
+   rings, checked boxes, radios, tags) follows. */
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) {
+	--wp-admin-theme-color: var(--perdita-ui-primary, #3f6b5e);
+	--wp-admin-theme-color--rgb: var(--perdita-ui-primary-rgb, 63, 107, 94);
+	--wp-admin-theme-color-darker-10: var(--perdita-ui-primary-hover, #2e5246);
+	--wp-admin-theme-color-darker-10--rgb: var(--perdita-ui-primary-hover-rgb, 46, 82, 70);
+	--wp-admin-theme-color-darker-20: var(--perdita-ui-primary-hover, #2e5246);
+	--wp-admin-theme-color-darker-20--rgb: var(--perdita-ui-primary-hover-rgb, 46, 82, 70);
+}
+
+/* Links */
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) a {
+	color: var(--perdita-ui-primary, #3f6b5e);
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) a:hover,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) a:active {
+	color: var(--perdita-ui-primary-hover, #2e5246);
+}
+
+/* Buttons */
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button-secondary,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .page-title-action {
+	color: var(--perdita-ui-primary, #3f6b5e);
+	border-color: var(--perdita-ui-primary, #3f6b5e);
+	background: #fff;
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button:hover,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button-secondary:hover,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .page-title-action:hover {
+	color: var(--perdita-ui-primary-hover, #2e5246);
+	border-color: var(--perdita-ui-primary-hover, #2e5246);
+	background: var(--perdita-ui-surface, #fbfaf6);
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button-primary {
+	color: #fff;
+	background: var(--perdita-ui-primary, #3f6b5e);
+	border-color: var(--perdita-ui-primary, #3f6b5e);
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button-primary:hover,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button-primary:active {
+	color: #fff;
+	background: var(--perdita-ui-primary-hover, #2e5246);
+	border-color: var(--perdita-ui-primary-hover, #2e5246);
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button-link,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button.button-link {
+	color: var(--perdita-ui-primary, #3f6b5e);
+	background: none;
+	border-color: transparent;
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button-link:hover,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button.button-link:hover {
+	color: var(--perdita-ui-primary-hover, #2e5246);
+	background: none;
+}
+
+/* Destructive: WordPress's red, the same red the theme's screen uses. */
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button-link-delete {
+	color: var(--perdita-ui-danger, #b32d2e);
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button.button-link-delete:not(.button-link) {
+	color: var(--perdita-ui-danger, #b32d2e);
+	border-color: var(--perdita-ui-danger, #b32d2e);
+	background: #fff;
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button-link-delete:hover {
+	color: var(--perdita-ui-danger-hover, #8a2424);
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button.button-link-delete:not(.button-link):hover {
+	color: var(--perdita-ui-danger-hover, #8a2424);
+	border-color: var(--perdita-ui-danger-hover, #8a2424);
+	background: #fcf0f1;
+}
+
+/* Disabled. WordPress marks its own disabled colors !important, so these
+   have to be too. */
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button[disabled],
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button:disabled,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button.disabled,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button[aria-disabled="true"] {
+	color: var(--perdita-ui-muted, #76726a) !important;
+	border-color: var(--perdita-ui-border, #e4e1d8) !important;
+	background: var(--perdita-ui-surface, #fbfaf6) !important;
+}
+
+/* Focus: a visible ring on every control. Primary buttons get a white gap
+   so the ring reads against their own fill. */
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) a:focus,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button:focus,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button-link:focus,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .page-title-action:focus,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) input:focus,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) select:focus,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) textarea:focus {
+	border-color: var(--perdita-ui-primary, #3f6b5e);
+	box-shadow: 0 0 0 1px var(--perdita-ui-primary, #3f6b5e);
+	outline: 2px solid transparent;
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button-primary:focus {
+	box-shadow: 0 0 0 1px #fff, 0 0 0 3px var(--perdita-ui-primary, #3f6b5e);
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button:not(.button-primary):not(.button-link-delete):not(.button-link):focus {
+	color: var(--perdita-ui-primary-hover, #2e5246);
+	background: var(--perdita-ui-surface, #fbfaf6);
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) input[type="checkbox"]:focus,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) input[type="radio"]:focus {
+	box-shadow: 0 0 0 1px #fff, 0 0 0 3px var(--perdita-ui-primary, #3f6b5e);
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) [role="tab"]:focus-visible,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .nav-tab:focus-visible,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) button:not(.button):focus-visible,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) summary:focus-visible {
+	outline: 2px solid var(--perdita-ui-primary, #3f6b5e);
+	outline-offset: 1px;
+}
+
+/* Checkboxes, radios, ranges and progress bars. WordPress 7.1 fills a
+   checked box with its own theme color, so the fill and the mark are set
+   here too. */
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) input[type="checkbox"],
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) input[type="radio"],
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) input[type="range"],
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) progress {
+	accent-color: var(--perdita-ui-primary, #3f6b5e);
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) input[type="checkbox"]:checked {
+	background-color: var(--perdita-ui-primary, #3f6b5e);
+	border-color: var(--perdita-ui-primary, #3f6b5e);
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) input[type="checkbox"]:checked::before {
+	content: url("data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2020%2020%27%3E%3Cpath%20d%3D%27M14.83%204.89l1.34.94-5.81%208.38H9.02L5.78%209.67l1.34-1.25%202.57%202.4z%27%20fill%3D%27%23ffffff%27%2F%3E%3C%2Fsvg%3E");
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) input[type="radio"]:checked {
+	border-color: var(--perdita-ui-primary, #3f6b5e);
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) input[type="radio"]:checked::before {
+	background-color: var(--perdita-ui-primary, #3f6b5e);
+}
+
+/* Tabs: WordPress's nav-tab row and ARIA tab lists. The active tab carries
+   a bar and heavier text, so it doesn't rely on color alone. */
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .nav-tab {
+	color: var(--perdita-ui-primary, #3f6b5e);
+	background: var(--perdita-ui-surface, #fbfaf6);
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .nav-tab:hover {
+	color: var(--perdita-ui-primary-hover, #2e5246);
+	background: #fff;
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .nav-tab-active,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .nav-tab-active:hover,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .nav-tab-active:focus {
+	color: var(--perdita-ui-heading, #1c1b18);
+	background: #f0f0f1;
+	box-shadow: inset 0 3px 0 var(--perdita-ui-primary, #3f6b5e);
+}
+
+/* The Customizer's back arrow, inside Perdita's own panel and sections. */
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .customize-panel-back:hover,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .customize-panel-back:focus,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .customize-section-back:hover,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .customize-section-back:focus {
+	color: var(--perdita-ui-primary, #3f6b5e);
+	border-left-color: var(--perdita-ui-primary, #3f6b5e);
+}
+
+/* Version numbers beside a screen title: muted, dark enough for 4.5:1 on
+   WordPress's page color. */
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .perdita-version {
+	font-size: 12px;
+	font-weight: 400;
+	color: #6b675f;
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .subsubsub a.current,
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .subsubsub a[aria-current="page"] {
+	color: var(--perdita-ui-heading, #1c1b18);
+}
+
+/* Notices Perdita prints on its own screens. Info carries the brand, the
+   other kinds keep WordPress's meaning colors. */
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .notice-info {
+	border-left-color: var(--perdita-ui-primary, #3f6b5e);
+}
+
+/* Cards, tables and boxes */
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .card {
+	border-color: var(--perdita-ui-border, #e4e1d8);
+	border-radius: var(--perdita-ui-radius, 8px);
+}
+
+/* Badges and status pills. Text always says the status, so color is never
+   the only signal. */
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .perdita-badge {
+	display: inline-block;
+	padding: 2px 8px;
+	border-radius: 999px;
+	font-size: 12px;
+	line-height: 1.5;
+	white-space: nowrap;
+	color: var(--perdita-ui-heading, #1c1b18);
+	background: var(--perdita-ui-bg, #f4f2ec);
+	border: 1px solid var(--perdita-ui-border, #e4e1d8);
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .perdita-badge.is-primary {
+	color: #fff;
+	background: var(--perdita-ui-primary, #3f6b5e);
+	border-color: var(--perdita-ui-primary, #3f6b5e);
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .perdita-badge.is-ok {
+	color: #005c12;
+	background: #edfaef;
+	border-color: #b8e6bf;
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .perdita-badge.is-warn {
+	color: #8a4d00;
+	background: #fcf0e3;
+	border-color: #f0c33c;
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .perdita-badge.is-error {
+	color: var(--perdita-ui-danger-hover, #8a2424);
+	background: #fcf0f1;
+	border-color: var(--perdita-ui-danger, #b32d2e);
+}
+
+/* WordPress's success green, #008a20, is 4.1:1 on the admin page color.
+   Some Perdita screens print it inline, so it's darkened to #007017 (5.5:1)
+   inside the wrapper. */
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) [style*="color:#008a20"],
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) [style*="color: #008a20"] {
+	color: #007017 !important;
+}
+
+/* Numbers never wrap. */
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .perdita-num {
+	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
+}
+
+/* Long URLs, keys and email addresses break inside their box instead of
+   widening the page. */
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .perdita-break {
+	overflow-wrap: anywhere;
+	word-break: break-word;
+}
+
+/* A code sample. It scrolls inside its own box, so the markup gives it
+   tabindex="0" and a label for keyboard and screen reader users. */
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .perdita-code {
+	max-width: 760px;
+	overflow: auto;
+	padding: 12px;
+	background: var(--perdita-ui-surface, #fbfaf6);
+	border: 1px solid var(--perdita-ui-border, #e4e1d8);
+	border-radius: var(--perdita-ui-radius, 8px);
+}
+
+/* A row of stat cards that wraps on a narrow screen. */
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .perdita-stats {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 16px;
+	margin: 16px 0;
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .perdita-stat {
+	flex: 1 1 180px;
+	min-width: 0;
+	max-width: 100%;
+	margin: 0;
+	padding: 12px 16px;
+	box-sizing: border-box;
+}
+.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .perdita-stat-value {
+	display: block;
+	font-size: 22px;
+	line-height: 1.4;
+	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
+}
+
+/* Phones: a table marked .perdita-stack shows one labeled block per row.
+   Each cell carries data-label with its column name. */
+@media screen and (max-width: 600px) {
+	.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) table.perdita-stack thead {
+		display: none;
+	}
+	.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) table.perdita-stack,
+	.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) table.perdita-stack tbody,
+	.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) table.perdita-stack tr,
+	.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) table.perdita-stack td {
+		display: block;
+		width: 100%;
+		box-sizing: border-box;
+	}
+	.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) table.perdita-stack tr {
+		padding: 8px 0;
+		border-bottom: 1px solid var(--perdita-ui-border, #e4e1d8);
+	}
+	.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) table.perdita-stack td {
+		padding: 4px 10px;
+		overflow-wrap: anywhere;
+	}
+	.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) table.perdita-stack td[data-label]::before {
+		content: attr(data-label);
+		display: block;
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--perdita-ui-muted, #76726a);
+	}
+	.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) table.perdita-stack input[type="text"],
+	.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) table.perdita-stack select {
+		width: 100%;
+		max-width: 100%;
+	}
+}
+
+/* Phones: 44px touch targets on buttons and tabs. */
+@media screen and (max-width: 782px) {
+	.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .button,
+	.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .page-title-action,
+	.wp-core-ui :where(.perdita-admin-screen #wpbody-content, .perdita-admin) .nav-tab {
+		min-height: 44px;
+	}
+}

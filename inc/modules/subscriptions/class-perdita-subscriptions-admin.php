@@ -328,18 +328,9 @@ class Perdita_Subscriptions_Admin {
 	/* ---------- premium ---------- */
 
 	/**
-	 * "Coming in Perdita Premium" card, matching the pattern in
-	 * Perdita_SEO_Admin::premium(). Inert UI only, no gating mechanism.
+	 * One line about what Perdita Pro adds to subscriptions.
 	 */
 	private function premium() {
-		?>
-		<div class="card" style="max-width:760px;border-left:4px solid #3f6b5e;">
-			<h2 style="margin-top:0;"><?php esc_html_e( 'Coming in Perdita Premium', 'perdita-core' ); ?></h2>
-			<ul style="list-style:disc;padding-left:20px;color:#3c434a;">
-				<li><?php esc_html_e( 'Weekly and monthly roundup digest emails, instead of (or alongside) a notification for every single post.', 'perdita-core' ); ?></li>
-			</ul>
-			<p class="description"><?php esc_html_e( 'Everything on this page is free, forever. Premium adds depth for bigger sites.', 'perdita-core' ); ?></p>
-		</div>
-		<?php
+		echo '<p class="description">' . esc_html__( 'Everything on this page is free. With Perdita Pro, you can also send subscribers a weekly or monthly digest.', 'perdita-core' ) . '</p>';
 	}
 }

@@ -105,12 +105,12 @@ class Perdita_Image_SEO_Admin {
 
 		echo '<tr><th scope="row">' . esc_html__( 'Alt text', 'perdita-core' ) . '</th><td>';
 		echo '<label><input type="checkbox" name="auto_alt" value="1" ' . checked( ! empty( $s['auto_alt'] ), true, false ) . ' /> ' . esc_html__( 'Fill in alt text when an image is uploaded without any', 'perdita-core' ) . '</label>';
-		echo '<p><input type="text" name="alt_format" class="regular-text code" value="' . esc_attr( (string) $s['alt_format'] ) . '" /></p>';
+		echo '<p><label for="perdita-image-seo-alt-format">' . esc_html__( 'Alt text pattern', 'perdita-core' ) . '</label><br /><input type="text" id="perdita-image-seo-alt-format" name="alt_format" class="regular-text code" value="' . esc_attr( (string) $s['alt_format'] ) . '" /></p>';
 		echo '</td></tr>';
 
 		echo '<tr><th scope="row">' . esc_html__( 'Media title', 'perdita-core' ) . '</th><td>';
 		echo '<label><input type="checkbox" name="auto_title" value="1" ' . checked( ! empty( $s['auto_title'] ), true, false ) . ' /> ' . esc_html__( 'Rewrite the media title on upload, but only while it is still the raw filename', 'perdita-core' ) . '</label>';
-		echo '<p><input type="text" name="title_format" class="regular-text code" value="' . esc_attr( (string) $s['title_format'] ) . '" /></p>';
+		echo '<p><label for="perdita-image-seo-title-format">' . esc_html__( 'Media title pattern', 'perdita-core' ) . '</label><br /><input type="text" id="perdita-image-seo-title-format" name="title_format" class="regular-text code" value="' . esc_attr( (string) $s['title_format'] ) . '" /></p>';
 		echo '</td></tr>';
 
 		echo '<tr><th scope="row">' . esc_html__( 'Variables', 'perdita-core' ) . '</th><td><p class="description">';

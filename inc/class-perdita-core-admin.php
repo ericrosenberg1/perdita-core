@@ -36,6 +36,10 @@ class Perdita_Core_Admin {
 	public function __construct( Perdita_Core $core ) {
 		$this->core = $core;
 
+		// Perdita's look on every Perdita admin screen and meta box.
+		require_once __DIR__ . '/class-perdita-core-admin-ui.php';
+		Perdita_Core_Admin_UI::boot();
+
 		// Priority 9, deliberately BEFORE the default 10. Every module admin
 		// screen here and in Perdita Pro registers with add_submenu_page(
 		// 'perdita', ... ) at the default priority, and WordPress derives a
@@ -87,7 +91,7 @@ class Perdita_Core_Admin {
 			wp_die( esc_html__( 'Not allowed.', 'perdita-core' ) );
 		}
 
-		echo '<div class="wrap"><h1>' . esc_html__( 'Perdita', 'perdita-core' ) . ' <span style="font-size:12px;color:#787c82;">' . esc_html( PERDITA_CORE_VERSION ) . '</span></h1>';
+		echo '<div class="wrap"><h1>' . esc_html__( 'Perdita', 'perdita-core' ) . ' <span class="perdita-version">' . esc_html( PERDITA_CORE_VERSION ) . '</span></h1>';
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display of a message this plugin put in the URL itself.
 		if ( '' !== perdita_notice_text( 'perdita_msg' ) ) {
 			// phpcs:ignore WordPress.Security.NonceVerification.Recommended

@@ -95,14 +95,14 @@ class Perdita_Forms_Admin {
 		$types  = Perdita_Forms::field_types();
 		?>
 		<p class="description"><?php esc_html_e( 'Add the fields people fill in. The field name is used in emails and must be unique (lowercase, no spaces).', 'perdita-core' ); ?></p>
-		<table class="widefat perdita-fields" style="margin-bottom:10px;">
+		<table class="widefat perdita-fields perdita-stack">
 			<thead><tr>
 				<th><?php esc_html_e( 'Type', 'perdita-core' ); ?></th>
 				<th><?php esc_html_e( 'Label', 'perdita-core' ); ?></th>
 				<th><?php esc_html_e( 'Name', 'perdita-core' ); ?></th>
 				<th><?php esc_html_e( 'Options (comma-separated)', 'perdita-core' ); ?></th>
 				<th><?php esc_html_e( 'Required', 'perdita-core' ); ?></th>
-				<th></th>
+				<th><span class="screen-reader-text"><?php esc_html_e( 'Remove', 'perdita-core' ); ?></span></th>
 			</tr></thead>
 			<tbody class="perdita-fields__rows">
 				<?php foreach ( $cfg['fields'] as $i => $f ) : ?>
@@ -129,18 +129,18 @@ class Perdita_Forms_Admin {
 		$base = 'df[fields][' . $i . ']';
 		?>
 		<tr class="perdita-fields__row">
-			<td>
-				<select name="<?php echo esc_attr( $base . '[type]' ); ?>">
+			<td data-label="<?php esc_attr_e( 'Type', 'perdita-core' ); ?>">
+				<select name="<?php echo esc_attr( $base . '[type]' ); ?>" aria-label="<?php esc_attr_e( 'Field type', 'perdita-core' ); ?>">
 					<?php foreach ( $types as $val => $label ) : ?>
 						<option value="<?php echo esc_attr( $val ); ?>" <?php selected( $f['type'], $val ); ?>><?php echo esc_html( $label ); ?></option>
 					<?php endforeach; ?>
 				</select>
 			</td>
-			<td><input type="text" class="perdita-field-label" name="<?php echo esc_attr( $base . '[label]' ); ?>" value="<?php echo esc_attr( $f['label'] ); ?>" /></td>
-			<td><input type="text" class="perdita-field-name" name="<?php echo esc_attr( $base . '[name]' ); ?>" value="<?php echo esc_attr( $f['name'] ); ?>" /></td>
-			<td><input type="text" class="widefat" name="<?php echo esc_attr( $base . '[options]' ); ?>" value="<?php echo esc_attr( implode( ', ', (array) $f['options'] ) ); ?>" placeholder="<?php esc_attr_e( 'For dropdown / radio / checkboxes', 'perdita-core' ); ?>" /></td>
-			<td style="text-align:center;"><input type="checkbox" name="<?php echo esc_attr( $base . '[required]' ); ?>" value="1" <?php checked( ! empty( $f['required'] ) ); ?> /></td>
-			<td><button type="button" class="button-link perdita-fields__remove" aria-label="<?php esc_attr_e( 'Remove', 'perdita-core' ); ?>">&times;</button></td>
+			<td data-label="<?php esc_attr_e( 'Label', 'perdita-core' ); ?>"><input type="text" class="perdita-field-label" name="<?php echo esc_attr( $base . '[label]' ); ?>" value="<?php echo esc_attr( $f['label'] ); ?>" aria-label="<?php esc_attr_e( 'Field label', 'perdita-core' ); ?>" /></td>
+			<td data-label="<?php esc_attr_e( 'Name', 'perdita-core' ); ?>"><input type="text" class="perdita-field-name" name="<?php echo esc_attr( $base . '[name]' ); ?>" value="<?php echo esc_attr( $f['name'] ); ?>" aria-label="<?php esc_attr_e( 'Field name', 'perdita-core' ); ?>" /></td>
+			<td data-label="<?php esc_attr_e( 'Options (comma-separated)', 'perdita-core' ); ?>"><input type="text" class="widefat" name="<?php echo esc_attr( $base . '[options]' ); ?>" value="<?php echo esc_attr( implode( ', ', (array) $f['options'] ) ); ?>" placeholder="<?php esc_attr_e( 'For dropdown / radio / checkboxes', 'perdita-core' ); ?>" aria-label="<?php esc_attr_e( 'Field options, comma-separated', 'perdita-core' ); ?>" /></td>
+			<td class="perdita-fields__required" data-label="<?php esc_attr_e( 'Required', 'perdita-core' ); ?>"><input type="checkbox" name="<?php echo esc_attr( $base . '[required]' ); ?>" value="1" <?php checked( ! empty( $f['required'] ) ); ?> aria-label="<?php esc_attr_e( 'Required field', 'perdita-core' ); ?>" /></td>
+			<td><button type="button" class="button-link perdita-fields__remove" aria-label="<?php esc_attr_e( 'Remove this field', 'perdita-core' ); ?>">&times;</button></td>
 		</tr>
 		<?php
 	}
@@ -341,7 +341,8 @@ class Perdita_Forms_Admin {
 			return;
 		}
 		echo '<form method="get"><input type="hidden" name="post_type" value="' . esc_attr( Perdita_Forms::CPT ) . '" /><input type="hidden" name="page" value="perdita-entries" />';
-		echo '<select name="form" onchange="this.form.submit()">';
+		echo '<label for="perdita-entries-form">' . esc_html__( 'Form', 'perdita-core' ) . '</label> ';
+		echo '<select id="perdita-entries-form" name="form" onchange="this.form.submit()">';
 		foreach ( $forms as $f ) {
 			printf( '<option value="%d" %s>%s</option>', (int) $f->ID, selected( $fid, $f->ID, false ), esc_html( $f->post_title ) );
 		}
