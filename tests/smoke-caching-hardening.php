@@ -488,7 +488,14 @@ Perdita_Caching::delete_entry( $chd_gf );
 /* ------------------------------------------------------------------ */
 
 $chd_ids_before = $chd_hook_ids();
+// Built as a WP-Cron request: a site that updates itself and never opens
+// wp-admin still has to get its cleanup booked.
+remove_action( 'init', array( 'Perdita_Caching', 'sync_schedules' ), 20 );
+add_filter( 'wp_doing_cron', '__return_true' );
 $chd_inst       = new Perdita_Caching( perdita_core() );
+remove_filter( 'wp_doing_cron', '__return_true' );
+$ok( 20 === has_action( 'init', array( 'Perdita_Caching', 'sync_schedules' ) ), 'cache hardening 6: a WP-Cron request books the cleanup schedule, with no wp-admin visit needed' );
+remove_action( 'init', array( 'Perdita_Caching', 'sync_schedules' ), 20 );
 $chd_seed       = static function () use ( $chd_page ) {
 	$chd_page( '/' );
 	$chd_page( '/hard-unrelated/' );

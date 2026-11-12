@@ -319,8 +319,13 @@ class Perdita_Caching {
 		add_action( 'perdita_cache_preload_start', array( __CLASS__, 'run_preload_start' ) );
 		add_action( 'perdita_cache_purged_url', array( __CLASS__, 'queue_preload_url' ) );
 		add_action( 'perdita_cache_purged_all', array( __CLASS__, 'queue_preload_all' ) );
-		if ( is_admin() || ( defined( 'WP_CLI' ) && WP_CLI ) ) {
+		if ( is_admin() ) {
 			add_action( 'admin_init', array( __CLASS__, 'sync_schedules' ) );
+		} elseif ( wp_doing_cron() || ( defined( 'WP_CLI' ) && WP_CLI ) ) {
+			// A site that updates itself and never opens wp-admin still gets
+			// its cleanup booked: WP-Cron and WP-CLI requests book it too.
+			// admin_init never fires on either one.
+			add_action( 'init', array( __CLASS__, 'sync_schedules' ), 20 );
 		}
 
 		// CDN rewriting runs in its own buffer, opened right after the capture
