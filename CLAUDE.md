@@ -45,6 +45,7 @@ Decisions that look like bugs but aren't:
 - Pro codes against the caching extension points listed at the top of `class-perdita-caching.php`. Keep the names and signatures.
 - `Perdita_Client_IP::get()` is the one place that reads a visitor address. It trusts CF-Connecting-IP only from Cloudflare's published ranges (list in the class, filter `perdita_cloudflare_ip_ranges`).
 
+- Sales: `mark_order_paid()` claims the order with one conditional write (`update_post_meta( ..., 'paid', $status )`), the way `release_unpaid_order()` does. A plain read-then-write let two deliveries at once both send the receipt and fire `perdita_sales_order_paid` (2026-11-13). Keep any new "already done?" check on a conditional write or a lock.
 - Sales: every amount sent to or read from Stripe goes through `Perdita_Sales::to_minor_units()` / `from_minor_units()` with the currency, never `* 100`. Zero-decimal (JPY), three-decimal (KWD) and whole-unit two-decimal (ISK, UGX) currencies each convert differently. Pro calls these too.
 - Analytics: the consent default carries the visitor's stored choice and runs before every `gtag('config')`, with no consent update on page load. `tests/smoke-analytics-order.php` renders the actual head and footer for six settings paths and runs the inline scripts in node. A blank measurement ID with "manage consent for other Google tags" off prints nothing, and a live site's mu-plugin depends on that.
 - Analytics adopts Simple Consent Manager's settings once on `admin_init` for a site that never chose a consent model, and unhooks SCM's head script while Perdita's consent layer is on.
@@ -72,12 +73,12 @@ Perdita, Switch to Perdita (`admin.php?page=perdita-switch`, manage_options) and
 
 Fixes merged to main since the last release go here, one `readme.txt` line each. At the next lock-step bump, move them into that version's changelog entry and empty this list.
 
-(empty since 0.19.22-beta)
+* Fix: in Sales, a buyer gets one receipt when Stripe delivers the same paid event twice at once.
 
 ## Tests
 
 - `bash tests/run.sh /path/to/wordpress` (see `tests/README.md`). The node tests (`*.test.mjs`) run from `smoke.php` when node is on PATH.
-- 1,667 passing at 0.19.21-beta on WordPress 7.1.4 with PHP 8.5.11 and 8.4.18, zero notices. The count grows every release, so compare against the last line of your own run on main before a change. `tests/smoke-migration.php` runs the page cache drop-in in a child PHP process, so the suite needs a CLI PHP binary (it skips that block without one).
+- 1,667 passing at 0.19.21-beta on WordPress 7.1.4 with PHP 8.5.11 and 8.4.18, zero notices. Give the rig a site URL with no port and a database name that isn't a common word: at `127.0.0.1:<port>` with a database named `wp`, six cache and Switch checks fail for the rig's own reasons (2026-11-13). The count grows every release, so compare against the last line of your own run on main before a change. `tests/smoke-migration.php` runs the page cache drop-in in a child PHP process, so the suite needs a CLI PHP binary (it skips that block without one).
 - The `--wporg` build takes its changelog from `bin/wporg-changelog/<version>.txt` when that file exists. 0.19.7-beta needed it, since the automatic-update default lives in the updater the directory build strips. 0.19.8-beta's file also carries 0.19.7's directory lines, because no 0.19.7 zip reached the directory.
 - Plugin Check 2.1.0 on the `--wporg` zip: 0 errors, 81 warnings. Those are the baseline. WPCS reports 278 errors and 217 warnings on the directory build, all pre-existing, so compare against those numbers rather than zero.
 - Rig recipes are in the Mac's memory files `reference_perdita_review_tooling` and `reference_headless_wp_test_rig`.

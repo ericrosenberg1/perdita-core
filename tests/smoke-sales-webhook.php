@@ -164,9 +164,62 @@ $swh_html = $swh_success->invoke( $swh_sales );
 $ok( false !== strpos( $swh_html, 'order is confirmed' ), 'sales success page: the buyer\'s own session id shows the confirmation' );
 $_GET = $swh_get;
 
+// 7. One paid order, one receipt. Stripe can deliver the same paid event
+// twice at once, and a replay can overlap the first delivery.
+$swh_fired = array();
+$swh_count = function ( $order_id ) use ( &$swh_fired ) {
+	$swh_fired[] = (int) $order_id;
+};
+add_action( 'perdita_sales_order_paid', $swh_count );
+$swh_e    = $swh_order( 'cs_smoke_e' );
+$swh_paid = array(
+	'id'                  => 'cs_smoke_e',
+	'client_reference_id' => (string) $swh_e,
+	'payment_status'      => 'paid',
+);
+$swh_event( 'checkout.session.completed', $swh_paid );
+$swh_event( 'checkout.session.completed', $swh_paid );
+$ok( 'paid' === $swh_status( $swh_e ) && array( $swh_e ) === $swh_fired, 'sales webhook: a replayed paid event fires perdita_sales_order_paid once' );
+
+// Two deliveries at once: the other request marks the order paid between
+// this one's read of the status and its own write. This one still holds
+// 'pending' in its cache, as a second PHP process would in its memory.
+$swh_f     = $swh_order( 'cs_smoke_f' );
+$swh_fired = array();
+$swh_status( $swh_f ); // Prime the meta cache with 'pending'.
+$swh_raced = false;
+$swh_race  = function ( $value, $object_id, $meta_key ) use ( $swh_f, &$swh_raced ) {
+	global $wpdb;
+	if ( ! $swh_raced && (int) $object_id === $swh_f && '_perdita_sales_status' === $meta_key ) {
+		$swh_raced = true;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- the other request's write, which this request's cache never sees.
+		$wpdb->update(
+			$wpdb->postmeta,
+			array( 'meta_value' => 'paid' ), // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+			array(
+				'post_id'  => $swh_f,
+				'meta_key' => '_perdita_sales_status', // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+			)
+		);
+	}
+	return $value;
+};
+add_filter( 'get_post_metadata', $swh_race, 10, 3 );
+$swh_event(
+	'checkout.session.completed',
+	array(
+		'id'                  => 'cs_smoke_f',
+		'client_reference_id' => (string) $swh_f,
+		'payment_status'      => 'paid',
+	)
+);
+remove_filter( 'get_post_metadata', $swh_race, 10 );
+remove_action( 'perdita_sales_order_paid', $swh_count );
+$ok( $swh_raced && array() === $swh_fired && 'paid' === $swh_status( $swh_f ), 'sales webhook: the delivery that loses the race to mark an order paid sends no second receipt and fires nothing' );
+
 // Cleanup.
 remove_filter( 'pre_wp_mail', $swh_mail );
-foreach ( array( $swh_a, $swh_b, $swh_c, $swh_d, $swh_product ) as $swh_id ) {
+foreach ( array( $swh_a, $swh_b, $swh_c, $swh_d, $swh_e, $swh_f, $swh_product ) as $swh_id ) {
 	wp_delete_post( $swh_id, true );
 }
 if ( null === $swh_orig_opt ) {
