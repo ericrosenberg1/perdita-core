@@ -4,7 +4,7 @@ Tags: forms, seo, caching, security, newsletter
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.19.23-beta
+Stable tag: 0.19.24-beta
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -77,6 +77,9 @@ Form entries, subscribers, orders, products, form definitions, the SMTP log, you
 Yes, that's what Pro is built on. Pro registers its own modules into this plugin's registry, so they appear on the same Modules screen and behave the same way.
 
 == Changelog ==
+
+= 0.19.24-beta =
+* Maintenance release, in lock step with the Perdita theme and Perdita Pro. Nothing changes in Core.
 
 = 0.19.23-beta =
 * New: in Switch to Perdita, you can import your Contact Form 7 forms into Perdita Forms, with their fields, notification email, and messages. After you turn Contact Form 7 off, your visitors still see each form wherever you used its old shortcode or block, and you can undo the import.
