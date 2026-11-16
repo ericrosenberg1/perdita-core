@@ -61,6 +61,10 @@
  *                       plugin setting itself up again on Reactivate.
  *   reactivate_note()   One sentence shown after Reactivate when the plugin
  *                       doesn't come back exactly as it was, or ''.
+ *   before_undo( $snapshot )  Runs at the start of Undo, before the
+ *                       snapshot options go back. A source whose import
+ *                       made posts (Contact Form 7's forms) removes them
+ *                       here. $snapshot is Perdita_Switch::snapshot( id ).
  *   batch_keys()        Term meta keys a resumable batch reads, as
  *                       array( 'type' => 'term', 'keys' => string[] ), and
  *                       batch_step( $term_id ) to import one term. Undo
@@ -296,6 +300,15 @@ abstract class Perdita_Switch_Source {
 	 */
 	public function reactivate_note() {
 		return '';
+	}
+
+	/**
+	 * Runs at the start of Undo, before the snapshot options go back.
+	 *
+	 * @param array $snapshot Perdita_Switch::snapshot( id ).
+	 */
+	public function before_undo( array $snapshot ) {
+		unset( $snapshot );
 	}
 
 	/**

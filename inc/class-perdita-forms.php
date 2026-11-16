@@ -44,6 +44,9 @@ class Perdita_Forms {
 		add_action( 'rest_api_init', array( $this, 'routes' ) );
 		add_shortcode( 'perdita_form', array( $this, 'shortcode' ) );
 		add_filter( 'perdita_cache_exclude', array( $this, 'exclude_from_cache_if_has_form' ) );
+		// Contact Form 7 registers its shortcodes on plugins_loaded, so by
+		// init we know whether it still owns them.
+		add_action( 'init', array( $this, 'register_cf7_fallback' ), 20 );
 
 		if ( is_admin() ) {
 			add_action( 'admin_notices', array( __CLASS__, 'proxy_ip_notice' ) );
@@ -144,6 +147,145 @@ class Perdita_Forms {
 				'error'   => __( 'Something went wrong. Please check the form and try again.', 'perdita-core' ),
 			),
 		);
+	}
+
+	/**
+	 * Store a form config the way the form editor's save does: every field
+	 * needs a label and a known type, names are unique keys, and every
+	 * string goes through the same sanitizer the editor uses. Used by Switch
+	 * to Perdita, which offers a value only when this keeps it unchanged.
+	 *
+	 * @param array $cfg fields, email, messages.
+	 * @return array
+	 */
+	public static function sanitize_config( array $cfg ) {
+		$fields = array();
+		$used   = array();
+		foreach ( isset( $cfg['fields'] ) && is_array( $cfg['fields'] ) ? $cfg['fields'] : array() as $f ) {
+			if ( ! is_array( $f ) ) {
+				continue;
+			}
+			$label = sanitize_text_field( isset( $f['label'] ) ? (string) $f['label'] : '' );
+			$type  = isset( $f['type'] ) && array_key_exists( $f['type'], self::field_types() ) ? $f['type'] : 'text';
+			if ( '' === $label ) {
+				continue;
+			}
+			$name = sanitize_key( isset( $f['name'] ) ? (string) $f['name'] : '' );
+			if ( '' === $name ) {
+				$name = sanitize_key( str_replace( '-', '_', sanitize_title( $label ) ) );
+			}
+			while ( '' === $name || in_array( $name, $used, true ) ) {
+				$name .= '_' . ( count( $used ) + 1 );
+			}
+			$used[]  = $name;
+			$options = array();
+			foreach ( isset( $f['options'] ) && is_array( $f['options'] ) ? $f['options'] : array() as $opt ) {
+				$opt = sanitize_text_field( is_scalar( $opt ) ? (string) $opt : '' );
+				if ( '' !== $opt ) {
+					$options[] = $opt;
+				}
+			}
+			$fields[] = array(
+				'type'        => $type,
+				'label'       => $label,
+				'name'        => $name,
+				'required'    => ! empty( $f['required'] ),
+				'placeholder' => sanitize_text_field( isset( $f['placeholder'] ) ? (string) $f['placeholder'] : '' ),
+				'options'     => $options,
+			);
+		}
+		$email    = isset( $cfg['email'] ) && is_array( $cfg['email'] ) ? $cfg['email'] : array();
+		$messages = isset( $cfg['messages'] ) && is_array( $cfg['messages'] ) ? $cfg['messages'] : array();
+		return array(
+			'fields'   => $fields ? $fields : self::default_config()['fields'],
+			'email'    => array(
+				'to'      => sanitize_text_field( isset( $email['to'] ) ? (string) $email['to'] : get_option( 'admin_email' ) ),
+				'subject' => sanitize_text_field( isset( $email['subject'] ) ? (string) $email['subject'] : '' ),
+				'body'    => sanitize_textarea_field( isset( $email['body'] ) ? (string) $email['body'] : '' ),
+			),
+			'messages' => array(
+				'success' => sanitize_text_field( isset( $messages['success'] ) ? (string) $messages['success'] : '' ),
+				'error'   => sanitize_text_field( isset( $messages['error'] ) ? (string) $messages['error'] : '' ),
+			),
+		);
+	}
+
+	/**
+	 * Option: the Contact Form 7 forms Switch to Perdita imported, as
+	 * cf7 post id => array( id (Perdita form), hash, title ).
+	 */
+	const CF7_MAP_OPTION = 'perdita_forms_cf7_map';
+
+	/**
+	 * The imported Contact Form 7 forms.
+	 *
+	 * @return array
+	 */
+	public static function cf7_map() {
+		$map = get_option( self::CF7_MAP_OPTION, array() );
+		return is_array( $map ) ? $map : array();
+	}
+
+	/**
+	 * Once Contact Form 7 is off, answer its shortcodes with the Perdita
+	 * forms imported from it, so every page and block that embeds one keeps
+	 * a working form. Its block saves the same shortcode inside its markup.
+	 */
+	public function register_cf7_fallback() {
+		if ( shortcode_exists( 'contact-form-7' ) || ! self::cf7_map() ) {
+			return;
+		}
+		add_shortcode( 'contact-form-7', array( $this, 'cf7_shortcode' ) );
+	}
+
+	/**
+	 * Which imported Perdita form a [contact-form-7] tag means: its id
+	 * attribute is the form's hash (7 or more hex characters) or its post
+	 * id, and its title attribute is the fallback, the same order Contact
+	 * Form 7 looks them up in.
+	 *
+	 * @param array $atts Shortcode attributes.
+	 * @param array $map  cf7_map().
+	 * @return int Perdita form id, or 0.
+	 */
+	public static function cf7_target( $atts, array $map ) {
+		$atts  = is_array( $atts ) ? $atts : array();
+		$id    = isset( $atts['id'] ) ? trim( (string) $atts['id'] ) : '';
+		$title = isset( $atts['title'] ) ? trim( (string) $atts['title'] ) : '';
+		if ( preg_match( '/^[0-9a-f]{7,}$/', $id ) ) {
+			foreach ( $map as $row ) {
+				if ( is_array( $row ) && ! empty( $row['hash'] ) && 0 === strpos( (string) $row['hash'], $id ) ) {
+					return (int) $row['id'];
+				}
+			}
+		}
+		if ( ctype_digit( $id ) && isset( $map[ (int) $id ]['id'] ) ) {
+			return (int) $map[ (int) $id ]['id'];
+		}
+		if ( '' !== $title ) {
+			foreach ( $map as $row ) {
+				if ( is_array( $row ) && isset( $row['title'] ) && $title === (string) $row['title'] ) {
+					return (int) $row['id'];
+				}
+			}
+		}
+		return 0;
+	}
+
+	/**
+	 * The [contact-form-7] fallback. It renders through the [perdita_form]
+	 * shortcode, so every do_shortcode_tag filter on that tag (Forms Pro's
+	 * uploads and steps, a spam widget) runs on the old shortcode too.
+	 *
+	 * @param array|string $atts Attributes.
+	 * @return string
+	 */
+	public function cf7_shortcode( $atts ) {
+		$target = self::cf7_target( $atts, self::cf7_map() );
+		if ( ! $target ) {
+			return '';
+		}
+		return shortcode_exists( 'perdita_form' ) ? do_shortcode( '[perdita_form id="' . (int) $target . '"]' ) : $this->shortcode( array( 'id' => $target ) );
 	}
 
 	/**

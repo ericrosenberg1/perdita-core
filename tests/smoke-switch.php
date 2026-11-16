@@ -216,10 +216,10 @@ $pdsw_put  = static function ( $path, $body ) {
  * ============================================================= */
 
 $pdsw_all = Perdita_Switch::sources( true );
-$ok( 18 === count( $pdsw_all ), 'registry: Core registers 18 sources' );
+$ok( 19 === count( $pdsw_all ), 'registry: Core registers 19 sources' );
 $pdsw_bad_ok = true;
 foreach ( $pdsw_all as $pdsw_id => $pdsw_src ) {
-	if ( $pdsw_id !== $pdsw_src->id() || ! in_array( $pdsw_src->module(), array( 'caching', 'seo', 'smtp', 'analytics', 'security' ), true ) || ! $pdsw_src->plugin_files() ) {
+	if ( $pdsw_id !== $pdsw_src->id() || ! in_array( $pdsw_src->module(), array( 'caching', 'seo', 'smtp', 'analytics', 'security', 'forms' ), true ) || ! $pdsw_src->plugin_files() ) {
 		$pdsw_bad_ok = false;
 	}
 }

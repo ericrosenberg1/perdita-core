@@ -81,6 +81,7 @@ class Perdita_Switch {
 			'Perdita_Switch_Source_SCM'              => 'class-perdita-switch-source-scm.php',
 			'Perdita_Switch_Source_LLAR'             => 'class-perdita-switch-source-llar.php',
 			'Perdita_Switch_Source_Loginizer'        => 'class-perdita-switch-source-loginizer.php',
+			'Perdita_Switch_Source_Contact_Form_7'   => 'class-perdita-switch-source-contact-form-7.php',
 		);
 	}
 
@@ -424,6 +425,7 @@ class Perdita_Switch {
 		if ( $job && $job['source'] === $id && 'import' === $job['mode'] ) {
 			self::clear_job();
 		}
+		$source->before_undo( $snap );
 		foreach ( (array) $snap['options'] as $name => $was ) {
 			if ( ! empty( $was['exists'] ) ) {
 				update_option( $name, $was['value'] );
