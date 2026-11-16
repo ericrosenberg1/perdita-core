@@ -13,6 +13,8 @@
 
 defined( 'ABSPATH' ) || exit;
 
+require_once __DIR__ . '/class-perdita-switch-catalog.php';
+
 class Perdita_Switch_Admin {
 
 	const PAGE   = 'perdita-switch';
@@ -284,18 +286,45 @@ class Perdita_Switch_Admin {
 				$absent[] = $source->label();
 			}
 		}
+		// Every plugin only Perdita Pro imports from shows too: a locked card
+		// when it's installed, a name on the list below when it isn't.
+		$locked     = array();
+		$absent_pro = array();
+		foreach ( Perdita_Switch_Catalog::missing( $sources ) as $id => $entry ) {
+			if ( $entry['installed'] ) {
+				$locked[ $entry['module'] ][ $id ] = $entry;
+				if ( ! isset( $groups[ $entry['module'] ] ) ) {
+					$groups[ $entry['module'] ] = array();
+				}
+			} else {
+				$absent_pro[] = $entry['label'];
+			}
+		}
 		if ( ! $groups ) {
 			echo '<div class="pds-card"><p>' . esc_html__( 'You don\'t have any of the plugins you can switch from, or any settings they left, so you have nothing to switch.', 'perdita-core' ) . '</p></div>';
 		}
+		$pro_labels = Perdita_Switch_Catalog::module_labels();
+		$pro_state  = $locked ? Perdita_Switch_Catalog::pro_state() : '';
 		foreach ( $groups as $module => $cards ) {
-			echo '<h2 class="pds-group">' . esc_html( Perdita_Switch_Target::module_label( $module ) ) . '</h2>';
+			$heading = Perdita_Switch_Target::module_label( $module );
+			if ( $heading === $module && isset( $pro_labels[ $module ] ) ) {
+				$heading = $pro_labels[ $module ];
+			}
+			echo '<h2 class="pds-group">' . esc_html( $heading ) . '</h2>';
 			foreach ( $cards as $id => $card ) {
 				$this->render_card( $id, $card[0], $card[1], $card[2] );
+			}
+			foreach ( isset( $locked[ $module ] ) ? $locked[ $module ] : array() as $id => $entry ) {
+				$this->render_locked( $id, $entry, $pro_state );
 			}
 		}
 		if ( $absent ) {
 			/* translators: %s: comma-separated plugin names. */
 			echo '<p class="pds-meta">' . esc_html( sprintf( __( 'You can also switch from %s. You don\'t have any of those plugins installed.', 'perdita-core' ), implode( ', ', $absent ) ) ) . '</p>';
+		}
+		if ( $absent_pro ) {
+			/* translators: %s: comma-separated plugin names. */
+			echo '<p class="pds-meta">' . esc_html( sprintf( __( 'With Perdita Pro, you can also switch from %s.', 'perdita-core' ), implode( ', ', array_unique( $absent_pro ) ) ) ) . '</p>';
 		}
 		$this->render_backups();
 
@@ -450,6 +479,27 @@ class Perdita_Switch_Admin {
 		 * @param array                 $state  Its stored state (Perdita_Switch::state()).
 		 */
 		do_action( 'perdita_switch_card_after', $source, $state );
+		echo '</div>';
+	}
+
+	/**
+	 * A card for a plugin only Perdita Pro imports from: what Pro brings
+	 * over and what to do to run it. No buttons, since free has no import
+	 * for it.
+	 *
+	 * @param string $id    Catalog id.
+	 * @param array  $entry Perdita_Switch_Catalog::missing() entry.
+	 * @param string $state Perdita_Switch_Catalog::pro_state().
+	 */
+	private function render_locked( $id, array $entry, $state ) {
+		$action = Perdita_Switch_Catalog::pro_action( $state );
+		echo '<div class="pds-card pds-locked" id="pds-' . esc_attr( $id ) . '">';
+		echo '<div class="pds-head"><h3>' . esc_html( $entry['label'] ) . '</h3>';
+		echo '<span class="perdita-badge' . ( $entry['active'] ? ' is-warn' : '' ) . '">' . esc_html( $entry['active'] ? __( 'Active', 'perdita-core' ) : __( 'Inactive', 'perdita-core' ) ) . '</span>';
+		echo '<span class="perdita-badge">' . esc_html__( 'Perdita Pro', 'perdita-core' ) . '</span>';
+		echo '</div>';
+		echo '<p>' . esc_html( $entry['covers'] ) . '</p>';
+		echo '<p class="pds-meta">' . esc_html( $action['text'] ) . ' <a href="' . esc_url( $action['url'] ) . '">' . esc_html( $action['link'] ) . '</a></p>';
 		echo '</div>';
 	}
 

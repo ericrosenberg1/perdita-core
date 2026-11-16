@@ -4,7 +4,7 @@ Tags: forms, seo, caching, security, newsletter
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.19.22-beta
+Stable tag: 0.19.23-beta
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -33,7 +33,7 @@ Everything is a module, and a module that's off costs you one option read. Its c
 * **Search Console.** Clicks, impressions, and top queries in wp-admin, using your own Google Cloud OAuth app.
 * **PageSpeed Insights.** Core Web Vitals for your homepage, straight from Google, so you can see what a setting actually did.
 * **MCP server.** Let Claude, ChatGPT, or any MCP client manage posts and pages over a secure API instead of only through wp-admin.
-* **Switch to Perdita.** Bring your settings over from WP Super Cache, W3 Total Cache, WP Fastest Cache, LiteSpeed Cache, Cache Enabler, Yoast SEO, All in One SEO, Rank Math, SEOPress, WP Mail SMTP, FluentSMTP, Post SMTP, Site Kit, MonsterInsights, GA Google Analytics, Simple Consent Manager, Limit Login Attempts Reloaded, or Loginizer. You can preview every setting first, undo an import, and deactivate the old plugin when you're ready. For a caching plugin, you can also clear out what it leaves behind, its drop-in and its .htaccess rules, and you get a backup copy of each file in a protected folder first. `wp perdita switch` gives you the same tools on the command line.
+* **Switch to Perdita.** Bring your settings over from WP Super Cache, W3 Total Cache, WP Fastest Cache, LiteSpeed Cache, Cache Enabler, Yoast SEO, All in One SEO, Rank Math, SEOPress, WP Mail SMTP, FluentSMTP, Post SMTP, Site Kit, MonsterInsights, GA Google Analytics, Simple Consent Manager, Limit Login Attempts Reloaded, Loginizer, or Contact Form 7. You can preview every setting first, undo an import, and deactivate the old plugin when you're ready. For a caching plugin, you can also clear out what it leaves behind, its drop-in and its .htaccess rules, and you get a backup copy of each file in a protected folder first. `wp perdita switch` gives you the same tools on the command line. On the same screen, you can see the plugins you can switch from with Perdita Pro.
 
 **Defaults**
 
@@ -77,6 +77,10 @@ Form entries, subscribers, orders, products, form definitions, the SMTP log, you
 Yes, that's what Pro is built on. Pro registers its own modules into this plugin's registry, so they appear on the same Modules screen and behave the same way.
 
 == Changelog ==
+
+= 0.19.23-beta =
+* New: in Switch to Perdita, you can import your Contact Form 7 forms into Perdita Forms, with their fields, notification email, and messages. After you turn Contact Form 7 off, your visitors still see each form wherever you used its old shortcode or block, and you can undo the import.
+* New: in Switch to Perdita, you can see every plugin you can switch from with Perdita Pro, and what you need to run each import.
 
 = 0.19.22-beta =
 * Fix: you get your page cache's daily cleanup on a site that updates itself, with no wp-admin visit needed.

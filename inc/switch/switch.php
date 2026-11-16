@@ -14,6 +14,7 @@ require_once __DIR__ . '/class-perdita-switch-php-config.php';
 require_once __DIR__ . '/class-perdita-switch-backups.php';
 require_once __DIR__ . '/class-perdita-switch-leftovers.php';
 require_once __DIR__ . '/class-perdita-switch.php';
+require_once __DIR__ . '/class-perdita-switch-catalog.php';
 
 add_action(
 	Perdita_Switch::CRON,

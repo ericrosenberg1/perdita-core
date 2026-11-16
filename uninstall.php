@@ -74,6 +74,8 @@ function perdita_core_uninstall_options() {
 		'perdita_cache_preload',     // Preload progress.
 		// perdita_forms_settings is kept, like perdita_seo: notification recipients and
 		// spam-provider configuration are site configuration, not plugin bookkeeping.
+		// perdita_forms_cf7_map is kept with the forms: old [contact-form-7] shortcodes
+		// in posts find their imported form through it after a reinstall.
 		'perdita_mcp_settings',
 		'perdita_pagespeed_settings',
 		'perdita_related_posts_settings',

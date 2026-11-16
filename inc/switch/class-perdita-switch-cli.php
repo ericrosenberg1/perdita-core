@@ -43,6 +43,21 @@ class Perdita_Switch_CLI {
 				'has_settings' => $det['has_settings'] ? 'yes' : 'no',
 				'imported'     => $state['imported'] ? gmdate( 'Y-m-d H:i', (int) $state['imported'] ) : '',
 				'undo'         => Perdita_Switch::snapshot( $id ) ? 'yes' : 'no',
+				'needs_pro'    => 'no',
+			);
+		}
+		// The plugins only Perdita Pro imports from, while Pro isn't running them.
+		foreach ( Perdita_Switch_Catalog::missing( Perdita_Switch::sources() ) as $id => $entry ) {
+			$rows[] = array(
+				'source'       => $id,
+				'plugin'       => $entry['label'],
+				'module'       => $entry['module'],
+				'installed'    => $entry['installed'] ? 'yes' : 'no',
+				'active'       => $entry['active'] ? 'yes' : 'no',
+				'has_settings' => '',
+				'imported'     => '',
+				'undo'         => 'no',
+				'needs_pro'    => 'yes',
 			);
 		}
 		WP_CLI\Utils\format_items( isset( $assoc['format'] ) ? $assoc['format'] : 'table', $rows, array_keys( $rows[0] ) );
@@ -148,6 +163,11 @@ class Perdita_Switch_CLI {
 	private static function source( array $args ) {
 		$id     = isset( $args[0] ) ? sanitize_key( $args[0] ) : '';
 		$source = Perdita_Switch::get( $id );
+		$pro = Perdita_Switch_Catalog::pro_sources();
+		if ( ! $source && isset( $pro[ $id ] ) ) {
+			$action = Perdita_Switch_Catalog::pro_action( Perdita_Switch_Catalog::pro_state() );
+			WP_CLI::error( $pro[ $id ]['covers'] . ' ' . $action['text'] );
+		}
 		if ( ! $source ) {
 			/* translators: %s: source id. */
 			WP_CLI::error( sprintf( __( 'You can\'t switch from "%s". Run wp perdita switch list for the ids.', 'perdita-core' ), $id ) );
