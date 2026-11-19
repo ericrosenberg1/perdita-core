@@ -788,3 +788,22 @@ foreach ( $pdsw_live_was as $pdsw_path => $pdsw_md5 ) {
 $ok( $pdsw_live_same, 'switch: the live wp-config.php and .htaccess were never touched (every edit went to a temp copy)' );
 remove_filter( 'perdita_switch_wp_config_path', $pdsw_cfg_filter );
 remove_filter( 'perdita_switch_htaccess_path', $pdsw_ht_filter );
+
+// Singular and plural forms use each placeholder the same number of times, so a translator never loses a name.
+$pdsw_plural_ok = true;
+foreach ( glob( PERDITA_CORE_DIR . 'inc/switch/*.php' ) as $pdsw_src ) {
+	preg_match_all( "/_n\(\s*'((?:[^'\\\\]|\\\\.)*)',\s*'((?:[^'\\\\]|\\\\.)*)'/", (string) file_get_contents( $pdsw_src ), $pdsw_pairs, PREG_SET_ORDER ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+	foreach ( $pdsw_pairs as $pdsw_pair ) {
+		preg_match_all( '/%\d+\$[sd]/', $pdsw_pair[1], $pdsw_one );
+		preg_match_all( '/%\d+\$[sd]/', $pdsw_pair[2], $pdsw_many );
+		$pdsw_one  = $pdsw_one[0];
+		$pdsw_many = $pdsw_many[0];
+		sort( $pdsw_one );
+		sort( $pdsw_many );
+		if ( $pdsw_one !== $pdsw_many ) {
+			$pdsw_plural_ok = false;
+			echo '      mismatched: ' . basename( $pdsw_src ) . ': ' . $pdsw_pair[2] . "\n";
+		}
+	}
+}
+$ok( $pdsw_plural_ok, 'i18n: every _n() pair in the switch code uses the same placeholders in both forms' );
