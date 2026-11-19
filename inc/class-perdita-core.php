@@ -446,7 +446,15 @@ final class Perdita_Core {
 	 * Nothing else: a deactivate/reactivate cycle has to be lossless, so no
 	 * option, table, or stored entry is touched here. Removal is uninstall.php.
 	 */
-	public static function on_deactivate() {
+	public static function on_deactivate( $network_wide = false ) {
+		if ( $network_wide && is_multisite() ) {
+			foreach ( get_sites( array( 'fields' => 'ids', 'number' => 0 ) ) as $site_id ) {
+				switch_to_blog( $site_id );
+				self::on_deactivate( false );
+				restore_current_blog();
+			}
+			return;
+		}
 		foreach ( self::CRON_HOOKS as $hook ) {
 			wp_clear_scheduled_hook( $hook );
 		}
