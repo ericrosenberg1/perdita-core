@@ -185,6 +185,13 @@ class Perdita_Caching {
 	private $post_changes = array();
 
 	/**
+	 * Products a WooCommerce write already purged on this request.
+	 *
+	 * @var array<int,bool>
+	 */
+	private $woo_purged = array();
+
+	/**
 	 * File in the cache dir holding the time of the last full purge.
 	 */
 	const PURGE_STAMP = 'purged-all.stamp';
@@ -259,6 +266,13 @@ class Perdita_Caching {
 		add_action( 'pre_post_update', array( $this, 'on_post_updated' ), 10, 2 );
 		add_action( 'transition_post_status', array( $this, 'on_transition_post_status' ), 10, 3 );
 		add_action( 'save_post', array( $this, 'on_save_post' ), 10, 2 );
+		// WooCommerce writes a product's price, sale, stock and stock status
+		// through its CRUD classes, REST API, importer and stock reductions, none
+		// of which call wp_update_post() or fire save_post, so a cached product
+		// page and shop listing kept the old price and "In stock".
+		foreach ( array( 'woocommerce_update_product', 'woocommerce_update_product_variation', 'woocommerce_product_set_stock', 'woocommerce_variation_set_stock', 'woocommerce_product_set_stock_status', 'woocommerce_variation_set_stock_status' ) as $woo_hook ) {
+			add_action( $woo_hook, array( $this, 'on_woo_product_change' ), 10, 1 );
+		}
 		add_action( 'before_delete_post', array( $this, 'on_before_delete_post' ) );
 		add_action( 'deleted_post', array( $this, 'on_deleted_post' ) );
 		add_action( 'set_object_terms', array( $this, 'on_set_object_terms' ), 10, 6 );
@@ -2045,6 +2059,38 @@ class Perdita_Caching {
 	}
 
 	/**
+	 * A WooCommerce product or variation changed without a save_post.
+	 *
+	 * @param int|object $product Product id, or the product object that stock hooks pass.
+	 */
+	public function on_woo_product_change( $product ) {
+		$id = is_object( $product ) && method_exists( $product, 'get_id' ) ? (int) $product->get_id() : (int) $product;
+		if ( $id < 1 ) {
+			return;
+		}
+		$parent = (int) wp_get_post_parent_id( $id );
+		$post   = get_post( $parent > 0 && 'product_variation' === get_post_type( $id ) ? $parent : $id );
+		if ( ! $post instanceof WP_Post || isset( $this->woo_purged[ $post->ID ] ) ) {
+			return;
+		}
+		// One sale fires several stock hooks for the same product.
+		$this->woo_purged[ $post->ID ] = true;
+		$settings = self::settings();
+		if ( 'smart' !== $settings['purge_on_save'] ) {
+			$this->purge_all();
+			return;
+		}
+		// A price or stock write leaves the post's status, title and terms
+		// alone, so smart mode clears the product's own pages and lists. A
+		// product that isn't public may have just left the shop, so all goes.
+		if ( 'publish' === $post->post_status && is_post_type_viewable( $post->post_type ) ) {
+			self::purge_urls( self::urls_for_post( $post ) );
+		} else {
+			$this->purge_all();
+		}
+	}
+
+	/**
 	 * Purge after a post save. Autosaves, revisions and auto-drafts change
 	 * nothing a visitor sees.
 	 *
@@ -3784,6 +3830,9 @@ class Perdita_Caching {
 	 * @return string
 	 */
 	public static function nginx_snippet() {
+		$up   = wp_upload_dir( null, false );
+		$path = isset( $up['baseurl'] ) ? trim( (string) wp_parse_url( $up['baseurl'], PHP_URL_PATH ), '/' ) : '';
+		$path = '' === $path ? 'wp-content/uploads' : $path;
 		return implode(
 			"\n",
 			array(
@@ -3797,6 +3846,12 @@ class Perdita_Caching {
 				'    expires 1y;',
 				'    add_header Cache-Control "public, immutable";',
 				'    access_log off;',
+				'}',
+				'',
+				'# Apache blocks the cache folder with its .htaccess. nginx needs this rule, since',
+				'# a signed-in visitor\'s saved page sits there under a name only its owner should know.',
+				'location ^~ /' . $path . '/perdita-cache/ {',
+				'    return 404;',
 				'}',
 			)
 		);
