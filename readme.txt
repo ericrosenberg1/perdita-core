@@ -4,7 +4,7 @@ Tags: forms, seo, caching, security, newsletter
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.19.26-beta
+Stable tag: 0.19.27-beta
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -77,6 +77,13 @@ Form entries, subscribers, orders, products, form definitions, the SMTP log, you
 Yes, that's what Pro is built on. Pro registers its own modules into this plugin's registry, so they appear on the same Modules screen and behave the same way.
 
 == Changelog ==
+
+= 0.19.27-beta =
+* Fix: in Switch to Perdita, you get your FluentSMTP password when FluentSMTP stored the password encrypted.
+* Fix: in Switch to Perdita, you keep Yoast's title variables, separators, and verification codes.
+* Fix: in Switch to Perdita, you keep Rank Math's robots limits as you set them in Rank Math, so you never lose your search snippets to a limit you had switched off.
+* Fix: in Switch to Perdita, you get the right cache exclusions, CDN exclusions, and phone copy from W3 Total Cache, WP Fastest Cache, and Cache Enabler.
+* Fix: in Switch to Perdita, you get Contact Form 7 recipients and labels without a stray comma or "(required)".
 
 = 0.19.26-beta =
 * Fix: when WooCommerce changes a product's price or stock, visitors get the new price and stock right away instead of a cached page.
