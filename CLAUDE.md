@@ -75,7 +75,7 @@ Perdita, Switch to Perdita (`admin.php?page=perdita-switch`, manage_options) and
 
 Fixes merged to main since the last release go here, one `readme.txt` line each. At the next lock-step bump, move them into that version's changelog entry and empty this list.
 
-* Fix: in Sales, a buyer gets one receipt when Stripe delivers the same paid event twice at once.
+(empty since 0.19.25-beta)
 
 ## Tests
 
