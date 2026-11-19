@@ -132,6 +132,17 @@ abstract class Perdita_Switch_Source {
 	abstract public function label();
 
 	/**
+	 * The plugin's name on the screen's list of plugins you could switch
+	 * from. A card for one part of a plugin gives that plugin's name, and a
+	 * card that covers several plugins gives '' to stay off the list.
+	 *
+	 * @return string
+	 */
+	public function plugin_name() {
+		return $this->label();
+	}
+
+	/**
 	 * Plugin basenames (folder/file.php).
 	 *
 	 * @return string[]

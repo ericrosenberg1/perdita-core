@@ -172,9 +172,12 @@ abstract class Perdita_Switch_Caching_Source extends Perdita_Switch_Source {
 	 * @param string   $setting  Setting name.
 	 * @param string[] $patterns Patterns.
 	 * @param string[] $ignore   Default patterns that need no import.
+	 * @param bool|null $anchored Whether every pattern starts at the beginning of the path (true), or
+	 *                           none does (false). Null reads each pattern: only a leading ^ anchors it.
 	 */
-	protected function offer_path_patterns( $setting, array $patterns, array $ignore = array() ) {
-		$paths = array();
+	protected function offer_path_patterns( $setting, array $patterns, array $ignore = array(), $anchored = null ) {
+		$paths      = array();
+		$unanchored = false;
 		foreach ( $patterns as $pattern ) {
 			if ( ! is_scalar( $pattern ) || '' === trim( (string) $pattern ) ) {
 				continue;
@@ -192,10 +195,19 @@ abstract class Perdita_Switch_Caching_Source extends Perdita_Switch_Source {
 				$this->skip( $setting, $pattern, __( 'This matched anywhere in an address. In Perdita, you match a path from its start, so add the full path on Perdita, Caching.', 'perdita-core' ), __( 'Never cache these paths', 'perdita-core' ) );
 				continue;
 			}
+			// WP Super Cache, W3 Total Cache, and LiteSpeed Cache match a
+			// fragment anywhere in the address unless it starts with ^.
+			if ( null === $anchored ? '^' !== substr( $pattern, 0, 1 ) : ! $anchored ) {
+				$unanchored = true;
+			}
 			$paths[] = $path;
 		}
 		if ( $paths ) {
-			$this->offer( $setting, $paths, 'exclude_paths', $paths, __( 'Never cache these paths', 'perdita-core' ) );
+			$opts = array();
+			if ( $unanchored ) {
+				$opts['note'] = __( 'In that plugin, you excluded /shop/cart/ too when you listed /cart/. In Perdita, you match a path from its start, so add any other path you need on Perdita, Caching.', 'perdita-core' );
+			}
+			$this->offer( $setting, $paths, 'exclude_paths', $paths, __( 'Never cache these paths', 'perdita-core' ), $opts );
 		}
 	}
 

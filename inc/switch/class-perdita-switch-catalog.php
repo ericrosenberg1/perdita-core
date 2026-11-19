@@ -42,7 +42,8 @@ class Perdita_Switch_Catalog {
 	/**
 	 * Every Pro-only source.
 	 *
-	 * @return array id => label, module, plugins (basenames), covers (what Pro brings over).
+	 * @return array id => label, module, plugins (basenames), covers (what Pro brings over),
+	 *               plugin (the name on the screen's list, or '' for a card that covers several plugins).
 	 */
 	public static function pro_sources() {
 		$speed  = __( 'Perdita Pro brings over its minify, lazy load, preload, and other page speed settings.', 'perdita-core' );
@@ -55,10 +56,10 @@ class Perdita_Switch_Catalog {
 			'wp-rocket'                 => array( 'WP Rocket', 'caching-pro', array( 'wp-rocket/wp-rocket.php' ), $speed ),
 			'autoptimize'               => array( 'Autoptimize', 'caching-pro', array( 'autoptimize/autoptimize.php' ), $speed ),
 			'perfmatters'               => array( 'Perfmatters', 'caching-pro', array( 'perfmatters/perfmatters.php' ), $speed ),
-			'w3-total-cache-speed'      => array( 'W3 Total Cache, page optimization', 'caching-pro', array( 'w3-total-cache/w3-total-cache.php' ), $speed ),
-			'wp-fastest-cache-speed'    => array( 'WP Fastest Cache, page optimization', 'caching-pro', array( 'wp-fastest-cache/wpFastestCache.php' ), $speed ),
-			'litespeed-cache-speed'     => array( 'LiteSpeed Cache, page optimization', 'caching-pro', array( 'litespeed-cache/litespeed-cache.php' ), $speed ),
-			'cache-enabler-speed'       => array( 'Cache Enabler, page optimization', 'caching-pro', array( 'cache-enabler/cache-enabler.php' ), $speed ),
+			'w3-total-cache-speed'      => array( 'W3 Total Cache, page optimization', 'caching-pro', array( 'w3-total-cache/w3-total-cache.php' ), $speed, 'W3 Total Cache' ),
+			'wp-fastest-cache-speed'    => array( 'WP Fastest Cache, page optimization', 'caching-pro', array( 'wp-fastest-cache/wpFastestCache.php' ), $speed, 'WP Fastest Cache' ),
+			'litespeed-cache-speed'     => array( 'LiteSpeed Cache, page optimization', 'caching-pro', array( 'litespeed-cache/litespeed-cache.php' ), $speed, 'LiteSpeed Cache' ),
+			'cache-enabler-speed'       => array( 'Cache Enabler, page optimization', 'caching-pro', array( 'cache-enabler/cache-enabler.php' ), $speed, 'Cache Enabler' ),
 			'ewww'                      => array( 'EWWW Image Optimizer', 'media-pro', array( 'ewww-image-optimizer/ewww-image-optimizer.php', 'ewww-image-optimizer-cloud/ewww-image-optimizer-cloud.php' ), $images ),
 			'shortpixel'                => array( 'ShortPixel', 'media-pro', array( 'shortpixel-image-optimiser/wp-shortpixel.php' ), $images ),
 			'imagify'                   => array( 'Imagify', 'media-pro', array( 'imagify/imagify.php' ), $images ),
@@ -67,16 +68,16 @@ class Perdita_Switch_Catalog {
 			'antispam-bee'              => array( 'Antispam Bee', 'spam-pro', array( 'antispam-bee/antispam_bee.php' ), $spam ),
 			'advanced-google-recaptcha' => array( 'Advanced Google reCAPTCHA', 'spam-pro', array( 'advanced-google-recaptcha/advanced-google-recaptcha.php' ), $spam ),
 			'simple-google-recaptcha'   => array( 'Simple Google reCAPTCHA', 'spam-pro', array( 'simple-google-recaptcha/simple-google-recaptcha.php' ), $spam ),
-			'seo-pro-posts'             => array( 'Each post\'s own SEO fields', 'seo-pro', $seo, __( 'Perdita Pro brings over each post\'s SEO title, description, and social fields.', 'perdita-core' ) ),
+			'seo-pro-posts'             => array( 'Each post\'s own SEO fields', 'seo-pro', $seo, __( 'Perdita Pro brings over each post\'s SEO title, description, and social fields.', 'perdita-core' ), '' ),
 			'redirection'               => array( 'Redirection', 'seo-pro', array( 'redirection/redirection.php' ), __( 'Perdita Pro brings over your redirects.', 'perdita-core' ) ),
-			'seo-pro-redirects'         => array( 'Redirects from SEO plugins', 'seo-pro', array( 'wordpress-seo-premium/wp-seo-premium.php', 'seo-by-rank-math/rank-math.php', 'seo-by-rank-math-pro/rank-math-pro.php', 'wp-seopress-pro/seopress-pro.php', 'wp-seopress/seopress.php', 'all-in-one-seo-pack-pro/all_in_one_seo_pack.php' ), __( 'Perdita Pro brings over the redirects you made in your SEO plugin.', 'perdita-core' ) ),
-			'fluent-smtp-failover'      => array( 'FluentSMTP fallback connection', 'smtp-pro', array( 'fluent-smtp/fluent-smtp.php' ), __( 'Perdita Pro brings over the fallback connection, so mail goes out when the first one fails.', 'perdita-core' ) ),
+			'seo-pro-redirects'         => array( 'Redirects from SEO plugins', 'seo-pro', array( 'wordpress-seo-premium/wp-seo-premium.php', 'seo-by-rank-math/rank-math.php', 'seo-by-rank-math-pro/rank-math-pro.php', 'wp-seopress-pro/seopress-pro.php', 'wp-seopress/seopress.php', 'all-in-one-seo-pack-pro/all_in_one_seo_pack.php' ), __( 'Perdita Pro brings over the redirects you made in your SEO plugin.', 'perdita-core' ), '' ),
+			'fluent-smtp-failover'      => array( 'FluentSMTP fallback connection', 'smtp-pro', array( 'fluent-smtp/fluent-smtp.php' ), __( 'Perdita Pro brings over the fallback connection, so mail goes out when the first one fails.', 'perdita-core' ), 'FluentSMTP' ),
 			'wordfence'                 => array( 'Wordfence', 'security-pro', array( 'wordfence/wordfence.php' ), $secure ),
 			'solid-security'            => array( 'Solid Security', 'security-pro', array( 'better-wp-security/better-wp-security.php', 'ithemes-security-pro/ithemes-security-pro.php' ), $secure ),
 			'aios'                      => array( 'All In One WP Security', 'security-pro', array( 'all-in-one-wp-security-and-firewall/wp-security.php' ), $secure ),
 			'updraftplus'               => array( 'UpdraftPlus', 'backups-pro', array( 'updraftplus/updraftplus.php' ), $backup ),
 			'backwpup'                  => array( 'BackWPup', 'backups-pro', array( 'backwpup/backwpup.php', 'backwpup-pro/backwpup.php' ), $backup ),
-			'contact-form-7-pro'        => array( 'Contact Form 7, uploads and autoresponder', 'forms-pro', array( 'contact-form-7/wp-contact-form-7.php' ), __( 'Perdita Pro brings over file upload fields and the second mail, Contact Form 7\'s autoresponder.', 'perdita-core' ) ),
+			'contact-form-7-pro'        => array( 'Contact Form 7, uploads and autoresponder', 'forms-pro', array( 'contact-form-7/wp-contact-form-7.php' ), __( 'Perdita Pro brings over file upload fields and the second mail, Contact Form 7\'s autoresponder.', 'perdita-core' ), 'Contact Form 7' ),
 		);
 		$out = array();
 		foreach ( $list as $id => $row ) {
@@ -85,6 +86,7 @@ class Perdita_Switch_Catalog {
 				'module'  => $row[1],
 				'plugins' => $row[2],
 				'covers'  => $row[3],
+				'plugin'  => isset( $row[4] ) ? $row[4] : $row[0],
 			);
 		}
 		return $out;

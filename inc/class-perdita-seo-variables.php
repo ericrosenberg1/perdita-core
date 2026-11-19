@@ -182,6 +182,68 @@ class Perdita_SEO_Variables {
 		return $unknown ? null : (string) $out;
 	}
 
+	/**
+	 * Yoast SEO variables and the Perdita token each one means. Yoast writes
+	 * them as %%name%%, with two percent signs on each side.
+	 *
+	 * @return array<string,string> Yoast variable name => Perdita token.
+	 */
+	public static function yoast_var_map() {
+		return array(
+			'sitename'         => '%sitename%',
+			'sitedesc'         => '%tagline%',
+			'sep'              => '%sep%',
+			'title'            => '%title%',
+			'excerpt'          => '%excerpt%',
+			'excerpt_only'     => '%excerpt%',
+			'category'         => '%category%',
+			'primary_category' => '%category%',
+			'tag'              => '%tag%',
+			'name'             => '%author%',
+			'term_title'       => '%term_title%',
+			'term_description' => '%term_description%',
+			'searchphrase'     => '%search_term%',
+			'page'             => '%page%',
+			'pt_single'        => '%post_type_singular%',
+			'pt_plural'        => '%post_type_plural%',
+			'currentyear'      => '%currentyear%',
+			'currentmonth'     => '%currentmonth%',
+			'currentdate'      => '%currentdate%',
+		);
+	}
+
+	/**
+	 * Translate a Yoast SEO title or description into a Perdita template, so
+	 * "%%sitename%% %%sep%% %%sitedesc%%" imports as "%sitename% %sep% %tagline%".
+	 * Perdita reads one percent sign on each side, so an untranslated Yoast
+	 * variable prints as "%Site name%". A variable with no twin returns null and
+	 * the caller keeps Perdita's own default.
+	 *
+	 * @param string $text Yoast value.
+	 * @return string|null Perdita template, or null when a variable can't be translated.
+	 */
+	public static function from_yoast( $text ) {
+		$text = (string) $text;
+		if ( false === strpos( $text, '%%' ) ) {
+			return $text;
+		}
+		$map     = self::yoast_var_map();
+		$unknown = false;
+		$out     = preg_replace_callback(
+			'/%%([a-z0-9_]+)%%/i',
+			function ( $m ) use ( $map, &$unknown ) {
+				$key = strtolower( $m[1] );
+				if ( isset( $map[ $key ] ) ) {
+					return $map[ $key ];
+				}
+				$unknown = true;
+				return $m[0];
+			},
+			$text
+		);
+		return $unknown ? null : (string) $out;
+	}
+
 	/* ---------- token resolvers ---------- */
 
 	/**

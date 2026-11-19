@@ -85,6 +85,7 @@ $pdcf_tags    = Perdita_Switch_Source_Contact_Form_7::parse_form( $pdcf_default 
 $ok( 5 === count( $pdcf_tags ) && 'your-name' === $pdcf_tags[0]['name'] && $pdcf_tags[0]['required'] && 'Your name' === $pdcf_tags[0]['label'], 'cf7 parse: the default form gives five tags, the first a required your-name labelled "Your name"' );
 $ok( 'Your message' === $pdcf_tags[3]['label'] && ! $pdcf_tags[3]['required'] && 'submit' === $pdcf_tags[4]['basetype'] && '' === $pdcf_tags[4]['name'], 'cf7 parse: "(optional)" comes out of the label, and submit has no name' );
 $ok( array( 'autocomplete:name' ) === $pdcf_tags[0]['options'], 'cf7 parse: options after the name stay options' );
+$ok( 'Your email' === Perdita_Switch_Source_Contact_Form_7::label_from( '<label> Your email (required)' ), 'cf7 parse: "(required)" comes out of the label too, since Perdita marks required fields itself' );
 $pdcf_tags = Perdita_Switch_Source_Contact_Form_7::parse_form( "Phone<br />\n[tel your-phone]\n[[text escaped]]\n[select* service first_as_label \"Pick one\" \"Design|design\" \"Hosting\"]\n[acceptance terms] I agree. [/acceptance]" );
 $ok( 3 === count( $pdcf_tags ) && 'Phone' === $pdcf_tags[0]['label'], 'cf7 parse: a <br> line labels the tag under it, and [[text escaped]] is skipped as Contact Form 7 skips it' );
 $ok( array( 'Pick one', 'Design|design', 'Hosting' ) === $pdcf_tags[1]['values'] && 'I agree.' === $pdcf_tags[2]['content'], 'cf7 parse: quoted values and an acceptance tag\'s text come through' );
@@ -121,7 +122,9 @@ $pdcf_mail   = array(
 	'subject'            => '[_site_title] "[your-subject]"',
 	'sender'             => '[_site_title] <wordpress@example.test>',
 	'body'               => "From: [your-name] <[your-email]>\nService: [service]\nBrief: [brief]\n-- [_site_title]",
-	'recipient'          => 'sales@example.com, [_site_admin_email]',
+	// [brief] is a file field that doesn't come over, so its tag drops out
+	// and the recipient list must not end on a stray comma.
+	'recipient'          => 'sales@example.com, [_site_admin_email], [brief]',
 	'additional_headers' => 'Reply-To: [your-email]',
 	'attachments'        => '',
 	'use_html'           => 0,

@@ -53,6 +53,20 @@ class Perdita_Switch_Source_FluentSMTP extends Perdita_Switch_SMTP_Source {
 		return '' === $salt ? $plain : substr( $plain, 0, -strlen( $salt ) );
 	}
 
+	/**
+	 * Whether FluentSMTP stored this connection's secrets encrypted. It keeps
+	 * use_encrypt at the top of fluentmail-settings (not under misc), and a
+	 * connection can opt out with disable_encryption.
+	 *
+	 * @param array $o Option value.
+	 * @param array $p One connection's provider_settings.
+	 * @return bool
+	 */
+	public static function encrypts( array $o, array $p ) {
+		$on = ! empty( $o['use_encrypt'] ) || ( isset( $o['misc']['use_encrypt'] ) && 'yes' === $o['misc']['use_encrypt'] );
+		return $on && 'yes' !== self::val( $p, 'disable_encryption' );
+	}
+
 	public function plan() {
 		$this->begin();
 		$o     = self::array_option( 'fluentmail-settings' );
@@ -63,7 +77,7 @@ class Perdita_Switch_Source_FluentSMTP extends Perdita_Switch_SMTP_Source {
 		$default = isset( $o['misc']['default_connection'] ) && is_scalar( $o['misc']['default_connection'] ) ? (string) $o['misc']['default_connection'] : '';
 		$conn    = isset( $conns[ $default ] ) && is_array( $conns[ $default ] ) ? $conns[ $default ] : reset( $conns );
 		$p       = is_array( $conn ) && isset( $conn['provider_settings'] ) && is_array( $conn['provider_settings'] ) ? $conn['provider_settings'] : array();
-		$encrypt = isset( $o['misc']['use_encrypt'] ) && 'yes' === $o['misc']['use_encrypt'];
+		$encrypt = self::encrypts( $o, $p );
 
 		$provider = (string) self::val( $p, 'provider' );
 		$m        = array(

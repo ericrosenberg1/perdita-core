@@ -64,16 +64,22 @@ class Perdita_Switch_Leftovers {
 		$body     = '' !== $htaccess && is_readable( $htaccess ) ? (string) file_get_contents( $htaccess ) : ''; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- local file.
 		foreach ( $markers as $marker ) {
 			if ( '' !== $body && preg_match( '/^[ \t]*# BEGIN ' . preg_quote( (string) $marker, '/' ) . '[ \t]*$/m', $body ) ) {
+				// A plugin that cleans up on deactivation leaves its markers
+				// and comment lines behind with no rule between them.
+				$empty = self::block_is_empty( $body, (string) $marker );
 				$out[] = array(
 					'id'        => 'htaccess:' . $marker,
 					/* translators: %s: marker name. */
 					'label'     => sprintf( __( '.htaccess block "%s"', 'perdita-core' ), $marker ),
-					/* translators: %s: plugin name. */
-					'detail'    => sprintf( __( 'Rules from %s. While they stay in .htaccess, visitors can keep getting that plugin\'s old cached files.', 'perdita-core' ), $source->label() ),
+					'detail'    => $empty
+						/* translators: %s: plugin name. */
+						? sprintf( __( 'You have an empty block from %s here, with no rules between its markers. You can remove the block to tidy .htaccess.', 'perdita-core' ), $source->label() )
+						/* translators: %s: plugin name. */
+						: sprintf( __( 'Rules from %s. While they stay in .htaccess, visitors can keep getting that plugin\'s old cached files.', 'perdita-core' ), $source->label() ),
 					'removable' => wp_is_writable( $htaccess ),
 					'line'      => '',
 					/* translators: %s: backup folder, such as wp-content/uploads/perdita-switch-backups/. */
-					'confirm'   => sprintf( __( 'Remove the block. You\'ll get a backup copy of .htaccess in %s first.', 'perdita-core' ), Perdita_Switch_Backups::display_dir() ),
+					'confirm'   => sprintf( __( 'Remove the block. You\'ll get a copy of the removed block in %s first.', 'perdita-core' ), Perdita_Switch_Backups::display_dir() ),
 				);
 			}
 		}
@@ -82,6 +88,27 @@ class Perdita_Switch_Leftovers {
 			$out[] = $wp_cache;
 		}
 		return $out;
+	}
+
+	/**
+	 * Whether a block holds only its markers, comments, and blank lines.
+	 *
+	 * @param string $body   File contents.
+	 * @param string $marker Marker name.
+	 * @return bool
+	 */
+	private static function block_is_empty( $body, $marker ) {
+		$lines = self::block_lines( $body, $marker );
+		if ( ! $lines ) {
+			return false;
+		}
+		foreach ( $lines as $line ) {
+			$trim = trim( $line );
+			if ( '' !== $trim && '#' !== $trim[0] ) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	/**

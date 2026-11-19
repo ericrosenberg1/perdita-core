@@ -140,14 +140,17 @@ class Perdita_Switch_Source_Rank_Math extends Perdita_Switch_SEO_Source {
 			$this->offer( __( 'Noindex paginated pages', 'perdita-core' ), self::on( $t['noindex_archive_subpages'] ), 'noindex_paginated', self::on( $t['noindex_archive_subpages'] ), self::target_label( 'noindex_paginated' ) );
 		}
 		if ( isset( $t['advanced_robots_global'] ) && is_array( $t['advanced_robots_global'] ) ) {
+			// Rank Math stores a directive its owner left switched off as false, which
+			// means "send no such directive". Perdita reads 0 as "no snippet" or
+			// "no video preview", so a switched-off directive stays out.
 			$adv = $t['advanced_robots_global'];
-			if ( isset( $adv['max-snippet'] ) ) {
+			if ( isset( $adv['max-snippet'] ) && false !== $adv['max-snippet'] && '' !== $adv['max-snippet'] ) {
 				$this->offer( 'max-snippet', $adv['max-snippet'], 'max_snippet', (int) $adv['max-snippet'], self::target_label( 'max_snippet' ) );
 			}
-			if ( isset( $adv['max-video-preview'] ) ) {
+			if ( isset( $adv['max-video-preview'] ) && false !== $adv['max-video-preview'] && '' !== $adv['max-video-preview'] ) {
 				$this->offer( 'max-video-preview', $adv['max-video-preview'], 'max_video_preview', (int) $adv['max-video-preview'], self::target_label( 'max_video_preview' ) );
 			}
-			if ( isset( $adv['max-image-preview'] ) ) {
+			if ( isset( $adv['max-image-preview'] ) && false !== $adv['max-image-preview'] && '' !== $adv['max-image-preview'] ) {
 				$this->offer( 'max-image-preview', $adv['max-image-preview'], 'max_image_preview', (string) $adv['max-image-preview'], self::target_label( 'max_image_preview' ) );
 			}
 		}
@@ -225,7 +228,7 @@ class Perdita_Switch_Source_Rank_Math extends Perdita_Switch_SEO_Source {
 		}
 
 		$this->note_terms();
-		$this->note( self::no_per_post_note( $this->label() ) );
+		$this->note( self::per_post_note() );
 		return $this->finish();
 	}
 

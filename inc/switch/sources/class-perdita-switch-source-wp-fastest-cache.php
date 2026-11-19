@@ -38,8 +38,11 @@ class Perdita_Switch_Source_WP_Fastest_Cache extends Perdita_Switch_Caching_Sour
 		}
 		$on = self::on( self::val( $c, 'wpFastestCacheStatus' ) );
 		$this->offer_enabled( __( 'Cache System', 'perdita-core' ), $on );
-		$mobile = self::on( self::val( $c, 'wpFastestCacheMobileTheme' ) );
-		$this->offer( __( 'Create cache for mobile theme', 'perdita-core' ), $mobile, 'mobile_cache', $mobile, __( 'Separate copy for phones', 'perdita-core' ) );
+		// "Mobile" (free) never shows the desktop copy to a phone. "Mobile
+		// Theme" (Premium) builds a copy for phones. Perdita's phone copy
+		// covers both.
+		$mobile = self::on( self::val( $c, 'wpFastestCacheMobile' ) ) || self::on( self::val( $c, 'wpFastestCacheMobileTheme' ) );
+		$this->offer( self::on( self::val( $c, 'wpFastestCacheMobileTheme' ) ) ? __( 'Create cache for mobile theme', 'perdita-core' ) : __( 'Mobile', 'perdita-core' ), $mobile, 'mobile_cache', $mobile, __( 'Separate copy for phones', 'perdita-core' ) );
 		$preload = self::on( self::val( $c, 'wpFastestCachePreload' ) );
 		$this->offer( __( 'Preload', 'perdita-core' ), $preload, 'preload', $preload, __( 'Preload', 'perdita-core' ) );
 		if ( self::on( self::val( $c, 'wpFastestCacheGzip' ) ) ) {

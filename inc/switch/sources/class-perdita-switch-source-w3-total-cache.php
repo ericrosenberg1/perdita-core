@@ -132,7 +132,7 @@ class Perdita_Switch_Source_W3_Total_Cache extends Perdita_Switch_Caching_Source
 				if ( is_array( $raw ) && count( $raw ) > 1 ) {
 					$this->unsupported( __( 'More CDN hostnames', 'perdita-core' ), array_slice( $raw, 1 ), __( 'In Perdita, you can rewrite URLs to one CDN host.', 'perdita-core' ) );
 				}
-				$exclude = isset( $c['cdn.reject.files'] ) ? self::split_list( $c['cdn.reject.files'] ) : array();
+				$exclude = isset( $c['cdn.reject.files'] ) ? $this->cdn_exclusions( self::split_list( $c['cdn.reject.files'] ) ) : array();
 				if ( $exclude ) {
 					$this->offer( __( 'Rejected files', 'perdita-core' ), $exclude, 'cdn_exclude', $exclude, __( 'CDN exclusions', 'perdita-core' ) );
 				}
@@ -141,5 +141,34 @@ class Perdita_Switch_Source_W3_Total_Cache extends Perdita_Switch_Caching_Source
 			}
 		}
 		return $this->finish();
+	}
+
+	/**
+	 * W3 Total Cache keeps CDN exclusions as file masks, with {uploads_dir},
+	 * {plugins_dir}, and {wp_content_dir} standing for folders. Perdita
+	 * matches plain text inside the URL, so fill in the folders, turn a
+	 * trailing /* into the folder, and leave a mask with any other wildcard
+	 * out.
+	 *
+	 * @param string[] $raw Their entries.
+	 * @return string[]
+	 */
+	private function cdn_exclusions( array $raw ) {
+		$up   = wp_get_upload_dir();
+		$map  = array(
+			'{uploads_dir}'    => (string) wp_parse_url( (string) $up['baseurl'], PHP_URL_PATH ),
+			'{plugins_dir}'    => (string) wp_parse_url( plugins_url(), PHP_URL_PATH ),
+			'{wp_content_dir}' => (string) wp_parse_url( content_url(), PHP_URL_PATH ),
+		);
+		$keep = array();
+		foreach ( $raw as $item ) {
+			$plain = (string) preg_replace( '#/\*$#', '/', strtr( $item, $map ) );
+			if ( preg_match( '/[*?]/', $plain ) ) {
+				$this->skip( __( 'Rejected files', 'perdita-core' ), $item, __( 'This is a wildcard mask, and in Perdita you exclude plain parts of an address. Add the parts you need on Perdita, Caching.', 'perdita-core' ), __( 'CDN exclusions', 'perdita-core' ) );
+				continue;
+			}
+			$keep[] = $plain;
+		}
+		return $keep;
 	}
 }

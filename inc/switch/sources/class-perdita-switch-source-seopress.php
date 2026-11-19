@@ -174,7 +174,7 @@ class Perdita_Switch_Source_SEOPress extends Perdita_Switch_SEO_Source {
 		}
 
 		$this->note_terms();
-		$this->note( self::no_per_post_note( $this->label() ) );
+		$this->note( self::per_post_note() );
 		return $this->finish();
 	}
 }
