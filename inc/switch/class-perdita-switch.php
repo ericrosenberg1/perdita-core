@@ -560,7 +560,7 @@ class Perdita_Switch {
 		}
 		if ( $names ) {
 			/* translators: 1: add-on names, 2: plugin name. */
-			$message .= ' ' . sprintf( _n( 'You deactivated %1$s too, an add-on for %2$s. When you reactivate %2$s here, you get %1$s back too.', 'You deactivated %1$s too, add-ons for %2$s. When you reactivate %2$s here, you get those add-ons back too.', count( $names ), 'perdita-core' ), wp_sprintf_l( '%l', $names ), $source->label() );
+			$message .= ' ' . sprintf( _n( 'You deactivated %1$s too, an add-on for %2$s. When you reactivate %2$s here, you get %1$s back too.', 'You deactivated %1$s too, the add-ons for %2$s. When you reactivate %2$s here, you get %1$s back too.', count( $names ), 'perdita-core' ), wp_sprintf_l( '%l', $names ), $source->label() );
 		}
 		$left = array_diff_key( $addons, $off );
 		if ( $left ) {
