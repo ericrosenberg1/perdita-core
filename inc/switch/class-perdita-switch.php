@@ -447,6 +447,7 @@ class Perdita_Switch {
 			}
 		}
 		Perdita_Switch_Target::after_restore( $module );
+		$config_note = 'caching' === $module ? Perdita_Switch_Leftovers::undo_wp_cache( $id ) : '';
 
 		$all = get_option( self::SNAPSHOTS, array() );
 		unset( $all[ $id ] );
@@ -466,7 +467,7 @@ class Perdita_Switch {
 		}
 		$out['ok'] = true;
 		/* translators: %s: plugin name. */
-		$out['message'] = sprintf( __( 'Undid the import from %s. You have Perdita\'s settings back the way they were before the import.', 'perdita-core' ), $source->label() );
+		$out['message'] = trim( sprintf( __( 'Undid the import from %s. You have Perdita\'s settings back the way they were before the import.', 'perdita-core' ), $source->label() ) . ' ' . $config_note );
 		return $out;
 	}
 
@@ -517,8 +518,22 @@ class Perdita_Switch {
 			require_once ABSPATH . 'wp-admin/includes/plugin.php';
 		}
 		$network = is_multisite() && is_plugin_active_for_network( $det['plugin'] );
+		$addons  = Perdita_Switch_Catalog::active_addons( $det['plugin'] );
+		// The add-ons go first, so none of them runs for a moment without
+		// the plugin it needs.
+		$off = array();
+		foreach ( $addons as $addon => $name ) {
+			$addon_network = is_multisite() && is_plugin_active_for_network( $addon );
+			deactivate_plugins( $addon, false, $addon_network );
+			if ( ! Perdita_Switch_Source::plugin_active( $addon ) ) {
+				$off[ $addon ] = $addon_network;
+			}
+		}
 		deactivate_plugins( $det['plugin'], false, $network );
 		if ( Perdita_Switch_Source::plugin_active( $det['plugin'] ) ) {
+			foreach ( $off as $addon => $addon_network ) {
+				activate_plugin( $addon, '', $addon_network );
+			}
 			return array(
 				'ok'      => false,
 				/* translators: %s: plugin name. */
@@ -531,12 +546,30 @@ class Perdita_Switch {
 				'deactivated' => time(),
 				'reactivated' => 0,
 				'network'     => $network,
+				'addons'      => $off,
 			)
 		);
+		$message = sprintf(
+			/* translators: %1$s: plugin name. */
+			__( 'Deactivated %1$s. You still have its files and settings, so you can reactivate %1$s anytime.', 'perdita-core' ),
+			$source->label()
+		);
+		$names = array();
+		foreach ( array_keys( $off ) as $addon ) {
+			$names[] = $addons[ $addon ];
+		}
+		if ( $names ) {
+			/* translators: 1: add-on names, 2: plugin name. */
+			$message .= ' ' . sprintf( _n( 'You deactivated %1$s too, an add-on for %2$s. When you reactivate %2$s here, you get %1$s back too.', 'You deactivated %1$s too, add-ons for %2$s. When you reactivate %2$s here, you get those add-ons back too.', count( $names ), 'perdita-core' ), wp_sprintf_l( '%l', $names ), $source->label() );
+		}
+		$left = array_diff_key( $addons, $off );
+		if ( $left ) {
+			/* translators: 1: add-on names, 2: plugin name. */
+			$message .= ' ' . sprintf( __( 'You still have %1$s active without %2$s, so deactivate %1$s on the Plugins screen.', 'perdita-core' ), wp_sprintf_l( '%l', array_values( $left ) ), $source->label() );
+		}
 		return array(
 			'ok'      => true,
-			/* translators: %1$s: plugin name. */
-			'message' => sprintf( __( 'Deactivated %1$s. You still have its files and settings, so you can reactivate %1$s anytime.', 'perdita-core' ), $source->label() ),
+			'message' => $message,
 		);
 	}
 
@@ -573,18 +606,31 @@ class Perdita_Switch {
 				'message' => $res->get_error_message(),
 			);
 		}
+		$names  = array();
+		$addons = Perdita_Switch_Catalog::addons( $det['plugin'] );
+		foreach ( (array) ( isset( $state['addons'] ) ? $state['addons'] : array() ) as $addon => $addon_network ) {
+			$all = Perdita_Switch_Source::installed_plugins();
+			if ( ! isset( $all[ $addon ] ) || Perdita_Switch_Source::plugin_active( $addon ) ) {
+				continue;
+			}
+			if ( ! is_wp_error( activate_plugin( $addon, '', is_multisite() && $addon_network ) ) ) {
+				$names[] = isset( $addons[ $addon ] ) ? $addons[ $addon ] : $all[ $addon ]['Name'];
+			}
+		}
 		self::set_state(
 			$id,
 			array(
 				'deactivated' => 0,
 				'reactivated' => time(),
 				'network'     => false,
+				'addons'      => array(),
 			)
 		);
+		/* translators: %s: plugin names. */
+		$message = sprintf( __( 'Reactivated %s.', 'perdita-core' ), wp_sprintf_l( '%l', array_merge( array( $source->label() ), $names ) ) );
 		return array(
 			'ok'      => true,
-			/* translators: %s: plugin name. */
-			'message' => trim( sprintf( __( 'Reactivated %s.', 'perdita-core' ), $source->label() ) . ' ' . $source->reactivate_note() ),
+			'message' => trim( $message . ' ' . $source->reactivate_note() ),
 		);
 	}
 

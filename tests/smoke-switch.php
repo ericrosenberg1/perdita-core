@@ -537,10 +537,27 @@ if ( $pdsw_stub_exists ) {
 	$pdsw_out = $pdsw_call( array( 'do' => 'skip', 'source' => 'wp-super-cache', '_wpnonce' => wp_create_nonce( Perdita_Switch_Admin::nonce( 'skip', 'wp-super-cache' ) ) ) );
 	$ok( 0 === strpos( $pdsw_out, 'redirect:' ) && Perdita_Switch::state( 'wp-super-cache' )['skipped'], 'handler: an admin with the right nonce skips the import' );
 	$ok( true === Perdita_Switch::deactivate_allowed( 'wp-super-cache' ), 'deactivate: offered after the skip' );
+
+	// An add-on that needs the plugin goes off with it, and comes back with it.
+	$pdsw_addon_dir = WP_PLUGIN_DIR . '/pdsw-addon-stub';
+	wp_mkdir_p( $pdsw_addon_dir );
+	$pdsw_stub_dirs[] = $pdsw_addon_dir;
+	$pdsw_put( $pdsw_addon_dir . '/pdsw-addon-stub.php', "<?php\n/**\n * Plugin Name: Pdsw Addon Stub\n */\n" );
+	wp_clean_plugins_cache( false );
+	$pdsw_addon_map = static function ( $list, $basename ) {
+		return 'wp-super-cache/wp-cache.php' === $basename ? array( 'pdsw-addon-stub/pdsw-addon-stub.php' => 'Pdsw Addon Stub' ) : $list;
+	};
+	add_filter( 'perdita_switch_addons', $pdsw_addon_map, 10, 2 );
+	activate_plugin( 'pdsw-addon-stub/pdsw-addon-stub.php' );
+	ob_start();
+	$pdsw_admin_ui->page();
+	$pdsw_addon_html = (string) ob_get_clean();
+	$ok( false !== strpos( $pdsw_addon_html, 'You&#039;ll deactivate Pdsw Addon Stub too, an add-on for WP Super Cache.' ), 'screen: the Deactivate box names the add-on that goes off too' );
 	$pdsw_out = $pdsw_call( array( 'do' => 'deactivate', 'source' => 'wp-super-cache', '_wpnonce' => wp_create_nonce( Perdita_Switch_Admin::nonce( 'deactivate', 'wp-super-cache' ) ) ) );
 	$ok( is_plugin_active( 'wp-super-cache/wp-cache.php' ) && false !== strpos( $pdsw_out, 'perdita_err' ), 'handler: deactivate without the confirmation box does nothing' );
 	$pdsw_out = $pdsw_call( array( 'do' => 'deactivate', 'confirm' => '1', 'source' => 'wp-super-cache', '_wpnonce' => wp_create_nonce( Perdita_Switch_Admin::nonce( 'deactivate', 'wp-super-cache' ) ) ) );
 	$ok( ! is_plugin_active( 'wp-super-cache/wp-cache.php' ) && is_file( $pdsw_stub_dir . '/wp-cache.php' ) && is_file( $pdsw_wpsc_cfg ), 'handler: confirmed deactivate deactivates, and deletes nothing' );
+	$ok( ! is_plugin_active( 'pdsw-addon-stub/pdsw-addon-stub.php' ) && isset( Perdita_Switch::state( 'wp-super-cache' )['addons']['pdsw-addon-stub/pdsw-addon-stub.php'] ), 'deactivate: the add-on goes off with the plugin, and the screen remembers it' );
 
 	// WP Super Cache writes $cache_enabled = false on deactivation, so an
 	// inactive copy that says "off" must not switch Perdita's cache off.
@@ -615,6 +632,21 @@ if ( $pdsw_stub_exists ) {
 		$ok( ! glob( dirname( $pdsw_cfgp ) . '/wp-config-perdita-backup-*' ) && ! glob( dirname( $pdsw_cfgp ) . '/*.bak' ) && ! glob( dirname( $pdsw_cfgp ) . '/.*.tmp' ), 'leftovers: no backup copy or temp file sits beside wp-config.php' );
 		$ok( $pdsw_body === substr( $pdsw_file_was[ $pdsw_cfgp ], 0, strpos( $pdsw_body, Perdita_Switch_Leftovers::WP_CACHE_LINE ) ) . Perdita_Switch_Leftovers::WP_CACHE_LINE . "\n" . substr( $pdsw_file_was[ $pdsw_cfgp ], strpos( $pdsw_body, Perdita_Switch_Leftovers::WP_CACHE_LINE ) ), 'leftovers: the edit adds exactly the one line and keeps every other byte' );
 		$ok( strpos( $pdsw_body, Perdita_Switch_Leftovers::WP_CACHE_LINE ) < strpos( $pdsw_body, 'wp-settings.php' ), 'leftovers: the line sits above wp-settings.php' );
+		$ok( isset( get_option( Perdita_Switch_Leftovers::WP_CACHE_ADDED, array() )['wp-super-cache'] ), 'leftovers: Perdita records which card added the WP_CACHE line' );
+
+		// Undo takes the line back out, only when Perdita added it and early serving no longer needs it.
+		if ( Perdita_Switch::module_on( 'caching' ) ) {
+			$pdsw_un = Perdita_Switch_Leftovers::undo_wp_cache( 'wp-super-cache' );
+			$ok( false !== strpos( $pdsw_un, 'early serving on' ) && (string) file_get_contents( $pdsw_cfgp ) === $pdsw_body, 'undo: with early serving still on, the WP_CACHE line stays and the message says why' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		}
+		update_option( 'perdita_caching_settings', array_merge( Perdita_Caching::settings(), array( 'early_serve' => false ) ) );
+		$pdsw_added = get_option( Perdita_Switch_Leftovers::WP_CACHE_ADDED, array() );
+		update_option( Perdita_Switch_Leftovers::WP_CACHE_ADDED, array( 'w3-total-cache' => time() ), false );
+		$ok( '' === Perdita_Switch_Leftovers::undo_wp_cache( 'wp-super-cache' ) && (string) file_get_contents( $pdsw_cfgp ) === $pdsw_body, 'undo: a line another card added stays' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		update_option( Perdita_Switch_Leftovers::WP_CACHE_ADDED, $pdsw_added, false );
+		$pdsw_un = Perdita_Switch_Leftovers::undo_wp_cache( 'wp-super-cache' );
+		$ok( false !== strpos( $pdsw_un, 'Removed the WP_CACHE line' ) && (string) file_get_contents( $pdsw_cfgp ) === $pdsw_file_was[ $pdsw_cfgp ] && false === get_option( Perdita_Switch_Leftovers::WP_CACHE_ADDED ), 'undo: the WP_CACHE line Perdita added comes back out, byte for byte, and the record goes' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$ok( '' === Perdita_Switch_Leftovers::undo_wp_cache( 'wp-super-cache' ), 'undo: a second undo finds nothing to take out' );
 		$pdsw_put( $pdsw_cfgp, $pdsw_file_was[ $pdsw_cfgp ] );
 	}
 	$pdsw_php = defined( 'PHP_BINARY' ) && is_executable( PHP_BINARY ) && 'cli' === PHP_SAPI ? PHP_BINARY : '';
@@ -715,6 +747,7 @@ if ( $pdsw_stub_exists ) {
 	$pdsw_ours = in_array( Perdita_Caching::dropin_state(), array( 'ours', 'stale' ), true );
 	$pdsw_out  = $pdsw_call( array( 'do' => 'reactivate', 'source' => 'wp-super-cache', '_wpnonce' => wp_create_nonce( Perdita_Switch_Admin::nonce( 'reactivate', 'wp-super-cache' ) ) ) );
 	$ok( is_plugin_active( 'wp-super-cache/wp-cache.php' ) && Perdita_Switch::state( 'wp-super-cache' )['reactivated'], 'handler: Reactivate turns it back on' );
+	$ok( is_plugin_active( 'pdsw-addon-stub/pdsw-addon-stub.php' ) && false !== strpos( rawurldecode( str_replace( '+', ' ', $pdsw_out ) ), 'Reactivated WP Super Cache and Pdsw Addon Stub.' ), 'reactivate: the add-on comes back on with the plugin, and the message names both' );
 	$ok( $pdsw_ours && ! is_file( Perdita_Switch_Leftovers::dropin_path() ), 'reactivate: Perdita\'s drop-in steps aside first, so the plugin can write its own' );
 	$ok( false !== strpos( rawurldecode( str_replace( '+', ' ', $pdsw_out ) ), 'own cache was switched off when you deactivated' ), 'reactivate: the message says to switch WP Super Cache\'s cache back on' );
 	$pdsw_fix = Perdita_Switch::get( 'wp-super-cache' )->fix_leftover( 'dropin' );
@@ -724,7 +757,9 @@ if ( $pdsw_stub_exists ) {
 	remove_filter( 'wp_redirect', $pdsw_redirect, 1 );
 	$_POST    = array();
 	$_REQUEST = array();
-	deactivate_plugins( 'wp-super-cache/wp-cache.php', true );
+	$ok( array() === Perdita_Switch::state( 'wp-super-cache' )['addons'], 'reactivate: the screen forgets the add-on list' );
+	deactivate_plugins( array( 'pdsw-addon-stub/pdsw-addon-stub.php', 'wp-super-cache/wp-cache.php' ), true );
+	remove_filter( 'perdita_switch_addons', $pdsw_addon_map, 10 );
 }
 
 /* ---------- restore ---------- */

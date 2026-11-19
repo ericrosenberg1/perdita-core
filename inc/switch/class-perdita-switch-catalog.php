@@ -40,17 +40,58 @@ class Perdita_Switch_Catalog {
 	}
 
 	/**
+	 * Add-ons that need a source plugin and stop working without it. When
+	 * the screen deactivates the plugin, it deactivates the add-on too, and
+	 * Reactivate turns both back on.
+	 *
+	 * @param string $basename The source plugin's basename.
+	 * @return array add-on basename => name.
+	 */
+	public static function addons( $basename ) {
+		$all = array(
+			'contact-form-7/wp-contact-form-7.php' => array( 'flamingo/flamingo.php' => 'Flamingo' ),
+			'wordpress-seo/wp-seo.php'             => array( 'wordpress-seo-premium/wp-seo-premium.php' => 'Yoast SEO Premium' ),
+			'seo-by-rank-math/rank-math.php'       => array( 'seo-by-rank-math-pro/rank-math-pro.php' => 'Rank Math SEO PRO' ),
+			'wp-seopress/seopress.php'             => array( 'wp-seopress-pro/seopress-pro.php' => 'SEOPress PRO' ),
+		);
+		$list = isset( $all[ (string) $basename ] ) ? $all[ (string) $basename ] : array();
+		/**
+		 * Filters the add-ons the Switch screen deactivates with a plugin.
+		 *
+		 * @param array  $list     add-on basename => name.
+		 * @param string $basename The source plugin's basename.
+		 */
+		return (array) apply_filters( 'perdita_switch_addons', $list, (string) $basename );
+	}
+
+	/**
+	 * The add-ons of a plugin that are active now.
+	 *
+	 * @param string $basename The source plugin's basename.
+	 * @return array add-on basename => name.
+	 */
+	public static function active_addons( $basename ) {
+		$out = array();
+		foreach ( self::addons( $basename ) as $addon => $name ) {
+			if ( $addon !== $basename && Perdita_Switch_Source::plugin_active( $addon ) ) {
+				$out[ $addon ] = (string) $name;
+			}
+		}
+		return $out;
+	}
+
+	/**
 	 * Every Pro-only source.
 	 *
-	 * @return array id => label, module, plugins (basenames), covers (what Pro brings over),
+	 * @return array id => label, module, plugins (basenames), covers (what you can bring over with Pro),
 	 *               plugin (the name on the screen's list, or '' for a card that covers several plugins).
 	 */
 	public static function pro_sources() {
-		$speed  = __( 'Perdita Pro brings over its minify, lazy load, preload, and other page speed settings.', 'perdita-core' );
-		$images = __( 'Perdita Pro brings over its compression settings and adopts the images it already compressed, so nothing gets compressed twice.', 'perdita-core' );
-		$spam   = __( 'Perdita Pro brings over its keys and spam settings.', 'perdita-core' );
-		$secure = __( 'Perdita Pro brings over its login limits, the breached-password check, and the file scan schedule.', 'perdita-core' );
-		$backup = __( 'Perdita Pro brings over its S3-compatible bucket, schedule, and how many backups to keep.', 'perdita-core' );
+		$speed  = __( 'With Perdita Pro, you can bring over its minify, lazy load, preload, and other page speed settings.', 'perdita-core' );
+		$images = __( 'With Perdita Pro, you can bring over its compression settings and every image you already compressed with that plugin, so you never compress an image twice.', 'perdita-core' );
+		$spam   = __( 'With Perdita Pro, you can bring over its keys and spam settings.', 'perdita-core' );
+		$secure = __( 'With Perdita Pro, you can bring over its login limits, the breached-password check, and the file scan schedule.', 'perdita-core' );
+		$backup = __( 'With Perdita Pro, you can bring over its S3-compatible bucket, schedule, and how many backups to keep.', 'perdita-core' );
 		$seo    = array( 'wordpress-seo/wp-seo.php', 'wordpress-seo-premium/wp-seo-premium.php', 'all-in-one-seo-pack/all_in_one_seo_pack.php', 'all-in-one-seo-pack-pro/all_in_one_seo_pack.php', 'seo-by-rank-math/rank-math.php', 'wp-seopress/seopress.php' );
 		$list   = array(
 			'wp-rocket'                 => array( 'WP Rocket', 'caching-pro', array( 'wp-rocket/wp-rocket.php' ), $speed ),
@@ -68,16 +109,16 @@ class Perdita_Switch_Catalog {
 			'antispam-bee'              => array( 'Antispam Bee', 'spam-pro', array( 'antispam-bee/antispam_bee.php' ), $spam ),
 			'advanced-google-recaptcha' => array( 'Advanced Google reCAPTCHA', 'spam-pro', array( 'advanced-google-recaptcha/advanced-google-recaptcha.php' ), $spam ),
 			'simple-google-recaptcha'   => array( 'Simple Google reCAPTCHA', 'spam-pro', array( 'simple-google-recaptcha/simple-google-recaptcha.php' ), $spam ),
-			'seo-pro-posts'             => array( 'Each post\'s own SEO fields', 'seo-pro', $seo, __( 'Perdita Pro brings over each post\'s SEO title, description, and social fields.', 'perdita-core' ), '' ),
-			'redirection'               => array( 'Redirection', 'seo-pro', array( 'redirection/redirection.php' ), __( 'Perdita Pro brings over your redirects.', 'perdita-core' ) ),
-			'seo-pro-redirects'         => array( 'Redirects from SEO plugins', 'seo-pro', array( 'wordpress-seo-premium/wp-seo-premium.php', 'seo-by-rank-math/rank-math.php', 'seo-by-rank-math-pro/rank-math-pro.php', 'wp-seopress-pro/seopress-pro.php', 'wp-seopress/seopress.php', 'all-in-one-seo-pack-pro/all_in_one_seo_pack.php' ), __( 'Perdita Pro brings over the redirects you made in your SEO plugin.', 'perdita-core' ), '' ),
-			'fluent-smtp-failover'      => array( 'FluentSMTP fallback connection', 'smtp-pro', array( 'fluent-smtp/fluent-smtp.php' ), __( 'Perdita Pro brings over the fallback connection, so mail goes out when the first one fails.', 'perdita-core' ), 'FluentSMTP' ),
+			'seo-pro-posts'             => array( 'Each post\'s own SEO fields', 'seo-pro', $seo, __( 'With Perdita Pro, you can bring over each post\'s SEO title, description, and social fields.', 'perdita-core' ), '' ),
+			'redirection'               => array( 'Redirection', 'seo-pro', array( 'redirection/redirection.php' ), __( 'With Perdita Pro, you can bring over your redirects.', 'perdita-core' ) ),
+			'seo-pro-redirects'         => array( 'Redirects from SEO plugins', 'seo-pro', array( 'wordpress-seo-premium/wp-seo-premium.php', 'seo-by-rank-math/rank-math.php', 'seo-by-rank-math-pro/rank-math-pro.php', 'wp-seopress-pro/seopress-pro.php', 'wp-seopress/seopress.php', 'all-in-one-seo-pack-pro/all_in_one_seo_pack.php' ), __( 'With Perdita Pro, you can bring over the redirects you made in your SEO plugin.', 'perdita-core' ), '' ),
+			'fluent-smtp-failover'      => array( 'FluentSMTP fallback connection', 'smtp-pro', array( 'fluent-smtp/fluent-smtp.php' ), __( 'With Perdita Pro, you can bring over the fallback connection, so you can still send mail while the first connection is down.', 'perdita-core' ), 'FluentSMTP' ),
 			'wordfence'                 => array( 'Wordfence', 'security-pro', array( 'wordfence/wordfence.php' ), $secure ),
 			'solid-security'            => array( 'Solid Security', 'security-pro', array( 'better-wp-security/better-wp-security.php', 'ithemes-security-pro/ithemes-security-pro.php' ), $secure ),
 			'aios'                      => array( 'All In One WP Security', 'security-pro', array( 'all-in-one-wp-security-and-firewall/wp-security.php' ), $secure ),
 			'updraftplus'               => array( 'UpdraftPlus', 'backups-pro', array( 'updraftplus/updraftplus.php' ), $backup ),
 			'backwpup'                  => array( 'BackWPup', 'backups-pro', array( 'backwpup/backwpup.php', 'backwpup-pro/backwpup.php' ), $backup ),
-			'contact-form-7-pro'        => array( 'Contact Form 7, uploads and autoresponder', 'forms-pro', array( 'contact-form-7/wp-contact-form-7.php' ), __( 'Perdita Pro brings over file upload fields and the second mail, Contact Form 7\'s autoresponder.', 'perdita-core' ), 'Contact Form 7' ),
+			'contact-form-7-pro'        => array( 'Contact Form 7, uploads and autoresponder', 'forms-pro', array( 'contact-form-7/wp-contact-form-7.php' ), __( 'With Perdita Pro, you can bring over file upload fields and the second mail, Contact Form 7\'s autoresponder.', 'perdita-core' ), 'Contact Form 7' ),
 		);
 		$out = array();
 		foreach ( $list as $id => $row ) {

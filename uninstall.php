@@ -115,6 +115,7 @@ function perdita_core_uninstall_options() {
 		// the pre-import copies Undo restores. Bookkeeping for this screen.
 		'perdita_switch_state',
 		'perdita_switch_snapshots',
+		'perdita_switch_wp_cache_added',
 		'perdita_switch_batch_lock',
 	);
 }

@@ -202,6 +202,24 @@ class Perdita_Switch_Admin {
 	}
 
 	/**
+	 * The line under the Deactivate box that names the add-ons going off
+	 * with the plugin, or ''.
+	 *
+	 * @param string $basename Plugin basename.
+	 * @param string $label    Plugin name.
+	 * @return string HTML.
+	 */
+	private static function addons_note( $basename, $label ) {
+		$names = array_values( Perdita_Switch_Catalog::active_addons( $basename ) );
+		if ( ! $names ) {
+			return '';
+		}
+		/* translators: 1: add-on names, 2: plugin name. */
+		$text = sprintf( _n( 'You\'ll deactivate %1$s too, an add-on for %2$s.', 'You\'ll deactivate %1$s too, add-ons for %2$s.', count( $names ), 'perdita-core' ), wp_sprintf_l( '%l', $names ), $label );
+		return '<p class="pds-meta">' . esc_html( $text ) . '</p>';
+	}
+
+	/**
 	 * Whether this person may deactivate or reactivate the source plugin.
 	 * activate_plugins always, and on a network, manage_network_plugins for
 	 * a plugin that's network-active (or was, before this screen turned it
@@ -608,6 +626,7 @@ class Perdita_Switch_Admin {
 				$inner = '<label><input type="checkbox" name="confirm" value="1" required="required" /> '
 					/* translators: %s: plugin name. */
 					. esc_html( sprintf( __( 'I checked Perdita\'s settings and want to deactivate %s. I\'ll keep its files and settings.', 'perdita-core' ), $label ) ) . '</label>'
+					. self::addons_note( $det['plugin'], $label )
 					/* translators: %s: plugin name. */
 					. get_submit_button( sprintf( __( 'Deactivate %s', 'perdita-core' ), $label ), 'secondary', '', false );
 				echo '<div class="pds-actions">' . self::form( 'deactivate', $id, $inner, array( 'data-confirm' => $ask ) ) . '</div>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- built from escaped parts.
