@@ -4,7 +4,7 @@ Tags: forms, seo, caching, security, newsletter
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.19.27-beta
+Stable tag: 0.19.28-beta
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -77,6 +77,11 @@ Form entries, subscribers, orders, products, form definitions, the SMTP log, you
 Yes, that's what Pro is built on. Pro registers its own modules into this plugin's registry, so they appear on the same Modules screen and behave the same way.
 
 == Changelog ==
+
+= 0.19.28-beta =
+* Fix: in Switch to Perdita, when you deactivate Contact Form 7, Yoast SEO, Rank Math, or SEOPress, you deactivate its add-ons too, such as Flamingo, and you get those add-ons back when you reactivate the plugin.
+* Fix: you can put two forms on one page, or the same form twice, and screen reader users hear the right label for each field.
+* Fix: in Switch to Perdita, when you undo a cache plugin's import, you get wp-config.php back without the WP_CACHE line Perdita added, unless you still use early serving.
 
 = 0.19.27-beta =
 * Fix: in Switch to Perdita, you get your FluentSMTP password when FluentSMTP stored the password encrypted.
