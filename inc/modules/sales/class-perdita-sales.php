@@ -1255,11 +1255,21 @@ class Perdita_Sales {
 
 		// Idempotency: a second delivery of the same event must not double-charge
 		// stock or re-send the receipt.
-		if ( 'paid' === get_post_meta( $order_id, '_perdita_sales_status', true ) ) {
+		$status = (string) get_post_meta( $order_id, '_perdita_sales_status', true );
+		if ( 'paid' === $status ) {
 			return;
 		}
 
-		update_post_meta( $order_id, '_perdita_sales_status', 'paid' );
+		// Claim the order in one conditional write, the way
+		// release_unpaid_order() does. Two deliveries that arrive together
+		// both read 'pending' above. Only the one whose UPDATE still finds
+		// that value goes on, so the buyer gets one receipt and
+		// perdita_sales_order_paid fires once.
+		if ( '' === $status ) {
+			update_post_meta( $order_id, '_perdita_sales_status', 'paid' );
+		} elseif ( ! update_post_meta( $order_id, '_perdita_sales_status', 'paid', $status ) ) {
+			return;
+		}
 		update_post_meta( $order_id, '_perdita_sales_paid_at', current_time( 'mysql' ) );
 		if ( '' !== $session_id ) {
 			update_post_meta( $order_id, '_perdita_sales_gateway_ref', $session_id );
