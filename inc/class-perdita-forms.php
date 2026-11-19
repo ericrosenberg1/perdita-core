@@ -65,6 +65,35 @@ class Perdita_Forms {
 	private static $form_rendered = false;
 
 	/**
+	 * How many times each form has printed in this request, so two forms on
+	 * one page, or one form twice, never share an HTML id.
+	 *
+	 * @var array form id => count.
+	 */
+	private static $printed = array();
+
+	/**
+	 * The id prefix for this printing of a form's fields: df-12- the first
+	 * time, df-12-2- the second.
+	 *
+	 * @var string
+	 */
+	private $id_prefix = 'df-';
+
+	/**
+	 * The id prefix for the next printing of a form. Each call counts as a
+	 * printing.
+	 *
+	 * @param int $form_id Form post id.
+	 * @return string
+	 */
+	public static function next_id_prefix( $form_id ) {
+		$form_id                    = (int) $form_id;
+		self::$printed[ $form_id ] = isset( self::$printed[ $form_id ] ) ? self::$printed[ $form_id ] + 1 : 1;
+		return 'df-' . $form_id . '-' . ( self::$printed[ $form_id ] > 1 ? self::$printed[ $form_id ] . '-' : '' );
+	}
+
+	/**
 	 * Option flag: a forwarded-for/CF-Connecting-IP header was seen while no
 	 * 'perdita_form_client_ip' filter was hooked, so the per-IP throttle was
 	 * skipped. Value 1 means "show the notice", 'dismissed' means the owner
@@ -430,11 +459,13 @@ class Perdita_Forms {
 			wp_enqueue_script( 'perdita-turnstile', 'https://challenges.cloudflare.com/turnstile/v0/api.js', array(), null, true ); // phpcs:ignore PluginCheck.CodeAnalysis.EnqueuedResourceOffloading.OffloadedContent, WordPress.WP.EnqueuedResourceParameters.MissingVersion -- third-party endpoint, versionless by design.
 		}
 
-		$cfg = $this->config( $id );
+		$cfg             = $this->config( $id );
+		$this->id_prefix = self::next_id_prefix( $id );
 		ob_start();
 		?>
 		<form class="perdita-form" data-form="<?php echo esc_attr( $id ); ?>" novalidate>
-			<?php wp_nonce_field( 'perdita_form_' . $id, 'perdita_nonce' ); ?>
+			<input type="hidden" name="perdita_nonce" value="<?php echo esc_attr( wp_create_nonce( 'perdita_form_' . $id ) ); ?>" />
+			<?php wp_referer_field(); ?>
 			<div class="perdita-form__hp" aria-hidden="true" style="position:absolute;left:-9999px;">
 				<label><?php esc_html_e( 'Leave this field empty', 'perdita-core' ); ?><input type="text" name="perdita_hp" tabindex="-1" autocomplete="off" /></label>
 			</div>
@@ -470,13 +501,16 @@ class Perdita_Forms {
 		if ( '' === $name ) {
 			return '';
 		}
-		$id    = 'df-' . $name;
+		$id    = $this->id_prefix . $name;
 		$rmark = $req ? ' <span class="perdita-form__req">*</span>' : '';
 		$rattr = $req ? ' required' : '';
 
 		ob_start();
 		echo '<p class="perdita-form__field perdita-form__field--' . esc_attr( $type ) . '">';
-		echo '<label for="' . esc_attr( $id ) . '">' . esc_html( $label ) . $rmark . '</label>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- $rmark static.
+		// A radio or checkbox group has no one field to point at, so its
+		// label names the group instead.
+		$group = 'radio' === $type || 'checkbox' === $type;
+		echo '<label ' . ( $group ? 'id="' . esc_attr( $id . '-label' ) . '"' : 'for="' . esc_attr( $id ) . '"' ) . '>' . esc_html( $label ) . $rmark . '</label>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped pieces, $rmark static.
 
 		if ( in_array( $type, array( 'text', 'email', 'tel', 'url', 'number', 'date' ), true ) ) {
 			printf(
@@ -499,7 +533,7 @@ class Perdita_Forms {
 		} elseif ( 'radio' === $type || 'checkbox' === $type ) {
 			$input_type = 'radio' === $type ? 'radio' : 'checkbox';
 			$fname      = 'checkbox' === $type ? 'fields[' . $name . '][]' : 'fields[' . $name . ']';
-			echo '<span class="perdita-form__choices">';
+			echo '<span class="perdita-form__choices" role="group" aria-labelledby="' . esc_attr( $id . '-label' ) . '">';
 			foreach ( $opts as $opt ) {
 				echo '<label class="perdita-form__choice"><input type="' . esc_attr( $input_type ) . '" name="' . esc_attr( $fname ) . '" value="' . esc_attr( $opt ) . '" /> ' . esc_html( $opt ) . '</label>';
 			}

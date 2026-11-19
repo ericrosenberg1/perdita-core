@@ -36,6 +36,12 @@ class Perdita_Switch_Leftovers {
 	const WP_CACHE_LINE = "define( 'WP_CACHE', true ); // Added by Perdita, Switch to Perdita.";
 
 	/**
+	 * Option: source id => when Perdita added the WP_CACHE line from that
+	 * source's card, so Undo for that source can take the line back out.
+	 */
+	const WP_CACHE_ADDED = 'perdita_switch_wp_cache_added';
+
+	/**
 	 * Leftovers for a caching source.
 	 *
 	 * @param Perdita_Switch_Source $source     Source.
@@ -225,7 +231,7 @@ class Perdita_Switch_Leftovers {
 					'message' => __( 'WP_CACHE is already on in wp-config.php, so the file is unchanged.', 'perdita-core' ),
 				);
 			}
-			return self::add_wp_cache();
+			return self::add_wp_cache( $source->id() );
 		}
 		return $no( __( 'That item isn\'t on this card.', 'perdita-core' ) );
 	}
@@ -503,9 +509,11 @@ class Perdita_Switch_Leftovers {
 	 * backup folder names the one line to delete, so no copy of the
 	 * database password or the salts ever sits under uploads.
 	 *
+	 * @param string $source_id The card the owner clicked, so Undo for that
+	 *                          source can take the line back out.
 	 * @return array ok, message.
 	 */
-	private static function add_wp_cache() {
+	private static function add_wp_cache( $source_id = '' ) {
 		$path = self::config_path();
 		$why  = self::config_blocker( $path );
 		$no   = function ( $why ) {
@@ -540,11 +548,100 @@ class Perdita_Switch_Leftovers {
 		if ( ! self::write_atomic( $path, $new, $body ) ) {
 			return $no( __( 'We couldn\'t save the file in one piece.', 'perdita-core' ) );
 		}
+		if ( '' !== (string) $source_id ) {
+			$added                        = (array) get_option( self::WP_CACHE_ADDED, array() );
+			$added[ (string) $source_id ] = time();
+			update_option( self::WP_CACHE_ADDED, $added, false );
+		}
 		return array(
 			'ok'      => true,
 			/* translators: %s: note file name. */
 			'message' => sprintf( __( 'Added WP_CACHE to wp-config.php. To undo it, delete the line that ends "Added by Perdita". You\'ll find the same steps under Backup copies as %s.', 'perdita-core' ), $note ),
 		);
+	}
+
+	/**
+	 * wp-config.php's source with Perdita's WP_CACHE line taken out, or null
+	 * when the line isn't there exactly once on a line of its own.
+	 *
+	 * @param string $body Source.
+	 * @return string|null
+	 */
+	public static function config_without_wp_cache( $body ) {
+		$body = (string) $body;
+		if ( 1 !== substr_count( $body, self::WP_CACHE_LINE ) ) {
+			return null;
+		}
+		if ( ! preg_match( '/(^|\r\n|\n|\r)([ \t]*' . preg_quote( self::WP_CACHE_LINE, '/' ) . '[ \t]*)(\r\n|\n|\r|$)/', $body, $m, PREG_OFFSET_CAPTURE ) ) {
+			return null;
+		}
+		$start = $m[2][1];
+		$end   = $m[3][1] + strlen( $m[3][0] );
+		$new   = substr( $body, 0, $start ) . substr( $body, $end );
+		try {
+			token_get_all( $new, TOKEN_PARSE );
+		} catch ( \Throwable $e ) {
+			return null;
+		}
+		return $new;
+	}
+
+	/**
+	 * After Undo for a caching source: take out the WP_CACHE line Perdita
+	 * added from that source's card. The line stays when Perdita didn't
+	 * add it from this card (no record, and no undo note in the backup
+	 * folder from before the record existed), when Perdita's early serving
+	 * still needs it, or when the file can't be written safely.
+	 *
+	 * @param string $source_id Source id.
+	 * @return string A sentence for the Undo message, or ''.
+	 */
+	public static function undo_wp_cache( $source_id ) {
+		$source_id = (string) $source_id;
+		$added     = (array) get_option( self::WP_CACHE_ADDED, array() );
+		$ours      = isset( $added[ $source_id ] );
+		if ( ! $ours && ! $added ) {
+			// Perdita 0.19.27-beta and earlier left only the undo note.
+			foreach ( Perdita_Switch_Backups::all() as $copy ) {
+				if ( 0 === strpos( $copy['name'], 'wp-config-line-' ) ) {
+					$ours = true;
+					break;
+				}
+			}
+		}
+		$path = self::config_path();
+		$body = '' !== $path && is_file( $path ) && is_readable( $path ) ? (string) file_get_contents( $path ) : ''; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- local file.
+		if ( ! $ours || false === strpos( $body, self::WP_CACHE_LINE ) ) {
+			if ( isset( $added[ $source_id ] ) ) {
+				unset( $added[ $source_id ] );
+				update_option( self::WP_CACHE_ADDED, $added, false );
+			}
+			return '';
+		}
+		if ( Perdita_Switch::module_on( 'caching' ) && Perdita_Switch_Target::load( 'caching' ) ) {
+			$s = Perdita_Caching::settings();
+			if ( ! empty( $s['enabled'] ) && ! empty( $s['early_serve'] ) ) {
+				return __( 'You still have Perdita\'s early serving on, so we kept the WP_CACHE line Perdita added to wp-config.php.', 'perdita-core' );
+			}
+		}
+		$keep = __( 'To finish the undo, delete the line in wp-config.php that ends "Added by Perdita".', 'perdita-core' );
+		if ( ( defined( 'DISALLOW_FILE_MODS' ) && DISALLOW_FILE_MODS ) || ( defined( 'DISALLOW_FILE_EDIT' ) && DISALLOW_FILE_EDIT ) || ( is_multisite() && ! current_user_can( 'manage_network_options' ) ) ) {
+			return $keep;
+		}
+		if ( is_link( $path ) || ! wp_is_writable( $path ) || ! wp_is_writable( dirname( $path ) ) || ! self::same_owner_as_php( $path ) ) {
+			return $keep;
+		}
+		$new = self::config_without_wp_cache( $body );
+		if ( null === $new || ! self::write_atomic( $path, $new, $body ) ) {
+			return $keep;
+		}
+		unset( $added[ $source_id ] );
+		if ( $added ) {
+			update_option( self::WP_CACHE_ADDED, $added, false );
+		} else {
+			delete_option( self::WP_CACHE_ADDED );
+		}
+		return __( 'Removed the WP_CACHE line Perdita added to wp-config.php.', 'perdita-core' );
 	}
 
 	/**

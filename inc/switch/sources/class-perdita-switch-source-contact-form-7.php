@@ -93,7 +93,7 @@ class Perdita_Switch_Source_Contact_Form_7 extends Perdita_Switch_Source {
 	}
 
 	public function pro_note() {
-		return __( 'Perdita Pro also brings over file upload fields and the second mail, Contact Form 7\'s autoresponder.', 'perdita-core' );
+		return __( 'With Perdita Pro, you can also bring over file upload fields and the second mail, Contact Form 7\'s autoresponder.', 'perdita-core' );
 	}
 
 	/* ---------- the form template ---------- */

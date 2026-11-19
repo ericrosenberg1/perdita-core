@@ -203,6 +203,19 @@ if ( $pdcf_had ) {
 	add_shortcode( 'contact-form-7', $pdcf_had );
 }
 
+// Two imported forms on one page, and one of them twice: every HTML id is
+// unique, and each label points at its own form's field.
+$pdcf_two  = wp_insert_post( array( 'post_type' => 'perdita_form', 'post_status' => 'publish', 'post_title' => 'pdcf second' ) );
+update_post_meta( $pdcf_two, '_perdita_form', get_post_meta( $pdcf_new, '_perdita_form', true ) );
+$pdcf_page = do_shortcode( '[perdita_form id="' . $pdcf_new . '"][perdita_form id="' . $pdcf_two . '"][perdita_form id="' . $pdcf_new . '"]' );
+preg_match_all( '/\sid="([^"]+)"/', $pdcf_page, $pdcf_ids );
+preg_match_all( '/<label for="([^"]+)"/', $pdcf_page, $pdcf_fors );
+$ok( 3 === substr_count( $pdcf_page, '<form ' ) && count( $pdcf_ids[1] ) > 3 && count( $pdcf_ids[1] ) === count( array_unique( $pdcf_ids[1] ) ), 'cf7 forms: three forms on one page share no HTML id' );
+preg_match_all( '/aria-labelledby="([^"]+)"/', $pdcf_page, $pdcf_lbl );
+$ok( $pdcf_fors[1] && ! array_diff( $pdcf_fors[1], $pdcf_ids[1] ) && ! array_diff( $pdcf_lbl[1], $pdcf_ids[1] ), 'cf7 forms: every label points at a field or a choice group on the page' );
+$ok( 3 === substr_count( $pdcf_page, 'name="perdita_nonce"' ) + substr_count( $pdcf_page, 'name="perdita_pro_nonce"' ) && ! preg_match( '/id="perdita_(pro_)?nonce"/', $pdcf_page ), 'cf7 forms: each form keeps its nonce field, with no shared id' );
+wp_delete_post( $pdcf_two, true );
+
 /* ---------- undo ---------- */
 
 $pdcf_undo = Perdita_Switch::undo( 'contact-form-7' );

@@ -155,6 +155,9 @@ $ok( is_string( $pdsf_new ) && $pdsf_parses( $pdsf_new ) && false !== strpos( $p
 $pdsf_new = $pdsf_add( "<?php\n/**\n * Notes. That's all, stop editing! appears in this docblock.\n */\ndefine( 'X', 1 );\nrequire_once ABSPATH . 'wp-settings.php';" );
 $ok( is_string( $pdsf_new ) && $pdsf_parses( $pdsf_new ) && strpos( $pdsf_new, $pdsf_line ) < strpos( $pdsf_new, '/**' ), 'wp-config: with no closing newline or tag, the line still lands at the top level and parses' );
 
+$pdsf_rm = "<?php\r\n\$a = 1;\r\n" . $pdsf_line . "\r\n/* That's all, stop editing! */\r\nrequire_once ABSPATH . 'wp-settings.php';\r\n";
+$ok( "<?php\r\n\$a = 1;\r\n/* That's all, stop editing! */\r\nrequire_once ABSPATH . 'wp-settings.php';\r\n" === Perdita_Switch_Leftovers::config_without_wp_cache( $pdsf_rm ), 'wp-config: taking the line out keeps every other byte, CRLF included' );
+$ok( null === Perdita_Switch_Leftovers::config_without_wp_cache( "<?php\n" . $pdsf_line . "\n" . $pdsf_line . "\n" ) && null === Perdita_Switch_Leftovers::config_without_wp_cache( "<?php\ndefine( 'WP_CACHE', true );\n" ) && null === Perdita_Switch_Leftovers::config_without_wp_cache( "<?php\n\$x = \"" . $pdsf_line . "\";\n" ), 'wp-config: two copies, a line without the marker, or the line inside a string stay put' );
 $ok( Perdita_Switch_Leftovers::php_defines_wp_cache( "<?php define( 'WP_CACHE', true );" ) && ! Perdita_Switch_Leftovers::php_defines_wp_cache( "<?php if ( WP_CACHE ) { echo 1; }" ) && ! Perdita_Switch_Leftovers::php_defines_wp_cache( "<?php # define( 'WP_CACHE', true );" ), 'wp-config: a define counts, a read or a comment doesn\'t' );
 
 /* ---------- the blocker and the write ---------- */
