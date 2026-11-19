@@ -283,7 +283,7 @@ class Perdita_Switch_Admin {
 			if ( $det['installed'] || $det['has_settings'] || $state['imported'] || Perdita_Switch::snapshot( $id ) ) {
 				$groups[ $source->module() ][ $id ] = array( $source, $det, $state );
 			} else {
-				$absent[] = $source->label();
+				$absent[] = $source->plugin_name();
 			}
 		}
 		// Every plugin only Perdita Pro imports from shows too: a locked card
@@ -297,7 +297,7 @@ class Perdita_Switch_Admin {
 					$groups[ $entry['module'] ] = array();
 				}
 			} else {
-				$absent_pro[] = $entry['label'];
+				$absent_pro[] = $entry['plugin'];
 			}
 		}
 		if ( ! $groups ) {
@@ -318,13 +318,17 @@ class Perdita_Switch_Admin {
 				$this->render_locked( $id, $entry, $pro_state );
 			}
 		}
+		// A plugin's name goes on the lists once, and a Pro card for part of a
+		// plugin already listed adds nothing.
+		$absent     = array_values( array_unique( array_filter( $absent, 'strlen' ) ) );
+		$absent_pro = array_values( array_diff( array_unique( array_filter( $absent_pro, 'strlen' ) ), $absent ) );
 		if ( $absent ) {
 			/* translators: %s: comma-separated plugin names. */
 			echo '<p class="pds-meta">' . esc_html( sprintf( __( 'You can also switch from %s. You don\'t have any of those plugins installed.', 'perdita-core' ), implode( ', ', $absent ) ) ) . '</p>';
 		}
 		if ( $absent_pro ) {
 			/* translators: %s: comma-separated plugin names. */
-			echo '<p class="pds-meta">' . esc_html( sprintf( __( 'With Perdita Pro, you can also switch from %s.', 'perdita-core' ), implode( ', ', array_unique( $absent_pro ) ) ) ) . '</p>';
+			echo '<p class="pds-meta">' . esc_html( sprintf( __( 'With Perdita Pro, you can also switch from %s.', 'perdita-core' ), implode( ', ', $absent_pro ) ) ) . '</p>';
 		}
 		$this->render_backups();
 

@@ -182,7 +182,7 @@ class Perdita_Switch_Source_Contact_Form_7 extends Perdita_Switch_Source {
 			return '';
 		}
 		$label = (string) end( $lines );
-		$label = trim( preg_replace( '/\(\s*optional\s*\)/i', '', $label ) );
+		$label = trim( preg_replace( '/\(\s*(?:optional|required)\s*\)/i', '', $label ) );
 		return trim( $label, " \t:" );
 	}
 
@@ -433,6 +433,8 @@ class Perdita_Switch_Source_Contact_Form_7 extends Perdita_Switch_Source {
 		}
 
 		$to      = self::mail_text( isset( $mail['recipient'] ) ? $mail['recipient'] : '', $names, false );
+		// A dropped mail-tag leaves "a@b.com, " behind, so keep only the addresses that are left.
+		$to['text'] = implode( ', ', array_filter( array_map( 'trim', explode( ',', $to['text'] ) ), 'strlen' ) );
 		$subject = self::mail_text( isset( $mail['subject'] ) ? $mail['subject'] : '', $names, false );
 		$body    = self::mail_text( isset( $mail['body'] ) ? $mail['body'] : '', $names, true );
 		$cfg     = array(

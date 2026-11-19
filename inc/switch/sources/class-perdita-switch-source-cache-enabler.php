@@ -80,8 +80,15 @@ class Perdita_Switch_Source_Cache_Enabler extends Perdita_Switch_Caching_Source 
 		$label = 'exclude_paths' === $target ? __( 'Never cache these paths', 'perdita-core' ) : __( 'Skip the cache for these cookies', 'perdita-core' );
 		$whole = self::literal_path( $raw, true );
 		$inner = null;
-		if ( null === $whole && preg_match( '#^([/~\#!|])\^?\((.*)\)\$?\1[a-z]*$#is', $raw, $m ) ) {
-			$inner = explode( '|', $m[2] );
+		// ^ then optional literal text, one group of alternatives, then a
+		// suffix that only says "and what follows": /^\/(cart|shop)\// and
+		// /^(comment_author|shop_session)_?/ both read this way.
+		if ( null === $whole && preg_match( '#^([/~\#!|])\^?((?:\\\\.|[^()|\\\\])*)\((.*)\)((?:\\\\.|[^()|\\\\$])*)\$?\1[a-z]*$#is', $raw, $m ) && in_array( $m[4], array( '', '_', '_?', '\\/', '\\/?', '.*' ), true ) ) {
+			$inner = array();
+			foreach ( explode( '|', $m[3] ) as $alt ) {
+				// A required "/" after the group stays, so /cart/ never covers /cartoon.
+				$inner[] = $m[2] . $alt . ( '\\/' === $m[4] ? '\\/' : '' );
+			}
 		} elseif ( null !== $whole ) {
 			$inner = array( $whole );
 		}
@@ -95,11 +102,18 @@ class Perdita_Switch_Source_Cache_Enabler extends Perdita_Switch_Caching_Source 
 			$items[] = $plain;
 		}
 		if ( ! $items ) {
-			$this->skip( $setting, $raw, __( 'This pattern has no plain entries to import. Add the paths the pattern covers on Perdita, Caching.', 'perdita-core' ), $label );
+			$this->skip(
+				$setting,
+				$raw,
+				'exclude_paths' === $target
+					? __( 'This pattern has no plain entries to import. Add the paths the pattern covers on Perdita, Caching.', 'perdita-core' )
+					: __( 'This pattern has no plain cookie names to import. Add the names the pattern covers on Perdita, Caching.', 'perdita-core' ),
+				$label
+			);
 			return;
 		}
 		if ( 'exclude_paths' === $target ) {
-			$this->offer_path_patterns( $setting, $items );
+			$this->offer_path_patterns( $setting, $items, array(), (bool) preg_match( '#^([/~\#!|])\^#', $raw ) );
 		} else {
 			$this->offer( $setting, $items, 'reject_cookies', $items, $label );
 		}

@@ -428,6 +428,25 @@ $pdsw_patch = $pdsw_p['patch'];
 $ok( 48 === $pdsw_patch['ttl_hours'] && true === $pdsw_patch['mobile_cache'] && false === $pdsw_patch['gzip'], 'cache enabler: expiry, phones and compression' );
 $ok( array( '/basket/', '/checkout/' ) === $pdsw_patch['exclude_paths'], 'cache enabler: a delimited regex of plain alternatives becomes plain paths' );
 $ok( ! isset( $pdsw_patch['reject_cookies'] ) && (bool) $pdsw_rows( $pdsw_p, 'Skip the cache for these cookies', 'skip' ), 'cache enabler: a regex with a lookahead is refused whole' );
+// Cache Enabler's own examples: a shared prefix or suffix around the group.
+update_option( 'cache_enabler', array( 'excluded_page_paths' => '/^\/(cart|shop)\//', 'excluded_cookies' => '/^(comment_author|shop_session)_?/' ) );
+$pdsw_patch = $pdsw_plan( 'cache-enabler' )['patch'];
+$ok( array( '/cart/', '/shop/' ) === ( $pdsw_patch['exclude_paths'] ?? null ) && array( 'comment_author', 'shop_session' ) === ( $pdsw_patch['reject_cookies'] ?? null ), 'cache enabler: /^\/(cart|shop)\// and a cookie group with a _? suffix import as plain entries' );
+
+// W3 Total Cache matches a rejected URI anywhere, so the row says so, and
+// its CDN masks fill in their folder tokens or stay out.
+$pdsw_w3c                     = json_decode( substr( (string) file_get_contents( $pdsw_w3_dir . '/master.php' ), strlen( '<?php exit; ?>' ) ), true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+$pdsw_w3c['cdn.reject.files'] = array( '{uploads_dir}/wpcf7_captcha/*', '*.zip' );
+$pdsw_put( $pdsw_w3_dir . '/master.php', '<?php exit; ?>' . wp_json_encode( $pdsw_w3c ) );
+$pdsw_p   = $pdsw_plan( 'w3-total-cache' );
+$pdsw_up  = (string) wp_parse_url( (string) wp_get_upload_dir()['baseurl'], PHP_URL_PATH );
+$pdsw_exc = $pdsw_rows( $pdsw_p, 'Never cache these paths' );
+$ok( array( $pdsw_up . '/wpcf7_captcha/' ) === ( $pdsw_p['patch']['cdn_exclude'] ?? null ) && (bool) $pdsw_rows( $pdsw_p, 'CDN exclusions', 'skip' ), 'w3tc: {uploads_dir} fills in, a trailing /* becomes the folder, and *.zip is refused' );
+$ok( $pdsw_exc && false !== strpos( (string) ( $pdsw_exc[0]['reason'] ?? '' ), '/shop/cart/' ), 'w3tc: the exclusions row says the plugin matched anywhere in an address' );
+
+// WP Fastest Cache's free "Mobile" box keeps phones off the desktop copy.
+update_option( 'WpFastestCache', wp_json_encode( array( 'wpFastestCacheStatus' => 'on', 'wpFastestCacheMobile' => 'on' ) ) );
+$ok( true === ( $pdsw_plan( 'wp-fastest-cache' )['patch']['mobile_cache'] ?? null ), 'wp fastest cache: the free Mobile box turns on the phone copy' );
 
 /* =============================================================
  * Deactivate, reactivate and leftovers, with a stand-in plugin.
@@ -537,6 +556,8 @@ if ( $pdsw_stub_exists ) {
 	$pdsw_html = (string) ob_get_clean();
 	$ok( false !== strpos( $pdsw_html, 'id="pds-wp-super-cache"' ) && false !== strpos( $pdsw_html, 'Reactivate WP Super Cache' ), 'screen: the card renders and offers Reactivate' );
 	$ok( false === strpos( $pdsw_html, 'id="_wpnonce"' ) && false === strpos( $pdsw_html, 'id="submit"' ), 'screen: no repeated id attributes across its many forms' );
+	$ok( false === strpos( $pdsw_html, 'page optimization, ' ) && false === strpos( $pdsw_html, 'Each post&#039;s own SEO fields,' ) && false === strpos( $pdsw_html, 'Contact Form 7, uploads' ), 'screen: the lists of other plugins give plugin names, never card labels with commas of their own' );
+	$ok( 1 >= substr_count( $pdsw_html, 'W3 Total Cache, ' ), 'screen: a plugin is named once across both lists' );
 	$ok( false === strpos( $pdsw_html, '<img src=x' ) && false === strpos( $pdsw_html, 'onerror=alert(1)>' ), 'screen: a hostile value from the other plugin is never printed as markup' );
 
 	// Leftovers after deactivation.
@@ -562,6 +583,12 @@ if ( $pdsw_stub_exists ) {
 	$ok( '' !== $pdsw_hbk_last && false === strpos( (string) file_get_contents( $pdsw_hbk_last ), 'keep me' ) && false !== strpos( basename( $pdsw_hbk_last ), 'htaccess-block-' ), 'leftovers: the backup holds only the removed block, never the rest of .htaccess' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
 	$pdsw_fix = Perdita_Switch::get( 'wp-super-cache' )->fix_leftover( 'htaccess:WordPress' );
 	$ok( ! $pdsw_fix['ok'] && false !== strpos( (string) file_get_contents( $pdsw_ht ), '# BEGIN WordPress' ), 'leftovers: a block the plugin doesn\'t own is refused' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+	// A plugin that empties its block on deactivation leaves the markers.
+	$pdsw_put( $pdsw_ht, "# BEGIN WPSuperCache\n# The directives here are written by WP Super Cache.\n\n# END WPSuperCache\n# BEGIN WordPress\nkeep me\n# END WordPress\n" );
+	$pdsw_det = wp_list_pluck( Perdita_Switch::get( 'wp-super-cache' )->leftovers(), 'detail', 'id' );
+	$ok( isset( $pdsw_det['htaccess:WPSuperCache'] ) && false !== strpos( $pdsw_det['htaccess:WPSuperCache'], 'empty block' ) && false === strpos( $pdsw_det['htaccess:WPSuperCache'], 'old cached files' ), 'leftovers: an empty block says it has no rules, not that visitors get old cached files' );
+	$pdsw_fix = Perdita_Switch::get( 'wp-super-cache' )->fix_leftover( 'htaccess:WPSuperCache' );
+	$ok( $pdsw_fix['ok'] && false === strpos( (string) file_get_contents( $pdsw_ht ), 'WPSuperCache' ), 'leftovers: the empty block can be removed' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
 	$pdsw_fix = Perdita_Switch::get( 'wp-super-cache' )->fix_leftover( 'dropin' );
 	$ok( $pdsw_fix['ok'] && ( ! is_file( Perdita_Switch_Leftovers::dropin_path() ) || false === strpos( (string) file_get_contents( Perdita_Switch_Leftovers::dropin_path() ), 'WP SUPER CACHE' ) ), 'leftovers: its drop-in is removed' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
 	$pdsw_dbk = $pdsw_bks( 'advanced-cache' );

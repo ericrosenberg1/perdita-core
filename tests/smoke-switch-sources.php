@@ -50,6 +50,7 @@ $pdss_names   = array(
 	'seopress_advanced_option_name',
 	'wpseo_titles',
 	'wpseo_social',
+	'wpseo',
 	'wp_mail_smtp',
 	'wp_mail_smtp_mail_key',
 	'fluentmail-settings',
@@ -360,8 +361,8 @@ $ok( true === $pdss_patch['noindex']['archive_author'] && false === $pdss_patch[
 $ok( 'Organization' === $pdss_patch['schema_type'] && 'Press Co' === $pdss_patch['org_name'] && ! isset( $pdss_patch['org_logo_id'] ), 'seopress: knowledge graph, with a logo from outside the media library refused' );
 $ok( 'summary_large_image' === $pdss_patch['twitter_card'] && 'redirect' === $pdss_patch['attachments'] && 'sp-google' === $pdss_patch['verify_google'], 'seopress: card size, attachment redirect and verification' );
 $ok( (bool) array_filter( $pdss_p['notes'], function ( $n ) {
-	return false !== strpos( $n, 'SEOPress' );
-} ), 'seopress: the card says per-post fields stay behind' );
+	return false !== strpos( $n, 'own title and description' ) && false === strpos( $n, 'stay in SEOPress' );
+} ), 'seopress: the card says where per-post fields come over, since Perdita Pro imports them' );
 
 /* =============================================================
  * WP Mail SMTP, FluentSMTP and Post SMTP: secrets.
@@ -546,6 +547,44 @@ update_option( 'loginizer_whitelist', array( 1 => array( 'start' => '9.9.9.9', '
 update_option( 'loginizer_disable_brute', 0 );
 $pdss_p = $pdss_plan( 'loginizer' );
 $ok( 3 === $pdss_p['patch']['login_max'] && 15 === $pdss_p['patch']['login_lockout'] && 21 === $pdss_p['patch']['login_window'] && array( '9.9.9.9' ) === $pdss_p['patch']['ip_allowlist'], 'loginizer: settings convert, rounding the window to whole minutes' );
+
+/* ---------- regressions from the Switch audit, against the real plugins ---------- */
+
+// Yoast: its %%variables%% translate, an unknown one keeps Perdita's
+// default, newer separators map, and verification codes come over.
+update_option( 'wpseo_titles', array( 'separator' => 'sc-colon', 'title-home-wpseo' => '%%sitename%% %%sep%% %%sitedesc%%', 'metadesc-home-wpseo' => 'Shop %%cf_price%%' ) );
+update_option( 'wpseo', array( 'googleverify' => 'g-code-1', 'msverify' => 'ms-code-2' ) );
+update_option( 'wpseo_social', array( 'pinterestverify' => 'pin-code-3' ) );
+list( $pdss_y ) = perdita_core()->seo->yoast_patch();
+$ok( ':' === ( $pdss_y['separator'] ?? '' ) && '%sitename% %sep% %tagline%' === ( $pdss_y['home_title'] ?? '' ) && ! isset( $pdss_y['home_description'] ), 'yoast: sc-colon maps, %%sitedesc%% becomes %tagline%, and %%cf_price%% leaves the description at Perdita\'s default' );
+$ok( 'g-code-1' === ( $pdss_y['verify_google'] ?? '' ) && 'ms-code-2' === ( $pdss_y['verify_bing'] ?? '' ) && 'pin-code-3' === ( $pdss_y['verify_pinterest'] ?? '' ), 'yoast: Google, Bing and Pinterest verification codes come over' );
+update_option( 'wpseo_titles', array( 'separator' => 'sc-smstar' ) );
+list( $pdss_y ) = perdita_core()->seo->yoast_patch();
+$ok( "\u{22C6}" === ( $pdss_y['separator'] ?? '' ), 'yoast: sc-smstar maps to the small star' );
+
+// Rank Math stores a robots limit its owner switched off as false.
+update_option( 'rank-math-options-titles', array( 'advanced_robots_global' => array( 'max-snippet' => false, 'max-video-preview' => false, 'max-image-preview' => 'large' ) ) );
+$pdss_p = $pdss_plan( 'rank-math' );
+$ok( ! array_key_exists( 'max_snippet', $pdss_p['patch'] ) && ! array_key_exists( 'max_video_preview', $pdss_p['patch'] ) && 'large' === ( $pdss_p['patch']['max_image_preview'] ?? '' ), 'rank math: a switched-off max-snippet never imports as 0, which means no snippet at all' );
+
+// FluentSMTP keeps use_encrypt at the top of its option, and a connection
+// can opt out of encryption.
+update_option(
+	'fluentmail-settings',
+	array(
+		'use_encrypt' => 'yes',
+		'connections' => array( 'only' => array( 'provider_settings' => array( 'provider' => 'smtp', 'sender_email' => 'fluent@example.com', 'host' => 'smtp.fluent.example', 'port' => '587', 'auth' => 'yes', 'username' => 'fuser', 'password' => $pdss_fenc, 'encryption' => 'tls', 'key_store' => 'db' ) ) ),
+		'misc'        => array( 'default_connection' => 'only' ),
+	)
+);
+$pdss_p = $pdss_plan( 'fluent-smtp' );
+$ok( 'Flu3nt-Pass-ABCD' === ( $pdss_p['patch']['password_plain'] ?? '' ), 'fluentsmtp: a top-level use_encrypt decrypts the password' );
+$pdss_f = get_option( 'fluentmail-settings' );
+$pdss_f['connections']['only']['provider_settings']['disable_encryption'] = 'yes';
+$pdss_f['connections']['only']['provider_settings']['password']           = 'Plain-Pass-WXYZ';
+update_option( 'fluentmail-settings', $pdss_f );
+$pdss_p = $pdss_plan( 'fluent-smtp' );
+$ok( 'Plain-Pass-WXYZ' === ( $pdss_p['patch']['password_plain'] ?? '' ), 'fluentsmtp: a connection with disable_encryption keeps its plain password' );
 
 /* ---------- restore ---------- */
 

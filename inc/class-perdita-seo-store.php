@@ -514,13 +514,18 @@ class Perdita_SEO_Store {
 		$patch  = array( 'social' => array() );
 		$n      = 0;
 
+		if ( ! class_exists( 'Perdita_SEO_Variables' ) ) {
+			require_once __DIR__ . '/class-perdita-seo-variables.php';
+		}
 		$sep_map = array(
 			'sc-dash'   => '-',
 			'sc-ndash'  => '–',
 			'sc-mdash'  => '—',
+			'sc-colon'  => ':',
 			'sc-middot' => '·',
 			'sc-bull'   => '•',
 			'sc-star'   => '*',
+			'sc-smstar' => '⋆',
 			'sc-pipe'   => '|',
 			'sc-tilde'  => '~',
 			'sc-laquo'  => '«',
@@ -530,13 +535,33 @@ class Perdita_SEO_Store {
 			$patch['separator'] = $sep_map[ $titles['separator'] ];
 			++$n;
 		}
-		if ( ! empty( $titles['metadesc-home-wpseo'] ) ) {
-			$patch['home_description'] = $titles['metadesc-home-wpseo'];
+		// Yoast keeps its variables as %%name%%. Translate them, and leave a
+		// field with a variable that has no twin at Perdita's default.
+		$home_desc = ! empty( $titles['metadesc-home-wpseo'] ) ? Perdita_SEO_Variables::from_yoast( trim( html_entity_decode( (string) $titles['metadesc-home-wpseo'], ENT_QUOTES | ENT_HTML5, 'UTF-8' ) ) ) : null;
+		if ( null !== $home_desc && '' !== $home_desc ) {
+			$patch['home_description'] = $home_desc;
 			++$n;
 		}
-		if ( ! empty( $titles['title-home-wpseo'] ) ) {
-			$patch['home_title'] = $titles['title-home-wpseo'];
+		$home_title = ! empty( $titles['title-home-wpseo'] ) ? Perdita_SEO_Variables::from_yoast( trim( html_entity_decode( (string) $titles['title-home-wpseo'], ENT_QUOTES | ENT_HTML5, 'UTF-8' ) ) ) : null;
+		if ( null !== $home_title && '' !== $home_title ) {
+			$patch['home_title'] = $home_title;
 			++$n;
+		}
+		// Search engine verification codes: Yoast keeps them in the main
+		// "wpseo" option, and Pinterest's in "wpseo_social".
+		$wpseo = get_option( 'wpseo' );
+		$wpseo = is_array( $wpseo ) ? $wpseo : array();
+		foreach ( array(
+			'verify_google'    => $wpseo['googleverify'] ?? '',
+			'verify_bing'      => $wpseo['msverify'] ?? '',
+			'verify_yandex'    => $wpseo['yandexverify'] ?? '',
+			'verify_baidu'     => $wpseo['baiduverify'] ?? '',
+			'verify_pinterest' => $social['pinterestverify'] ?? '',
+		) as $key => $code ) {
+			if ( is_string( $code ) && '' !== trim( $code ) ) {
+				$patch[ $key ] = trim( $code );
+				++$n;
+			}
 		}
 		if ( ! empty( $titles['company_name'] ) ) {
 			$patch['org_name'] = $titles['company_name'];
