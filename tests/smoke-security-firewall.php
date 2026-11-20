@@ -1056,7 +1056,9 @@ $ok( 'allow' === $pfw_v['action'] && in_array( 'inspection_truncated', $pfw_v['n
 $pfw_apsrv = $pfw_server( '/wp-json/wp/v2/posts', array( 'REQUEST_METHOD' => 'POST', 'CONTENT_TYPE' => 'application/json', 'PHP_AUTH_USER' => 'ed', 'PHP_AUTH_PW' => 'xxxx', 'HTTP_AUTHORIZATION' => 'Basic ' . base64_encode( 'ed:xxxx' ) ) );
 $pfw_apv   = Perdita_Firewall::run( $pfw_cfg, $pfw_apsrv, array(), array(), array(), array(), wp_json_encode( array( 'title' => 'Big', 'content' => $pfw_huge['content'] ) ) );
 $ok( 'anomaly-003' === $pfw_apv['rule'] && Perdita_Firewall::should_defer( $pfw_apv, $pfw_cfg, array(), $pfw_apsrv, 'plugin' ), 'firewall anomaly-003: an application password REST post of 1.5 MB waits for WordPress' );
-$ok( ! Perdita_Firewall::should_defer( array_merge( $pfw_apv, array( 'rule' => 'sqli-005', 'category' => 'sqli' ) ), $pfw_cfg, array(), $pfw_apsrv, 'plugin' ), 'firewall anomaly-003: an Authorization header defers only anomaly-003' );
+$pfw_xssv = Perdita_Firewall::run( $pfw_cfg, $pfw_apsrv, array(), array(), array(), array(), wp_json_encode( array( 'title' => 'Embed', 'content' => '<script src="https://example.test/embed.js"></script>' ) ) );
+$ok( 'xss' === $pfw_xssv['category'] && Perdita_Firewall::should_defer( $pfw_xssv, $pfw_cfg, array(), $pfw_apsrv, 'plugin' ), 'firewall app passwords: an Authorization header defers a content block in any category' );
+$ok( ! Perdita_Firewall::should_defer( array_merge( $pfw_xssv, array( 'category' => 'ip_blocklist' ) ), $pfw_cfg, array(), $pfw_apsrv, 'plugin' ), 'firewall app passwords: an Authorization header never defers an IP block' );
 $ok( 'rest' === Perdita_Firewall::settle_point( $pfw_cfg, $pfw_apsrv ) && 'rest' === Perdita_Firewall::settle_point( $pfw_cfg, $pfw_server( '/?rest_route=/wp/v2/posts', array( 'QUERY_STRING' => 'rest_route=/wp/v2/posts' ) ) ) && 'rest' === Perdita_Firewall::settle_point( array_merge( $pfw_cfg, array( 'rest_prefix' => 'api' ) ), $pfw_server( '/blog/api/wp/v2/posts' ) ) && 'xmlrpc' === Perdita_Firewall::settle_point( $pfw_cfg, array( 'SCRIPT_FILENAME' => ABSPATH . 'xmlrpc.php', 'REQUEST_URI' => '/xmlrpc.php' ) ) && 'init' === Perdita_Firewall::settle_point( $pfw_cfg, $pfw_server( '/wp-admin/post.php' ) ) && 'init' === Perdita_Firewall::settle_point( $pfw_cfg, $pfw_server( '/wp-jsonx/' ) ), 'firewall anomaly-003: deferred verdicts settle on the REST hook, XML-RPC\'s own hook, or init' );
 $ok( ( function_exists( 'rest_get_url_prefix' ) ? rest_get_url_prefix() : 'wp-json' ) === $pfw_cfg['rest_prefix'], 'firewall anomaly-003: the config carries the REST prefix' );
 $pfw_prev_user = get_current_user_id();
@@ -1075,6 +1077,16 @@ if ( ! is_wp_error( $pfw_ap_users['editor'] ) && ! is_wp_error( $pfw_ap_users['s
 	wp_set_current_user( $pfw_ap_users['subscriber'] );
 	$pfw_v = Perdita_Firewall::resolve_pending();
 	$ok( 'block' === $pfw_v['action'] && 403 === $pfw_v['status'] && 'anomaly-003' === $pfw_v['rule'], 'firewall anomaly-003: the same post from a subscriber gets the 403' );
+	$pfw_unhook();
+	foreach ( array( 'editor' => 'allow', 'subscriber' => 'block' ) as $pfw_role => $pfw_want ) {
+		Perdita_Firewall::defer( $pfw_cfg, $pfw_xssv, $pfw_apsrv );
+		wp_set_current_user( $pfw_ap_users[ $pfw_role ] );
+		$ok( $pfw_want === Perdita_Firewall::resolve_pending()['action'], 'firewall app passwords: a REST post with a script embed from an application password ' . $pfw_role . ' settles as ' . $pfw_want );
+		$pfw_unhook();
+	}
+	Perdita_Firewall::defer( $pfw_cfg, $pfw_xssv, $pfw_apsrv );
+	wp_set_current_user( 0 );
+	$ok( 'block' === Perdita_Firewall::resolve_pending()['action'], 'firewall app passwords: a junk Authorization header still gets the 403 once WordPress loads' );
 	$pfw_unhook();
 	$pfw_xsrv = array( 'SCRIPT_FILENAME' => ABSPATH . 'xmlrpc.php', 'REQUEST_URI' => '/xmlrpc.php', 'REQUEST_METHOD' => 'POST' );
 	Perdita_Firewall::defer( $pfw_cfg, $pfw_apv, $pfw_xsrv );

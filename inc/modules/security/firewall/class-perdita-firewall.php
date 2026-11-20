@@ -17,9 +17,8 @@
  *
  * Deferred verdicts: a content block (sqli, xss, traversal, rfi, php_upload,
  * anomaly) on a request that carries a wordpress_logged_in_* cookie but no
- * valid trust cookie isn't answered before WordPress loads. anomaly-003 (bytes
- * left uninspected past the budget) also defers for a request with an
- * Authorization header, for application passwords. boot() keeps the verdict
+ * valid trust cookie isn't answered before WordPress loads. A request with an
+ * Authorization header (application passwords) defers the same way. boot() keeps the verdict
  * and settles it once WordPress knows the user: on rest_authentication_errors
  * for a REST request (application passwords resolve only there), on
  * xmlrpc_call for XML-RPC (after its own login), and on init for the rest. A
@@ -430,7 +429,7 @@ class Perdita_Firewall {
 		if ( 'block' !== $verdict['action'] || ! empty( $verdict['trusted'] ) || ! in_array( $verdict['category'], self::DEFERRABLE, true ) ) {
 			return false;
 		}
-		if ( ! self::session_tokens( $cookie ) && ! ( 'anomaly-003' === $verdict['rule'] && self::has_auth_header( $server ) ) ) {
+		if ( ! self::session_tokens( $cookie ) && ! self::has_auth_header( $server ) ) {
 			return false;
 		}
 		return 'prepend' !== $loader || self::entry_point( $config, $server );
