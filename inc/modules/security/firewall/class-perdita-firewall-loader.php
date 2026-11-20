@@ -367,7 +367,14 @@ class Perdita_Firewall_Loader {
 	 */
 	public static function bootstrap_still_needed() {
 		$boot = Perdita_Firewall_Config::bootstrap_path();
-		return self::$user_ini_removed > 0 || defined( 'PERDITA_FIREWALL_EARLY' ) || realpath( (string) ini_get( 'auto_prepend_file' ) ) === realpath( $boot );
+		if ( self::$user_ini_removed > 0 || defined( 'PERDITA_FIREWALL_EARLY' ) ) {
+			return true;
+		}
+		// realpath() answers false for '' and for a missing file alike, so an
+		// empty auto_prepend_file must never match a missing bootstrap.
+		$prepend = (string) ini_get( 'auto_prepend_file' );
+		$real    = '' === $prepend ? false : realpath( $prepend );
+		return false !== $real && realpath( $boot ) === $real;
 	}
 
 	/* ---------- status ---------- */
@@ -378,6 +385,7 @@ class Perdita_Firewall_Loader {
 	 * @return array array( 'mode', 'result', 'working' => bool, 'message' => string ).
 	 */
 	public static function status() {
+		Perdita_Firewall_Config::sweep_bootstrap();
 		$state = get_option( Perdita_Firewall_Config::STATE_OPTION, array() );
 		$state = is_array( $state ) ? $state : array();
 		$state = array_merge(
@@ -440,6 +448,10 @@ class Perdita_Firewall_Loader {
 			default:
 				/* translators: %s: file path. */
 				$msg = sprintf( __( 'WordPress can\'t write %s. Perdita Core runs the firewall instead.', 'perdita-core' ), $state['file'] );
+		}
+		if ( ! empty( $state['bootstrap_until'] ) && (int) $state['bootstrap_until'] > time() && is_file( Perdita_Firewall_Config::bootstrap_path() ) ) {
+			/* translators: %s: file path. */
+			$msg .= ' ' . sprintf( __( 'Perdita kept %s for a few more minutes, because PHP may still load that file from a cached .user.ini. Without its config, PHP runs nothing from the file, and Perdita deletes the file the next time you open this screen after the wait.', 'perdita-core' ), Perdita_Firewall_Config::bootstrap_path() );
 		}
 		$state['working'] = $working;
 		$state['ran']     = $ran;

@@ -72,7 +72,11 @@ foreach ( glob( PERDITA_CORE_DIR . 'inc/modules/security/firewall/*.php' ) as $p
 	$ok( ! preg_match( '/<<<\s*[\'"]?[A-Za-z_]/', $pfw_src ), 'firewall: no heredoc or nowdoc in ' . basename( $pfw_file ) );
 }
 $pfw_engine_src = (string) file_get_contents( PERDITA_CORE_DIR . 'inc/modules/security/firewall/class-perdita-firewall.php' );
-$ok( ! preg_match( '/\b(?:get_option|apply_filters|add_action|esc_html|wp_[a-z_]+)\s*\(/', $pfw_engine_src ), 'firewall: the engine calls no WordPress function, so it runs before WordPress loads' );
+// settle() runs on init and defer() may run inside WordPress, so those two
+// calls sit behind function_exists() guards.
+$ok( false !== strpos( $pfw_engine_src, "if ( function_exists( 'add_action' ) ) {\n\t\t\tadd_action( 'init', \$callback" ) && false !== strpos( $pfw_engine_src, "function_exists( 'current_user_can' ) && current_user_can( \$cap )" ), 'firewall: the engine guards its two WordPress calls with function_exists()' );
+$pfw_engine_bare = str_replace( array( "add_action( 'init', \$callback", 'current_user_can( $cap )' ), '', $pfw_engine_src );
+$ok( ! preg_match( '/\b(?:get_option|apply_filters|add_action|current_user_can|esc_html|wp_[a-z_]+)\s*\(/', $pfw_engine_bare ), 'firewall: the engine calls no other WordPress function, so it runs before WordPress loads' );
 
 /* ---------- engine config for the corpus ---------- */
 
@@ -89,7 +93,8 @@ $pfw_cfg = Perdita_Firewall_Config::build( $pfw_settings, true );
 $ok( ! empty( $pfw_cfg['enabled'] ) && 'block' === $pfw_cfg['mode'], 'firewall: build() turns the firewall on in block mode from the settings' );
 $ok( false === Perdita_Firewall_Config::build( $pfw_settings, false )['enabled'], 'firewall: build() keeps the firewall off while the security module is off' );
 $ok( 8 === count( array_filter( $pfw_cfg['rules'] ) ), 'firewall: every rule category is on once the firewall is on' );
-$ok( preg_match( '/^[0-9a-f]{64}$/', $pfw_cfg['key'] ) && $pfw_cfg['key'] === get_option( Perdita_Firewall_Config::KEY_OPTION ), 'firewall: the trust key is 64 hex characters, stored once in an option' );
+$ok( preg_match( '/^[0-9a-f]{64}$/', $pfw_cfg['key'] ) && $pfw_cfg['key'] === get_option( Perdita_Firewall_Config::KEY_OPTION ), 'firewall: the trust key is 64 hex characters, stored in an option' );
+$ok( ABSPATH === $pfw_cfg['abspath'] && 'edit_posts' === $pfw_cfg['trust_cap'], 'firewall: the config carries ABSPATH and the trust capability for deferred verdicts' );
 $ok( ! empty( $pfw_cfg['cf_ranges']['v4'] ) && ! empty( $pfw_cfg['cf_ranges']['v6'] ), 'firewall: the Cloudflare ranges compile into the config' );
 
 $pfw_ua     = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36';
@@ -105,7 +110,9 @@ $pfw_server = function ( $uri = '/', $extra = array() ) use ( $pfw_ua ) {
 		$extra
 	);
 };
-$pfw_trust = array( Perdita_Firewall::TRUST_COOKIE => Perdita_Firewall::trust_value( 1, time() + 3600, $pfw_cfg['key'] ) );
+$pfw_token = 'Tk' . str_repeat( 'a1B2', 10 ) . 'z';
+$pfw_li    = array( 'wordpress_logged_in_' . md5( 'smoke' ) => 'admin|' . ( time() + DAY_IN_SECONDS ) . '|' . $pfw_token . '|' . str_repeat( 'c', 64 ) );
+$pfw_trust = array( Perdita_Firewall::TRUST_COOKIE => Perdita_Firewall::trust_value( 1, time() + 3600, $pfw_cfg['key'], $pfw_token ) ) + $pfw_li;
 $pfw_run   = function ( $req ) use ( $pfw_cfg, $pfw_server ) {
 	$req = array_merge(
 		array(
@@ -581,26 +588,84 @@ $ok( 'allow' === $pfw_run( array( 'config' => $pfw_ex, 'uri' => '/wp-admin/admin
 /* ---------- trust cookie ---------- */
 
 $pfw_key  = $pfw_cfg['key'];
-$pfw_good = Perdita_Firewall::trust_value( 7, time() + 600, $pfw_key );
-$ok( 7 === Perdita_Firewall::verify_trust( $pfw_good, $pfw_key ), 'firewall trust: a signed cookie verifies to its user id' );
-$ok( false === Perdita_Firewall::verify_trust( $pfw_good, str_repeat( 'b', 64 ) ), 'firewall trust: a cookie signed with another key fails' );
-$ok( false === Perdita_Firewall::verify_trust( Perdita_Firewall::trust_value( 7, time() - 1, $pfw_key ), $pfw_key ), 'firewall trust: an expired cookie fails' );
+$pfw_tok  = array( $pfw_token );
+$pfw_good = Perdita_Firewall::trust_value( 7, time() + 600, $pfw_key, $pfw_token );
+$ok( 7 === Perdita_Firewall::verify_trust( $pfw_good, $pfw_key, null, $pfw_tok ), 'firewall trust: a signed cookie verifies to its user id next to its session token' );
+$ok( false === Perdita_Firewall::verify_trust( $pfw_good, str_repeat( 'b', 64 ), null, $pfw_tok ), 'firewall trust: a cookie signed with another key fails' );
+$ok( false === Perdita_Firewall::verify_trust( Perdita_Firewall::trust_value( 7, time() - 1, $pfw_key, $pfw_token ), $pfw_key, null, $pfw_tok ), 'firewall trust: an expired cookie fails' );
 $pfw_parts    = explode( '.', $pfw_good );
 $pfw_parts[0] = '1';
-$ok( false === Perdita_Firewall::verify_trust( implode( '.', $pfw_parts ), $pfw_key ), 'firewall trust: changing the user id breaks the signature' );
+$ok( false === Perdita_Firewall::verify_trust( implode( '.', $pfw_parts ), $pfw_key, null, $pfw_tok ), 'firewall trust: changing the user id breaks the signature' );
 $pfw_parts    = explode( '.', $pfw_good );
 $pfw_parts[1] = (string) ( (int) $pfw_parts[1] + 999999 );
-$ok( false === Perdita_Firewall::verify_trust( implode( '.', $pfw_parts ), $pfw_key ), 'firewall trust: extending the expiry breaks the signature' );
-$ok( false === Perdita_Firewall::verify_trust( '1.9999999999.' . str_repeat( '0', 64 ), $pfw_key ) && false === Perdita_Firewall::verify_trust( $pfw_good, '' ), 'firewall trust: a forged signature or an empty key fails' );
-$ok( 'block' === $pfw_run( array( 'cookie' => array( Perdita_Firewall::TRUST_COOKIE => '1.9999999999.' . str_repeat( 'a', 64 ) ), 'get' => array( 'id' => "1' OR '1'='1" ) ) )['action'], 'firewall trust: the engine never trusts a cookie it can\'t verify' );
+$ok( false === Perdita_Firewall::verify_trust( implode( '.', $pfw_parts ), $pfw_key, null, $pfw_tok ), 'firewall trust: extending the expiry breaks the signature' );
+$ok( false === Perdita_Firewall::verify_trust( '1.9999999999.' . str_repeat( '0', 64 ), $pfw_key, null, $pfw_tok ) && false === Perdita_Firewall::verify_trust( $pfw_good, '', null, $pfw_tok ), 'firewall trust: a forged signature or an empty key fails' );
+$ok( 'block' === $pfw_run( array( 'cookie' => array( Perdita_Firewall::TRUST_COOKIE => '1.9999999999.' . str_repeat( 'a', 64 ) ) + $pfw_li, 'get' => array( 'id' => "1' OR '1'='1" ) ) )['action'], 'firewall trust: the engine never trusts a cookie it can\'t verify' );
+
+// Review finding 4: a trust cookie works only beside the login session it was signed for.
+$ok( false === Perdita_Firewall::verify_trust( $pfw_good, $pfw_key ), 'firewall trust: a trust cookie without a wordpress_logged_in_* session token never verifies' );
+$ok( false === Perdita_Firewall::verify_trust( $pfw_good, $pfw_key, null, array( 'Other' . str_repeat( 'x', 38 ) ) ), 'firewall trust: a trust cookie replayed beside another session token fails' );
+$pfw_replay = array( Perdita_Firewall::TRUST_COOKIE => $pfw_trust[ Perdita_Firewall::TRUST_COOKIE ] );
+$pfw_v      = $pfw_run( array( 'cookie' => $pfw_replay, 'get' => array( 'id' => "1' OR '1'='1" ) ) );
+$ok( 'block' === $pfw_v['action'] && false === $pfw_v['trusted'], 'firewall trust: a replayed trust cookie with no logged-in cookie (after logout) blocks' );
+$pfw_v = $pfw_run( array( 'cookie' => $pfw_replay + array( 'wordpress_logged_in_x' => 'admin|1|Fresh' . str_repeat( 'y', 38 ) . '|' . str_repeat( 'd', 64 ) ), 'get' => array( 'id' => "1' OR '1'='1" ) ) );
+$ok( 'block' === $pfw_v['action'], 'firewall trust: a replayed trust cookie beside a new session blocks' );
+$ok( false === Perdita_Firewall::verify_trust( Perdita_Firewall::trust_value( 7, time() + 13 * DAY_IN_SECONDS, $pfw_key, $pfw_token ), $pfw_key, null, $pfw_tok ), 'firewall trust: an expiry past the one-hour lifetime never verifies, even with a good signature' );
+$ok( 3600 === Perdita_Firewall::TRUST_TTL && 7 === Perdita_Firewall::verify_trust( Perdita_Firewall::trust_value( 7, time() + 3600, $pfw_key, $pfw_token ), $pfw_key, null, $pfw_tok ), 'firewall trust: a fresh one-hour cookie verifies' );
+$ok( array( $pfw_token ) === Perdita_Firewall::session_tokens( $pfw_li + array( 'wordpress_logged_in_bad' => 'a|b|c', 'other' => 'x|y|' . $pfw_token . '|z' ) ), 'firewall trust: session_tokens() reads the token from wordpress_logged_in_* cookies only' );
 
 $pfw_admins = get_users( array( 'role' => 'administrator', 'number' => 1, 'fields' => 'ID' ) );
 $pfw_admin  = $pfw_admins ? (int) $pfw_admins[0] : 0;
 $pfw_sub    = wp_insert_user( array( 'user_login' => 'perdita_smoke_fw_sub', 'user_email' => 'perdita-smoke-fw-sub@example.com', 'user_pass' => wp_generate_password(), 'role' => 'subscriber' ) );
 $pfw_cookie_before = isset( $_COOKIE[ Perdita_Firewall::TRUST_COOKIE ] ) ? $_COOKIE[ Perdita_Firewall::TRUST_COOKIE ] : null;
-$pfw_val = Perdita_Firewall_Config::maybe_set_trust_cookie( $pfw_admin, time() + 600, 0 );
-$ok( $pfw_admin > 0 && $pfw_admin === Perdita_Firewall::verify_trust( $pfw_val, Perdita_Firewall_Config::key() ), 'firewall trust: an administrator gets a cookie the engine verifies' );
-$ok( '' === Perdita_Firewall_Config::maybe_set_trust_cookie( is_int( $pfw_sub ) ? $pfw_sub : 0, time() + 600, 0 ), 'firewall trust: a subscriber gets no trust cookie under edit_posts' );
+$pfw_val = Perdita_Firewall_Config::maybe_set_trust_cookie( $pfw_admin, $pfw_token );
+$ok( $pfw_admin > 0 && $pfw_admin === Perdita_Firewall::verify_trust( $pfw_val, Perdita_Firewall_Config::key(), null, $pfw_tok ), 'firewall trust: an administrator gets a cookie the engine verifies' );
+$ok( '' === Perdita_Firewall_Config::maybe_set_trust_cookie( is_int( $pfw_sub ) ? $pfw_sub : 0, $pfw_token ), 'firewall trust: a subscriber gets no trust cookie under edit_posts' );
+$ok( '' === Perdita_Firewall_Config::maybe_set_trust_cookie( $pfw_admin, '' ), 'firewall trust: no session token, no trust cookie' );
+
+// Sliding renewal on init, and the cookie goes away with the capability or the login.
+$pfw_user_before  = get_current_user_id();
+$pfw_li_name      = LOGGED_IN_COOKIE;
+$pfw_li_before    = isset( $_COOKIE[ $pfw_li_name ] ) ? $_COOKIE[ $pfw_li_name ] : null;
+$pfw_meta_before  = get_user_meta( $pfw_admin, 'session_tokens', true );
+$pfw_session      = WP_Session_Tokens::get_instance( $pfw_admin );
+$pfw_session_tok  = $pfw_session->create( time() + HOUR_IN_SECONDS );
+$_COOKIE[ $pfw_li_name ] = wp_generate_auth_cookie( $pfw_admin, time() + HOUR_IN_SECONDS, 'logged_in', $pfw_session_tok );
+wp_set_current_user( $pfw_admin );
+unset( $_COOKIE[ Perdita_Firewall::TRUST_COOKIE ] );
+Perdita_Firewall_Config::refresh_trust_cookie();
+$pfw_new = isset( $_COOKIE[ Perdita_Firewall::TRUST_COOKIE ] ) ? $_COOKIE[ Perdita_Firewall::TRUST_COOKIE ] : '';
+$ok( $pfw_admin === Perdita_Firewall::verify_trust( $pfw_new, Perdita_Firewall_Config::key(), null, array( $pfw_session_tok ) ), 'firewall trust: init issues a cookie bound to the signed-in session' );
+Perdita_Firewall_Config::refresh_trust_cookie();
+$ok( $pfw_new === $_COOKIE[ Perdita_Firewall::TRUST_COOKIE ], 'firewall trust: init leaves a fresh cookie alone (no Set-Cookie on every page)' );
+$_COOKIE[ Perdita_Firewall::TRUST_COOKIE ] = Perdita_Firewall::trust_value( $pfw_admin, time() + 600, Perdita_Firewall_Config::key(), $pfw_session_tok );
+Perdita_Firewall_Config::refresh_trust_cookie();
+$pfw_parts = explode( '.', (string) $_COOKIE[ Perdita_Firewall::TRUST_COOKIE ] );
+$ok( (int) $pfw_parts[1] >= time() + 3500, 'firewall trust: init reissues a cookie older than 15 minutes for another hour' );
+$_COOKIE[ Perdita_Firewall::TRUST_COOKIE ] = Perdita_Firewall::trust_value( $pfw_admin, time() + 3600, str_repeat( 'e', 64 ), $pfw_session_tok );
+Perdita_Firewall_Config::refresh_trust_cookie();
+$ok( $pfw_admin === Perdita_Firewall::verify_trust( (string) $_COOKIE[ Perdita_Firewall::TRUST_COOKIE ], Perdita_Firewall_Config::key(), null, array( $pfw_session_tok ) ), 'firewall trust: init replaces a cookie signed with an old key' );
+if ( is_int( $pfw_sub ) ) {
+	wp_set_current_user( $pfw_sub );
+	Perdita_Firewall_Config::refresh_trust_cookie();
+	$ok( ! isset( $_COOKIE[ Perdita_Firewall::TRUST_COOKIE ] ), 'firewall trust: init clears the cookie for a user without the capability' );
+}
+$_COOKIE[ Perdita_Firewall::TRUST_COOKIE ] = $pfw_new;
+wp_set_current_user( 0 );
+Perdita_Firewall_Config::refresh_trust_cookie();
+$ok( ! isset( $_COOKIE[ Perdita_Firewall::TRUST_COOKIE ] ), 'firewall trust: init clears the cookie for a visitor who isn\'t signed in' );
+$pfw_session->destroy( $pfw_session_tok );
+if ( '' === $pfw_meta_before ) {
+	delete_user_meta( $pfw_admin, 'session_tokens' );
+} else {
+	update_user_meta( $pfw_admin, 'session_tokens', $pfw_meta_before );
+}
+if ( null === $pfw_li_before ) {
+	unset( $_COOKIE[ $pfw_li_name ] );
+} else {
+	$_COOKIE[ $pfw_li_name ] = $pfw_li_before;
+}
+wp_set_current_user( $pfw_user_before );
 Perdita_Firewall_Config::clear_trust_cookie();
 $ok( ! isset( $_COOKIE[ Perdita_Firewall::TRUST_COOKIE ] ), 'firewall trust: logout clears the cookie' );
 if ( null !== $pfw_cookie_before ) {
@@ -609,6 +674,178 @@ if ( null !== $pfw_cookie_before ) {
 if ( is_int( $pfw_sub ) ) {
 	wp_delete_user( $pfw_sub );
 }
+
+/* ---------- review regressions ---------- */
+
+// Finding 1: UNION SELECT ... FROM with an alias, from(table), or a quoted table.
+foreach ( array(
+	'-1 union select user_pass from(wp_users)',
+	'-1 union select user_pass from wp_users x',
+	"-1 union select user_pass from wp_users\nwhere id=1",
+	'-1 union select user_login,user_pass from wp_users x',
+	'-1 union select user_pass from wordpress.wp_users x',
+	'-1 union select user_pass from `wp_users` x',
+	'-1 UNION ALL SELECT user_pass FROM wp_users u',
+	'-1 union distinct select(user_pass)from(wp_users)',
+	'-1 union select user_pass from wp_users limit 1',
+) as $pfw_payload ) {
+	$pfw_v = $pfw_run( array( 'get' => array( 'id' => $pfw_payload ) ) );
+	$ok( 'block' === $pfw_v['action'] && 'sqli' === $pfw_v['category'], 'firewall finding 1: UNION extraction blocks: ' . str_replace( "\n", '\\n', $pfw_payload ) . ( $pfw_v['rule'] ? ' (' . $pfw_v['rule'] . ')' : '' ) );
+}
+foreach ( array( '1 Union Select Rd', 'Union Select & Sons', 'We select union reps from every shop' ) as $pfw_text ) {
+	$ok( 'allow' === $pfw_run( array( 'get' => array( 'q' => $pfw_text ) ) )['action'], 'firewall finding 1: prose passes: ' . $pfw_text );
+}
+
+// Finding 2: no depth stops the walk, and a request past the value cap is an anomaly.
+foreach ( array( 17, 25, 200 ) as $pfw_depth ) {
+	$pfw_deep = "1' or '1'='1";
+	for ( $pfw_i = 0; $pfw_i < $pfw_depth; $pfw_i++ ) {
+		$pfw_deep = array( 'x' => $pfw_deep );
+	}
+	$pfw_vp = $pfw_run( array( 'server' => array( 'REQUEST_METHOD' => 'POST' ), 'post' => array( 'p' => $pfw_deep ) ) );
+	$pfw_vg = $pfw_run( array( 'get' => array( 'p' => $pfw_deep ) ) );
+	$ok( 'sqli-005' === $pfw_vp['rule'] && 'sqli-005' === $pfw_vg['rule'], 'firewall finding 2: a payload ' . $pfw_depth . ' levels deep blocks in POST and GET' );
+}
+$pfw_json = "\"1' or '1'='1\"";
+for ( $pfw_i = 0; $pfw_i < 100; $pfw_i++ ) {
+	$pfw_json = '{"x":' . $pfw_json . '}';
+}
+$pfw_jsrv = array( 'REQUEST_METHOD' => 'POST', 'CONTENT_TYPE' => 'application/json' );
+$ok( 'sqli-005' === $pfw_run( array( 'server' => $pfw_jsrv, 'body' => $pfw_json ) )['rule'], 'firewall finding 2: a JSON payload 100 levels deep blocks (decoded to depth 512)' );
+$pfw_json = str_repeat( '[', 600 ) . '1' . str_repeat( ']', 600 );
+$pfw_v    = $pfw_run( array( 'server' => $pfw_jsrv, 'body' => $pfw_json ) );
+$ok( 'anomaly-001' !== $pfw_v['rule'] && 'anomaly-002' === $pfw_v['rule'] && 'block' === $pfw_v['action'], 'firewall finding 2: JSON deeper than 512 levels blocks as anomaly-002' );
+$pfw_json = wp_json_encode( array( 'content' => "1' or '1'='1", 'pad' => str_repeat( 'a', 300000 ) ) );
+$ok( 'sqli-005' === $pfw_run( array( 'server' => $pfw_jsrv, 'body' => $pfw_json ) )['rule'], 'firewall finding 2: a JSON body over 256 KB still decodes and blocks' );
+$pfw_many = array_fill( 0, Perdita_Firewall::LEAF_CAP + 5, 'ok' );
+$pfw_v    = $pfw_run( array( 'server' => $pfw_jsrv, 'body' => wp_json_encode( array( 'list' => $pfw_many ) ) ) );
+$ok( 'anomaly-001' === $pfw_v['rule'] && 'block' === $pfw_v['action'] && 'json:list' === $pfw_v['field'], 'firewall finding 2: a request past ' . Perdita_Firewall::LEAF_CAP . ' values blocks as anomaly-001' );
+$ok( 'monitor' === $pfw_run( array( 'config' => $pfw_monitor, 'server' => $pfw_jsrv, 'body' => wp_json_encode( array( 'list' => $pfw_many ) ) ) )['action'], 'firewall finding 2: monitor mode logs anomaly-001 and lets it through' );
+$pfw_form = array();
+for ( $pfw_i = 0; $pfw_i < 900; $pfw_i++ ) {
+	$pfw_form[ 'attribute_' . $pfw_i ] = array( 'name' => 'Size ' . $pfw_i, 'values' => array( 'Small', 'Medium', 'Large' ) );
+}
+$ok( 'allow' === $pfw_run( array( 'server' => array( 'REQUEST_METHOD' => 'POST' ), 'post' => $pfw_form ) )['action'], 'firewall finding 2: a 900-attribute WooCommerce-style form passes' );
+$ok( 'anomaly' === Perdita_Firewall::category_of( 'anomaly-001' ), 'firewall finding 2: anomaly ids map to the anomaly category' );
+
+// Finding 3: time delays with a nested paren or a function argument.
+foreach ( array( '1 and sleep((5))', '1 and sleep(pi())', '1 and sleep( (5) )', '1 and benchmark((5000000),md5(1))', '1;select pg_sleep((5))', '1 and sleep(@d)', "1;waitfor delay ('0:0:5')", '1 and benchmark(power(10,7),md5(1))' ) as $pfw_payload ) {
+	$pfw_v = $pfw_run( array( 'get' => array( 'id' => $pfw_payload ) ) );
+	$ok( 'block' === $pfw_v['action'], 'firewall finding 3: time delay blocks: ' . $pfw_payload . ( $pfw_v['rule'] ? ' (' . $pfw_v['rule'] . ')' : '' ) );
+}
+foreach ( array( 'I need sleep (lots of it) before the benchmark (see results).', 'Sleep apnea: a benchmark of CPAP machines' ) as $pfw_text ) {
+	$ok( 'allow' === $pfw_run( array( 'server' => array( 'REQUEST_METHOD' => 'POST' ), 'post' => array( 'message' => $pfw_text ) ) )['action'], 'firewall finding 3: prose passes: ' . $pfw_text );
+}
+
+// Finding 5: built-in exclusions for the search box and the comment field.
+$ok( 'allow' === $pfw_run( array( 'uri' => '/', 'get' => array( 's' => 'what is php://filter' ) ) )['action'], 'firewall finding 5: a search for "what is php://filter" passes' );
+$ok( 'allow' === $pfw_run( array( 'uri' => '/', 'get' => array( 's' => '../wp-config.php and /etc/passwd' ) ) )['action'], 'firewall finding 5: a search naming ../wp-config.php passes' );
+$ok( 'allow' === $pfw_run( array( 'uri' => '/', 'get' => array( 's' => "' OR '1'='1" ) ) )['action'], 'firewall finding 5: a search holding a tautology passes' );
+$ok( 'block' === $pfw_run( array( 'uri' => '/', 'get' => array( 's' => '-1 union select user_pass from wp_users x' ) ) )['action'], 'firewall finding 5: a UNION extraction in the search box still blocks' );
+$ok( 'block' === $pfw_run( array( 'uri' => '/', 'get' => array( 's' => '1 and sleep(5)' ) ) )['action'], 'firewall finding 5: a time delay in the search box still blocks' );
+$ok( 'block' === $pfw_run( array( 'uri' => '/', 'get' => array( 's' => "1'; drop table wp_users--" ) ) )['action'], 'firewall finding 5: a stacked query in the search box still blocks' );
+$ok( 'block' === $pfw_run( array( 'uri' => '/', 'get' => array( 's' => '<script>alert(1)</script>' ) ) )['action'], 'firewall finding 5: a script in the search box still blocks' );
+$pfw_comment = function ( $text, $uri = '/wp-comments-post.php' ) use ( $pfw_run ) {
+	return $pfw_run( array( 'uri' => $uri, 'server' => array( 'REQUEST_METHOD' => 'POST' ), 'post' => array( 'comment' => $text, 'comment_post_ID' => '5' ) ) );
+};
+$ok( 'allow' === $pfw_comment( "Try ' OR '1'='1 in the login box and you'll see why prepared statements matter." )['action'], 'firewall finding 5: a logged-out comment with \' OR \'1\'=\'1 passes' );
+$ok( 'allow' === $pfw_comment( 'Never let a download link take ../wp-config.php or /etc/passwd.' )['action'], 'firewall finding 5: a comment naming ../wp-config.php passes' );
+$ok( 'block' === $pfw_comment( "1' and sleep(5)-- x" )['action'] && 'block' === $pfw_comment( '-1 union select user_pass from wp_users x' )['action'], 'firewall finding 5: UNION and time-delay SQL in a comment still block' );
+$ok( 'block' === $pfw_comment( "' OR '1'='1", '/contact/' )['action'], 'firewall finding 5: the comment exclusion applies on wp-comments-post.php only' );
+$ok( 'block' === $pfw_run( array( 'uri' => '/wp-comments-post.php', 'server' => array( 'REQUEST_METHOD' => 'POST' ), 'post' => array( 'author' => "' OR '1'='1", 'comment' => 'hi there' ) ) )['action'], 'firewall finding 5: other comment form fields keep every rule' );
+
+// Finding 5: a signed-in visitor's block waits for init.
+$pfw_editor = $pfw_run(
+	array(
+		'uri'    => '/wp-json/wp/v2/posts/42',
+		'server' => $pfw_jsrv,
+		'cookie' => $pfw_li,
+		'body'   => wp_json_encode( array( 'content' => "<!-- wp:code --><pre class=\"wp-block-code\"><code>SELECT 1 UNION SELECT user_pass FROM wp_users;</code></pre><!-- /wp:code -->" ) ),
+	)
+);
+$pfw_jsrv_full = $pfw_server( '/wp-json/wp/v2/posts/42', $pfw_jsrv );
+$ok( 'block' === $pfw_editor['action'] && Perdita_Firewall::should_defer( $pfw_editor, $pfw_cfg, $pfw_li, $pfw_jsrv_full, 'plugin' ), 'firewall finding 5: a block editor save with SQL in a code block, a logged-in cookie, and no trust cookie waits for init' );
+$ok( ! Perdita_Firewall::should_defer( $pfw_editor, $pfw_cfg, array(), $pfw_jsrv_full, 'plugin' ), 'firewall finding 5: with no logged-in cookie the block is immediate' );
+$pfw_mon = $pfw_editor;
+$pfw_mon['action'] = 'monitor';
+$ok( ! Perdita_Firewall::should_defer( $pfw_mon, $pfw_cfg, $pfw_li, $pfw_jsrv_full, 'plugin' ), 'firewall finding 5: monitor mode never defers' );
+$pfw_ipv = $pfw_editor;
+$pfw_ipv['category'] = 'ip_blocklist';
+$ok( ! Perdita_Firewall::should_defer( $pfw_ipv, $pfw_cfg, $pfw_li, $pfw_jsrv_full, 'plugin' ), 'firewall finding 5: an IP, country, rate, probe, or scanner block never waits' );
+$ok( Perdita_Firewall::should_defer( $pfw_editor, $pfw_cfg, $pfw_li, array( 'SCRIPT_FILENAME' => ABSPATH . 'index.php' ), 'prepend' ), 'firewall finding 5: before WordPress, a request for index.php defers' );
+$ok( Perdita_Firewall::entry_point( $pfw_cfg, array( 'SCRIPT_FILENAME' => ABSPATH . 'wp-admin/post.php' ) ) && Perdita_Firewall::entry_point( $pfw_cfg, array( 'SCRIPT_FILENAME' => ABSPATH . 'wp-comments-post.php' ) ), 'firewall finding 5: wp-admin screens and wp-comments-post.php count as WordPress entry points' );
+$ok( ! Perdita_Firewall::should_defer( $pfw_editor, $pfw_cfg, $pfw_li, array( 'SCRIPT_FILENAME' => WP_CONTENT_DIR . '/plugins/x/ajax.php' ), 'prepend' ) && ! Perdita_Firewall::entry_point( $pfw_cfg, array( 'SCRIPT_FILENAME' => ABSPATH . 'wp-admin/load-scripts.php' ) ) && ! Perdita_Firewall::entry_point( $pfw_cfg, array( 'SCRIPT_FILENAME' => '/tmp/other/index.php' ) ), 'firewall finding 5: before WordPress, a direct hit on a plugin file (or any script that never fires init) blocks at once' );
+$pfw_logcfg2            = $pfw_cfg;
+$pfw_logcfg2['log_dir'] = Perdita_Firewall_Config::log_dir();
+wp_mkdir_p( $pfw_logcfg2['log_dir'] );
+$pfw_logfile2 = $pfw_logcfg2['log_dir'] . gmdate( 'Y-m-d' ) . '.log.php';
+$pfw_size     = is_file( $pfw_logfile2 ) ? filesize( $pfw_logfile2 ) : 0;
+Perdita_Firewall::defer( $pfw_logcfg2, $pfw_editor, $pfw_jsrv_full );
+$ok( Perdita_Firewall::has_pending() && false !== has_action( 'init', array( 'Perdita_Firewall', 'settle' ) ), 'firewall finding 5: defer() keeps the verdict and hooks settle() on init' );
+$pfw_v = Perdita_Firewall::resolve_pending( true );
+clearstatcache();
+$ok( 'allow' === $pfw_v['action'] && true === $pfw_v['trusted'] && ( is_file( $pfw_logfile2 ) ? filesize( $pfw_logfile2 ) : 0 ) === $pfw_size && ! Perdita_Firewall::has_pending(), 'firewall finding 5: a user with the trust capability gets through and nothing is logged' );
+Perdita_Firewall::defer( $pfw_logcfg2, $pfw_editor, $pfw_jsrv_full );
+$pfw_v = Perdita_Firewall::resolve_pending( false );
+clearstatcache();
+$pfw_last = is_file( $pfw_logfile2 ) ? json_decode( (string) array_slice( file( $pfw_logfile2, FILE_IGNORE_NEW_LINES ), -1 )[0], true ) : null;
+$ok( 'block' === $pfw_v['action'] && 403 === $pfw_v['status'] && is_array( $pfw_last ) && $pfw_editor['rule'] === $pfw_last['rule'] && 'block' === $pfw_last['action'] && $pfw_v['ref'] === $pfw_last['ref'], 'firewall finding 5: anyone else gets the same block and the same log line' );
+remove_action( 'init', array( 'Perdita_Firewall', 'settle' ), Perdita_Firewall::SETTLE_PRIORITY );
+$pfw_cap_cfg              = $pfw_logcfg2;
+$pfw_cap_cfg['trust_cap'] = 'perdita_smoke_no_such_cap';
+Perdita_Firewall::defer( $pfw_cap_cfg, $pfw_editor, $pfw_jsrv_full );
+$ok( 'block' === Perdita_Firewall::resolve_pending()['action'], 'firewall finding 5: settle() asks WordPress for the trust capability from the config' );
+remove_action( 'init', array( 'Perdita_Firewall', 'settle' ), Perdita_Firewall::SETTLE_PRIORITY );
+
+// Round 2 finding 4: an editor tab opened before the firewall went on (no
+// trust cookie yet) saves a code block with an escaped onclick. The engine
+// blocks it on xss-002, and the verdict waits for init, where the editor's
+// capability lets it through and init issues the trust cookie.
+$pfw_stale = "<!-- wp:paragraph -->\n<p>Here's how to count orders per customer in MySQL, and how to embed the walkthrough video.</p>\n<!-- /wp:paragraph -->\n\n"
+	. "<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>SELECT customer_id, COUNT(*) FROM wp_wc_orders o\nWHERE o.status = 'wc-completed'\nGROUP BY customer_id;\n\n&lt;button onclick=\"toggleMenu()\"&gt;Menu&lt;/button&gt;</code></pre>\n<!-- /wp:code -->\n\n"
+	. "<!-- wp:html -->\n<iframe width=\"560\" height=\"315\" src=\"https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ\" title=\"Walkthrough\" allowfullscreen></iframe>\n<!-- /wp:html -->\n\n"
+	. '<!-- wp:block {"ref":12} /-->';
+$pfw_stale_v = $pfw_run(
+	array(
+		'uri'    => '/wp-json/wp/v2/posts/156',
+		'server' => $pfw_jsrv,
+		'cookie' => $pfw_li,
+		'body'   => wp_json_encode( array( 'title' => 'Counting orders per customer', 'content' => $pfw_stale, 'status' => 'publish' ) ),
+	)
+);
+$ok( 'block' === $pfw_stale_v['action'] && 'xss' === $pfw_stale_v['category'] && Perdita_Firewall::should_defer( $pfw_stale_v, $pfw_cfg, $pfw_li, $pfw_jsrv_full, 'plugin' ), 'firewall R2-4: the stale-tab editor save (' . $pfw_stale_v['rule'] . ' on an escaped onclick) waits for init instead of a 403' );
+Perdita_Firewall::defer( $pfw_cfg, $pfw_stale_v, $pfw_jsrv_full );
+$ok( 'allow' === Perdita_Firewall::resolve_pending( true )['action'], 'firewall R2-4: an editor with the trust capability saves it' );
+remove_action( 'init', array( 'Perdita_Firewall', 'settle' ), Perdita_Firewall::SETTLE_PRIORITY );
+
+// Finding 6: exclusions match on a path segment boundary.
+$pfw_seg               = $pfw_cfg;
+$pfw_seg['exclusions'] = array( array( 'rule' => 'sqli-005', 'path' => '/wp-json/myplugin', 'param' => '' ) );
+$pfw_q                 = array( 'q' => "1' OR '1'='1" );
+$ok( 'allow' === $pfw_run( array( 'config' => $pfw_seg, 'uri' => '/wp-json/myplugin', 'get' => $pfw_q ) )['action'] && 'allow' === $pfw_run( array( 'config' => $pfw_seg, 'uri' => '/wp-json/myplugin/v1/x', 'get' => $pfw_q ) )['action'], 'firewall finding 6: an exclusion covers its own path and the paths below it' );
+$ok( 'block' === $pfw_run( array( 'config' => $pfw_seg, 'uri' => '/wp-json/myplugin-evil/v1/x', 'get' => $pfw_q ) )['action'], 'firewall finding 6: an exclusion on /wp-json/myplugin never covers /wp-json/myplugin-evil' );
+$ok( Perdita_Firewall::path_covers( '/', '/anything' ) && Perdita_Firewall::path_covers( '', '/anything' ) && Perdita_Firewall::path_covers( '/a/', '/a/b' ) && ! Perdita_Firewall::path_covers( '/a/', '/ab' ), 'firewall finding 6: path_covers() handles the root, an empty path, and a trailing slash' );
+$ok( '/wp-json/my-plugin' === Perdita_Firewall::exclusion_path( '/WP-JSON//my-plugin/./?x=1#top' ) && '/' === Perdita_Firewall::exclusion_path( '/' ) && '/a/b' === Perdita_Firewall::exclusion_path( 'a/%62/' ), 'firewall finding 6: exclusion_path() normalizes case, slashes, encoding, and the query' );
+
+// Finding 7: every compile writes a new trust key.
+add_filter( 'option_perdita_core', $pfw_mod7 = function ( $value ) {
+	$value                        = is_array( $value ) ? $value : array();
+	$value['modules']['security'] = true;
+	return $value;
+} );
+add_filter( 'pre_option_perdita_security_settings', $pfw_fw_on = function () use ( $pfw_settings ) {
+	return array_merge( $pfw_settings, array( 'firewall_load' => 'plugin' ) );
+} );
+Perdita_Firewall_Config::compile();
+$pfw_k1 = get_option( Perdita_Firewall_Config::KEY_OPTION );
+Perdita_Firewall_Config::compile();
+$pfw_k2   = get_option( Perdita_Firewall_Config::KEY_OPTION );
+$pfw_disk = is_file( Perdita_Firewall_Config::config_path() ) ? include Perdita_Firewall_Config::config_path() : array();
+$ok( preg_match( '/^[0-9a-f]{64}$/', (string) $pfw_k2 ) && $pfw_k1 !== $pfw_k2 && isset( $pfw_disk['key'] ) && $pfw_k2 === $pfw_disk['key'], 'firewall finding 7: each compile writes a new trust key to the option and config.php' );
+$ok( false === Perdita_Firewall::verify_trust( Perdita_Firewall::trust_value( 1, time() + 600, $pfw_k1, $pfw_token ), $pfw_k2, null, $pfw_tok ), 'firewall finding 7: a cookie signed before the compile stops verifying' );
+remove_filter( 'pre_option_perdita_security_settings', $pfw_fw_on );
+remove_filter( 'option_perdita_core', $pfw_mod7 );
+Perdita_Firewall_Config::delete_file( Perdita_Firewall_Config::config_path() );
 
 /* ---------- Pro sections ---------- */
 
@@ -702,6 +939,8 @@ $pfw_recent = Perdita_Firewall_Config::recent( 10 );
 $ok( isset( $pfw_recent[0]['ref'] ) && $pfw_ref === $pfw_recent[0]['ref'] && 'sqli-005' === $pfw_recent[0]['rule'], 'firewall log: recent() reads the newest entry back' );
 $pfw_exw = Perdita_Firewall_Config::exclusion_for_entry( $pfw_recent[0] );
 $ok( array( 'rule' => 'sqli-005', 'path' => '/wp-json/x/v1/search', 'param' => 'q' ) === $pfw_exw, 'firewall log: the Allow button writes the rule id, the request path, and the parameter' );
+$pfw_exw = Perdita_Firewall_Config::exclusion_for_entry( array( 'rule' => 'sqli-005', 'uri' => '/WP-JSON//My-Plugin/./v1/?q=1', 'field' => 'query:q' ) );
+$ok( '/wp-json/my-plugin/v1' === $pfw_exw['path'], 'firewall log: the Allow button writes a normalized path (lower case, no repeated slashes, dot segments, or trailing slash)' );
 $ok( null === Perdita_Firewall_Config::exclusion_for_entry( array( 'rule' => 'ip-001', 'uri' => '/' ) ), 'firewall log: an IP block offers no Allow button' );
 
 /* ---------- admin section ---------- */
@@ -723,7 +962,7 @@ $ok( array( 'sqli', 'xss', 'traversal', 'rfi', 'php_upload', 'bad_bots', 'probes
 $ok( 'edit_posts' === $pfw_clean['fw_trust_roles'], 'firewall admin: an unlisted trust capability falls back to edit_posts' );
 $ok(
 	array(
-		array( 'rule' => 'sqli-005', 'path' => '/wp-json/my-plugin/', 'param' => 'q' ),
+		array( 'rule' => 'sqli-005', 'path' => '/wp-json/my-plugin', 'param' => 'q' ),
 		array( 'rule' => 'xss', 'path' => '/wp-admin/x', 'param' => '' ),
 	) === $pfw_clean['fw_exclusions'],
 	'firewall admin: sanitize() parses exclusion lines and drops a bad rule name'
@@ -731,7 +970,7 @@ $ok(
 ob_start();
 Perdita_Security_Firewall_Admin::render_section( array_merge( $pfw_settings, array( 'fw_exclusions' => $pfw_clean['fw_exclusions'] ) ) );
 $pfw_html = (string) ob_get_clean();
-$ok( false !== strpos( $pfw_html, 'name="perdita_fw_section"' ) && false !== strpos( $pfw_html, 'name="fw_rules[php_upload]"' ) && false !== strpos( $pfw_html, 'sqli-005 | /wp-json/my-plugin/ | q' ), 'firewall admin: render_section() prints the fields and the exclusion lines' );
+$ok( false !== strpos( $pfw_html, 'name="perdita_fw_section"' ) && false !== strpos( $pfw_html, 'name="fw_rules[php_upload]"' ) && false !== strpos( $pfw_html, 'sqli-005 | /wp-json/my-plugin | q' ), 'firewall admin: render_section() prints the fields and the exclusion lines' );
 $ok( false !== strpos( $pfw_html, 'action=perdita_firewall_allow' ) && false !== strpos( $pfw_html, '_wpnonce=' ), 'firewall admin: each log row gets a nonced Allow link' );
 $ok( ! preg_match( '/\x{2014}|;\s*(?:you|the|it)\b/u', wp_strip_all_tags( $pfw_html ) ), 'firewall admin: the section copy has no em dash' );
 
@@ -750,7 +989,7 @@ $ok( is_file( $pfw_cfg_path ), 'firewall compile: saving the settings writes con
 $pfw_loaded = is_file( $pfw_cfg_path ) ? include $pfw_cfg_path : null;
 $ok( is_array( $pfw_loaded ) && ! empty( $pfw_loaded['enabled'] ) && $pfw_loaded['key'] === Perdita_Firewall_Config::key() && ! empty( $pfw_loaded['allowlist']['v4'] ), 'firewall compile: config.php returns the array with the key and the parsed allowlist' );
 $ok( is_file( Perdita_Firewall_Config::dir() . '.htaccess' ) && is_file( Perdita_Firewall_Config::dir() . 'index.php' ) && is_file( Perdita_Firewall_Config::log_dir() . 'web.config' ), 'firewall compile: the folder and its log folder carry deny guards' );
-$ok( is_file( Perdita_Firewall_Config::bootstrap_path() ), 'firewall compile: the bootstrap sits beside the folder, not in it' );
+$ok( ! is_file( Perdita_Firewall_Config::bootstrap_path() ), 'firewall R2-8: plugin mode writes no bootstrap into wp-content' );
 $ok( 'plugin' === get_option( Perdita_Firewall_Config::STATE_OPTION )['result'], 'firewall compile: plugin mode writes no loader file' );
 $ok( ! glob( Perdita_Firewall_Config::dir() . '.*.tmp' ), 'firewall compile: the atomic write leaves no temp file' );
 
@@ -758,8 +997,10 @@ $ok( ! glob( Perdita_Firewall_Config::dir() . '.*.tmp' ), 'firewall compile: the
 update_option( 'perdita_security_settings', array_merge( $pfw_saved, array( 'firewall_load' => 'mu' ) ) );
 $pfw_mu = Perdita_Firewall_Loader::mu_path();
 $ok( is_file( $pfw_mu ) && false !== strpos( (string) file_get_contents( $pfw_mu ), Perdita_Firewall_Config::bootstrap_path() ), 'firewall mu: switching to mu writes 0-perdita-firewall.php, which includes the bootstrap' );
+$ok( is_file( Perdita_Firewall_Config::bootstrap_path() ), 'firewall mu: the bootstrap sits beside the folder, not in it' );
 update_option( 'perdita_security_settings', array_merge( $pfw_saved, array( 'firewall_load' => 'plugin' ) ) );
 $ok( ! is_file( $pfw_mu ), 'firewall mu: switching back removes the must-use plugin' );
+$ok( ! is_file( Perdita_Firewall_Config::bootstrap_path() ), 'firewall R2-8: leaving mu mode removes the bootstrap when no .user.ini can still name it' );
 file_put_contents( $pfw_mu, "<?php\n// Someone else's mu-plugin.\n" );
 update_option( 'perdita_security_settings', array_merge( $pfw_saved, array( 'firewall_load' => 'mu' ) ) );
 $ok( "<?php\n// Someone else's mu-plugin.\n" === file_get_contents( $pfw_mu ) && 'mu_foreign' === get_option( Perdita_Firewall_Config::STATE_OPTION )['result'], 'firewall mu: another plugin\'s file of that name stays untouched' );
@@ -785,6 +1026,19 @@ $ok( 'prepend_current' === get_option( Perdita_Firewall_Config::STATE_OPTION )['
 update_option( 'perdita_security_settings', array_merge( $pfw_saved, array( 'firewall_load' => 'plugin' ) ) );
 $ok( $pfw_ini_orig === file_get_contents( $pfw_ini ), 'firewall prepend: switching back removes exactly the marked block, byte for byte' );
 $ok( Perdita_Firewall_Loader::bootstrap_still_needed(), 'firewall prepend: after a .user.ini removal the bootstrap stays until PHP rereads the file' );
+$pfw_state = get_option( Perdita_Firewall_Config::STATE_OPTION );
+$ok( is_file( Perdita_Firewall_Config::bootstrap_path() ) && ! empty( $pfw_state['bootstrap_until'] ) && $pfw_state['bootstrap_until'] > time(), 'firewall R2-8: after a .user.ini removal, plugin mode keeps the bootstrap and records how long' );
+$ok( false !== strpos( Perdita_Firewall_Loader::status()['message'], 'cached .user.ini' ), 'firewall R2-8: the status screen says why the bootstrap is still there' );
+$pfw_state['bootstrap_until'] = time() - 1;
+update_option( Perdita_Firewall_Config::STATE_OPTION, $pfw_state, false );
+$pfw_removed_ref = new ReflectionProperty( 'Perdita_Firewall_Loader', 'user_ini_removed' );
+$pfw_removed_ref->setAccessible( true );
+$pfw_removed_was = $pfw_removed_ref->getValue();
+$pfw_removed_ref->setValue( null, 0 );
+Perdita_Firewall_Loader::status();
+$ok( ! is_file( Perdita_Firewall_Config::bootstrap_path() ) && empty( get_option( Perdita_Firewall_Config::STATE_OPTION )['bootstrap_until'] ), 'firewall R2-8: once the wait is over, the settings screen deletes the bootstrap' );
+$ok( '' !== (string) ini_get( 'auto_prepend_file' ) || ! Perdita_Firewall_Loader::bootstrap_still_needed(), 'firewall R2-8: with no auto_prepend_file and no bootstrap, nothing calls the bootstrap needed (uninstall wrote one before)' );
+$pfw_removed_ref->setValue( null, $pfw_removed_was );
 
 file_put_contents( $pfw_ini, $pfw_ini_orig . "auto_prepend_file = '/var/www/html/wordfence-waf.php'\n" );
 update_option( 'perdita_security_settings', array_merge( $pfw_saved, array( 'firewall_load' => 'prepend' ) ) );
@@ -816,7 +1070,8 @@ remove_filter( 'perdita_firewall_sapi', $pfw_sapi_cb );
 
 // Off.
 update_option( 'perdita_security_settings', array_merge( $pfw_saved, array( 'firewall' => false ) ) );
-$ok( ! is_file( $pfw_cfg_path ) && false === get_option( Perdita_Firewall_Config::STATE_OPTION, false ), 'firewall compile: turning the firewall off removes config.php and the loader state' );
+$pfw_off_state = get_option( Perdita_Firewall_Config::STATE_OPTION, false );
+$ok( ! is_file( $pfw_cfg_path ) && ( false === $pfw_off_state || ( 'off' === $pfw_off_state['mode'] && ! empty( $pfw_off_state['bootstrap_until'] ) ) ), 'firewall compile: turning the firewall off removes config.php and the loader state (a row stays only to time a kept bootstrap)' );
 $pfw_key_before = get_option( Perdita_Firewall_Config::KEY_OPTION, false );
 delete_option( Perdita_Firewall_Config::KEY_OPTION );
 Perdita_Firewall_Config::compile();

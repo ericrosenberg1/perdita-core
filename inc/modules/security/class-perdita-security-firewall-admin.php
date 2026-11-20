@@ -121,7 +121,9 @@ class Perdita_Security_Firewall_Admin {
 		}
 		echo '<tr><th scope="row"><label for="pfw-ex">' . esc_html__( 'Exclusions', 'perdita-core' ) . '</label></th><td>';
 		echo '<textarea id="pfw-ex" name="fw_exclusions_text" rows="4" cols="60" class="large-text code">' . esc_textarea( implode( "\n", $lines ) ) . '</textarea>';
-		echo '<p class="description">' . esc_html__( 'One per line: rule id or category | path prefix | parameter name (optional). For example: sqli-005 | /wp-json/my-plugin/ | query. Click Allow in the log below to add a line.', 'perdita-core' ) . '</p></td></tr>';
+		echo '<p class="description">' . esc_html__( 'One per line: rule id or category | path | parameter name (optional). Perdita applies an exclusion for /wp-json/my-plugin to /wp-json/my-plugin/v1 too, and never to /wp-json/my-plugin-pro. For example: sqli-005 | /wp-json/my-plugin | query. Click Allow in the log below to add a line.', 'perdita-core' ) . '</p></td></tr>';
+
+		echo '<tr><th scope="row">' . esc_html__( 'Built-in exclusions', 'perdita-core' ) . '</th><td><p class="description">' . esc_html__( 'On every site, Perdita skips the traversal, remote include, and sqli-005 rules for the search box (s) and the comment field on wp-comments-post.php, so visitors can write about code. Perdita still checks both for UNION, stacked, and time-delay SQL.', 'perdita-core' ) . '</p></td></tr>';
 
 		echo '</tbody></table>';
 		self::render_log();
@@ -219,6 +221,7 @@ class Perdita_Security_Firewall_Admin {
 		} elseif ( is_array( $raw ) ) {
 			$items = $raw;
 		}
+		require_once __DIR__ . '/firewall/class-perdita-firewall.php';
 		$cats = array_keys( self::categories() );
 		$out  = array();
 		foreach ( $items as $item ) {
@@ -230,7 +233,7 @@ class Perdita_Security_Firewall_Admin {
 				continue;
 			}
 			$path = isset( $item['path'] ) && is_string( $item['path'] ) ? trim( $item['path'] ) : '';
-			$path = '' === $path ? '' : '/' . ltrim( preg_replace( '/[^\w\/.~%@+-]/', '', $path ), '/' );
+			$path = '' === $path ? '' : Perdita_Firewall::exclusion_path( $path );
 			$param = isset( $item['param'] ) && is_string( $item['param'] ) ? preg_replace( '/[^\w\[\].-]/', '', trim( $item['param'] ) ) : '';
 			$clean = array(
 				'rule'  => $rule,

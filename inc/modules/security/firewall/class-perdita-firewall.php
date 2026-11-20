@@ -15,12 +15,32 @@
  *     reads the compiled config and the superglobals, runs, logs a match, and
  *     sends the 403 (or 429) page on a block.
  *
+ * Deferred verdicts: a content block (sqli, xss, traversal, rfi, php_upload,
+ * anomaly) on a request that carries a wordpress_logged_in_* cookie but no
+ * valid trust cookie isn't answered before WordPress loads. boot() keeps the
+ * verdict and settles it on init (settle()), once WordPress knows the user:
+ * a user with the trust capability gets through, and anyone else gets the
+ * same 403 and the same log line. Before WordPress (auto_prepend_file), only
+ * a request for one of WordPress's own entry points defers, so a direct hit
+ * on a plugin file still blocks at once. Monitor mode never defers.
+ *
+ * Built-in exclusions (always on, see builtin_exclusions()): the search
+ * parameter s, and the comment field on wp-comments-post.php, skip the
+ * traversal and rfi categories and the sqli-005 tautology rule. Every other
+ * SQL rule (UNION, stacked queries, time delays) still applies to them.
+ *
+ * Trust cookie: user id, expiry, and an HMAC over both and the session token
+ * inside the wordpress_logged_in_* cookie. It verifies only next to that
+ * cookie, lives TRUST_TTL seconds, and WordPress reissues it while the user
+ * keeps the capability. Every compile writes a new key.
+ *
  * Verdict: array(
  *   'action'   => 'allow' | 'block' | 'monitor' | 'throttle',
  *   'reason'   => why the request was allowed without inspection, or '',
  *   'rule'     => rule id such as 'sqli-001', or '',
- *   'category' => sqli | xss | traversal | rfi | php_upload | bad_bots | probes
- *                 | xmlrpc | ip_blocklist | country | rate_limit | custom, or '',
+ *   'category' => sqli | xss | traversal | rfi | php_upload | anomaly | bad_bots
+ *                 | probes | xmlrpc | ip_blocklist | country | rate_limit | custom,
+ *                 or '',
  *   'field'    => where it matched: 'uri', 'ua', 'query:<name>', 'post:<name>',
  *                 'cookie:<name>', 'json:<name>', 'file:<name>', 'header:<name>',
  *                 'ip', or '',
@@ -91,9 +111,41 @@ class Perdita_Firewall {
 	const LOG_DAYS = 14;
 
 	/**
+	 * Cap on a JSON body read for inspection, in bytes.
+	 */
+	const BODY_CAP = 4194304;
+
+	/**
+	 * JSON nesting depth, the same as WordPress's REST server.
+	 */
+	const JSON_DEPTH = 512;
+
+	/**
+	 * Cap on the values walked in one request. Past it, the request is an
+	 * anomaly (anomaly-001) instead of a silent pass.
+	 */
+	const LEAF_CAP = 20000;
+
+	/**
 	 * Name of the signed trust cookie.
 	 */
 	const TRUST_COOKIE = 'perdita_fw_trust';
+
+	/**
+	 * Trust cookie lifetime in seconds. WordPress reissues it on init once
+	 * it's older than TRUST_RENEW seconds.
+	 */
+	const TRUST_TTL = 3600;
+
+	/**
+	 * Age in seconds after which init reissues the trust cookie.
+	 */
+	const TRUST_RENEW = 900;
+
+	/**
+	 * Hook priority on init for settling a deferred verdict.
+	 */
+	const SETTLE_PRIORITY = -100000;
 
 	/**
 	 * Characters that can't start an attack on their own. A value made only of
@@ -129,6 +181,20 @@ class Perdita_Firewall {
 	 */
 	private static $truncated = false;
 
+	/**
+	 * Values walked in the current run().
+	 *
+	 * @var int
+	 */
+	private static $leaves = 0;
+
+	/**
+	 * A verdict waiting for init: array( config, verdict, server ), or null.
+	 *
+	 * @var array|null
+	 */
+	private static $pending = null;
+
 	/* ---------- rules ---------- */
 
 	/**
@@ -147,10 +213,11 @@ class Perdita_Firewall {
 			'sqli'      => array(
 				// UNION SELECT followed by a column list an attacker would use.
 				'sqli-001' => '\bunion(?:[\s(]+(?:all|distinct))?(?:[\s(]|#[^\n]*\n)+select[\s(]+(?:null|\d+\s*(?:,|--|#|$|\)|from\b)|@@\w+|0x[0-9a-f]+|char\s*\(|concat(?:_ws)?\s*\(|group_concat\s*\(|(?:version|user|database|schema)\s*\(\s*\))',
-				// UNION SELECT ... FROM table, ending the clause.
-				'sqli-002' => '\bunion(?:[\s(]+(?:all|distinct))?[\s(]+select\s.{1,300}?\bfrom\s+[\w`.]+\s*(?:where\b|limit\b|order\b|group\b|--|#|;|\)|$)',
-				// Time-based blind injection.
-				'sqli-003' => '\b(?:sleep|pg_sleep|benchmark)\s*\(\s*\d|\bwaitfor\s+delay\s*\'|\bdbms_pipe\.receive_message\s*\(',
+				// UNION SELECT ... FROM anything within 300 characters.
+				'sqli-002' => '\bunion(?:[\s(]+(?:all|distinct))?(?:[\s(]|#[^\n]*\n)+select[\s(].{0,300}?\bfrom\b\s*[\w`"(]',
+				// Time-based blind injection: a delay with a number, a nested
+				// paren, a variable, or a function call as its argument.
+				'sqli-003' => '\b(?:sleep|pg_sleep|benchmark)\s*\(\s*(?:[\d(@]|[a-z_]\w*\s*\()|\bwaitfor\s+delay\s*(?:[\'"(@]|[a-z_]\w*\s*\()|\bdbms_pipe\.receive_message\s*\(',
 				// Schema and file access.
 				'sqli-004' => '\binformation_schema\b|\bmysql\.(?:user|db)\b|\bload_file\s*\(|\binto\s+(?:out|dump)file\b|\bsys\.(?:objects|tables|columns|user_summary)\b|\bpg_(?:catalog|shadow)\b|\bsqlite_master\b',
 				// A quote or a number, then a tautology such as or 1=1 or 'x'='x'.
@@ -286,10 +353,14 @@ class Perdita_Firewall {
 			if ( false === strpos( $type, 'json' ) ) {
 				return '';
 			}
-			$raw = @file_get_contents( 'php://input', false, null, 0, self::TOTAL_CAP ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- runs before WordPress.
+			$raw = @file_get_contents( 'php://input', false, null, 0, self::BODY_CAP + 1 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- runs before WordPress.
 			return is_string( $raw ) ? $raw : '';
 		};
 		$verdict = self::run( $config, $server, $_GET, $_POST, $_COOKIE, $_FILES, $body_fn ); // phpcs:ignore WordPress.Security.NonceVerification -- a firewall reads every request.
+		if ( self::should_defer( $verdict, $config, $_COOKIE, $server, $loader ) ) {
+			self::defer( $config, $verdict, $server );
+			return $verdict;
+		}
 		if ( 'allow' !== $verdict['action'] || ! empty( $verdict['logged'] ) ) {
 			self::log( $config, $verdict, $server );
 		}
@@ -297,6 +368,158 @@ class Perdita_Firewall {
 			self::respond( $verdict );
 		}
 		return $verdict;
+	}
+
+	/* ---------- deferred verdicts ---------- */
+
+	/**
+	 * Content rule categories a trust cookie skips, and so the ones a
+	 * signed-in visitor's block may wait on init for.
+	 */
+	const DEFERRABLE = array( 'sqli', 'xss', 'traversal', 'rfi', 'php_upload', 'anomaly' );
+
+	/**
+	 * Whether a block should wait for init: a content block, a
+	 * wordpress_logged_in_* cookie with a session token, no valid trust
+	 * cookie, and (before WordPress) a request for a WordPress entry point.
+	 *
+	 * @param array  $verdict Verdict from run().
+	 * @param array  $config  Config.
+	 * @param array  $cookie  $_COOKIE.
+	 * @param array  $server  $_SERVER.
+	 * @param string $loader  prepend, mu, or plugin.
+	 * @return bool
+	 */
+	public static function should_defer( array $verdict, array $config, array $cookie, array $server, $loader ) {
+		if ( 'block' !== $verdict['action'] || ! empty( $verdict['trusted'] ) || ! in_array( $verdict['category'], self::DEFERRABLE, true ) ) {
+			return false;
+		}
+		if ( ! self::session_tokens( $cookie ) ) {
+			return false;
+		}
+		return 'prepend' !== $loader || self::entry_point( $config, $server );
+	}
+
+	/**
+	 * Whether the script PHP is about to run is one of WordPress's own entry
+	 * points under the compiled ABSPATH, so init is sure to fire.
+	 *
+	 * @param array $config Config.
+	 * @param array $server $_SERVER.
+	 * @return bool
+	 */
+	public static function entry_point( array $config, array $server ) {
+		$root   = isset( $config['abspath'] ) ? (string) $config['abspath'] : '';
+		$script = isset( $server['SCRIPT_FILENAME'] ) ? str_replace( '\\', '/', (string) $server['SCRIPT_FILENAME'] ) : '';
+		if ( '' === $root || '' === $script ) {
+			return false;
+		}
+		$root = rtrim( str_replace( '\\', '/', $root ), '/' ) . '/';
+		if ( 0 !== strpos( $script, $root ) ) {
+			$real   = @realpath( $script ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- runs before WordPress.
+			$rroot  = @realpath( $root ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- runs before WordPress.
+			$script = false === $real ? '' : str_replace( '\\', '/', $real );
+			$root   = false === $rroot ? '' : rtrim( str_replace( '\\', '/', $rroot ), '/' ) . '/';
+			if ( '' === $script || '' === $root || 0 !== strpos( $script, $root ) ) {
+				return false;
+			}
+		}
+		$rel = substr( $script, strlen( $root ) );
+		if ( preg_match( '~^wp-admin/load-(?:scripts|styles)\.php$~', $rel ) ) {
+			return false;
+		}
+		return (bool) preg_match( '~^(?:index|wp-login|wp-comments-post|xmlrpc|wp-cron|wp-signup|wp-activate|wp-trackback|wp-links-opml|wp-mail)\.php$|^wp-admin/(?:(?:network|user)/)?[\w.-]+\.php$~', $rel );
+	}
+
+	/**
+	 * Keep a verdict for init. Hooks settle() through the plugin API when
+	 * WordPress's plugin API is loaded, or through the global $wp_filter
+	 * array WordPress builds its hooks from when it isn't yet.
+	 *
+	 * @param array $config  Config.
+	 * @param array $verdict Verdict.
+	 * @param array $server  $_SERVER.
+	 */
+	public static function defer( array $config, array $verdict, array $server ) {
+		$verdict['notes'][] = 'deferred';
+		self::$pending      = array(
+			'config'  => $config,
+			'verdict' => $verdict,
+			'server'  => $server,
+		);
+		$callback = array( __CLASS__, 'settle' );
+		if ( function_exists( 'add_action' ) ) {
+			add_action( 'init', $callback, self::SETTLE_PRIORITY, 0 );
+		} else {
+			if ( ! isset( $GLOBALS['wp_filter'] ) || ! is_array( $GLOBALS['wp_filter'] ) ) {
+				$GLOBALS['wp_filter'] = array(); // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- WordPress builds its hooks from this array.
+			}
+			$GLOBALS['wp_filter']['init'][ self::SETTLE_PRIORITY ][] = array( // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- WordPress builds its hooks from this array.
+				'function'      => $callback,
+				'accepted_args' => 0,
+			);
+		}
+		register_shutdown_function( array( __CLASS__, 'settle_at_shutdown' ) );
+	}
+
+	/**
+	 * init callback: allow a user with the trust capability, else log and
+	 * send the 403.
+	 */
+	public static function settle() {
+		$verdict = self::resolve_pending();
+		if ( is_array( $verdict ) && 'block' === $verdict['action'] ) {
+			self::respond( $verdict );
+		}
+	}
+
+	/**
+	 * Settle the kept verdict without sending anything.
+	 *
+	 * @param bool|null $can Whether the user has the trust capability, or null to ask WordPress.
+	 * @return array|null The settled verdict, or null when nothing waited.
+	 */
+	public static function resolve_pending( $can = null ) {
+		if ( null === self::$pending ) {
+			return null;
+		}
+		$pending       = self::$pending;
+		self::$pending = null;
+		$config        = $pending['config'];
+		$verdict       = $pending['verdict'];
+		if ( null === $can ) {
+			$cap = isset( $config['trust_cap'] ) && is_string( $config['trust_cap'] ) && '' !== $config['trust_cap'] ? $config['trust_cap'] : 'edit_posts';
+			$can = function_exists( 'current_user_can' ) && current_user_can( $cap );
+		}
+		if ( $can ) {
+			$verdict['action']  = 'allow';
+			$verdict['reason']  = 'trusted_user';
+			$verdict['trusted'] = true;
+			return $verdict;
+		}
+		self::log( $config, $verdict, $pending['server'] );
+		return $verdict;
+	}
+
+	/**
+	 * Shutdown fallback: a kept verdict init never settled (the request
+	 * ended before init) still gets its log line.
+	 */
+	public static function settle_at_shutdown() {
+		if ( null === self::$pending ) {
+			return;
+		}
+		self::$pending['verdict']['notes'][] = 'unsettled';
+		self::resolve_pending( false );
+	}
+
+	/**
+	 * Whether a verdict waits for init.
+	 *
+	 * @return bool
+	 */
+	public static function has_pending() {
+		return null !== self::$pending;
 	}
 
 	/* ---------- run ---------- */
@@ -317,6 +540,7 @@ class Perdita_Firewall {
 	public static function run( array $config, array $server, array $get, array $post, array $cookie, array $files, $body = null ) {
 		self::$inspected = 0;
 		self::$truncated = false;
+		self::$leaves    = 0;
 		$verdict         = array(
 			'action'   => 'allow',
 			'reason'   => '',
@@ -409,7 +633,7 @@ class Perdita_Firewall {
 		}
 
 		// 10. A verified trust cookie skips the content rules.
-		if ( isset( $cookie[ self::TRUST_COOKIE ] ) && ! empty( $config['key'] ) && false !== self::verify_trust( (string) $cookie[ self::TRUST_COOKIE ], (string) $config['key'] ) ) {
+		if ( isset( $cookie[ self::TRUST_COOKIE ] ) && ! empty( $config['key'] ) && false !== self::verify_trust( (string) $cookie[ self::TRUST_COOKIE ], (string) $config['key'], null, self::session_tokens( $cookie ) ) ) {
 			$verdict['trusted'] = true;
 			$verdict['reason']  = 'trusted';
 			return $verdict;
@@ -449,15 +673,7 @@ class Perdita_Firewall {
 				if ( false !== strpos( $type, 'json' ) ) {
 					$raw = is_callable( $body ) ? call_user_func( $body ) : (string) $body;
 					if ( is_string( $raw ) && '' !== $raw ) {
-						$json = json_decode( substr( $raw, 0, self::TOTAL_CAP ), true, 64 );
-						if ( is_array( $json ) ) {
-							$r = self::scan_array( $ctx, 'json', $json );
-						} elseif ( is_string( $json ) ) {
-							$r = self::scan_value( $ctx, 'json', '', $json, true );
-							$r = $r ? array( $r[0], $r[1], $r[2], 'json:' ) : null;
-						} else {
-							$r = null;
-						}
+						$r = self::scan_json( $ctx, $raw );
 						if ( $r ) {
 							return self::hit( $verdict, $block_action, $r[0], $r[1], $r[3], $r[2], 403 );
 						}
@@ -528,7 +744,44 @@ class Perdita_Firewall {
 	/* ---------- content scanning ---------- */
 
 	/**
-	 * Scan a nested array of request values.
+	 * Scan a JSON body: decoded to WordPress's depth, then walked like a form.
+	 * A body too deep to decode is an anomaly (anomaly-002). A body past
+	 * BODY_CAP, or one that isn't valid JSON, is scanned as text.
+	 *
+	 * @param array  $ctx Scan context.
+	 * @param string $raw Raw body.
+	 * @return array|null array( rule, category, match, field ) or null.
+	 */
+	private static function scan_json( array $ctx, $raw ) {
+		if ( strlen( $raw ) <= self::BODY_CAP ) {
+			$json = json_decode( $raw, true, self::JSON_DEPTH );
+			if ( is_array( $json ) ) {
+				return self::scan_array( $ctx, 'json', $json );
+			}
+			if ( null === $json && JSON_ERROR_DEPTH === json_last_error() ) {
+				if ( self::excluded( $ctx['exclusions'], 'anomaly-002', 'anomaly', '' ) ) {
+					self::$truncated = true;
+					return null;
+				}
+				return array( 'anomaly-002', 'anomaly', 'json deeper than ' . self::JSON_DEPTH, 'json:' );
+			}
+			if ( is_string( $json ) ) {
+				$r = self::scan_value( $ctx, 'json', '', $json, true );
+				return $r ? array( $r[0], $r[1], $r[2], 'json:' ) : null;
+			}
+			if ( null !== $json || JSON_ERROR_NONE === json_last_error() ) {
+				return null;
+			}
+		}
+		self::$truncated = self::$truncated || strlen( $raw ) > self::VALUE_CAP;
+		$r = self::scan_value( $ctx, 'json', '', substr( $raw, 0, self::VALUE_CAP ), false );
+		return $r ? array( $r[0], $r[1], $r[2], 'json:' ) : null;
+	}
+
+	/**
+	 * Scan request values, nested to any depth, without recursion. Every
+	 * value walked counts toward LEAF_CAP, and a request past the cap is an
+	 * anomaly (anomaly-001) instead of a silent pass.
 	 *
 	 * @param array  $ctx    Scan context.
 	 * @param string $source query, post, or json.
@@ -538,6 +791,9 @@ class Perdita_Firewall {
 	private static function scan_array( array $ctx, $source, array $values ) {
 		foreach ( $values as $name => $value ) {
 			$name = (string) $name;
+			if ( ++self::$leaves > self::LEAF_CAP ) {
+				return self::over_leaf_cap( $ctx, $source, $name );
+			}
 			if ( preg_match( self::SKIP_PARAMS, $name ) ) {
 				continue;
 			}
@@ -547,7 +803,36 @@ class Perdita_Firewall {
 					return array( $r[0], $r[1], $r[2], $source . ':' . $name );
 				}
 			}
-			$r = is_array( $value ) ? self::scan_nested( $ctx, $source, $name, $value, 1 ) : ( is_scalar( $value ) ? self::scan_value( $ctx, $source, $name, (string) $value, true ) : null );
+			if ( is_array( $value ) ) {
+				$stack = array( $value );
+				while ( $stack ) {
+					foreach ( array_pop( $stack ) as $key => $child ) {
+						if ( ++self::$leaves > self::LEAF_CAP ) {
+							return self::over_leaf_cap( $ctx, $source, $name );
+						}
+						if ( is_string( $key ) && preg_match( self::SKIP_PARAMS, $key ) ) {
+							continue;
+						}
+						if ( is_array( $child ) ) {
+							$stack[] = $child;
+							continue;
+						}
+						if ( ! is_string( $child ) ) {
+							continue;
+						}
+						$r = self::scan_value( $ctx, $source, $name, $child, true );
+						if ( $r ) {
+							return array( $r[0], $r[1], $r[2], $source . ':' . $name );
+						}
+						if ( self::$inspected >= self::TOTAL_CAP ) {
+							self::$truncated = true;
+							return null;
+						}
+					}
+				}
+				continue;
+			}
+			$r = is_scalar( $value ) ? self::scan_value( $ctx, $source, $name, (string) $value, true ) : null;
 			if ( $r ) {
 				return array( $r[0], $r[1], $r[2], $source . ':' . $name );
 			}
@@ -560,39 +845,20 @@ class Perdita_Firewall {
 	}
 
 	/**
-	 * Scan the values under one top-level parameter.
+	 * The anomaly-001 result for a request past LEAF_CAP, or null (with the
+	 * truncated note) when an owner's exclusion covers it.
 	 *
 	 * @param array  $ctx    Scan context.
 	 * @param string $source Source.
-	 * @param string $param  Top-level parameter name.
-	 * @param array  $values Nested values.
-	 * @param int    $depth  Depth.
+	 * @param string $name   Top-level parameter name.
 	 * @return array|null
 	 */
-	private static function scan_nested( array $ctx, $source, $param, array $values, $depth ) {
-		if ( $depth > 16 ) {
+	private static function over_leaf_cap( array $ctx, $source, $name ) {
+		if ( self::excluded( $ctx['exclusions'], 'anomaly-001', 'anomaly', $name ) ) {
+			self::$truncated = true;
 			return null;
 		}
-		foreach ( $values as $key => $value ) {
-			if ( is_string( $key ) && preg_match( self::SKIP_PARAMS, $key ) ) {
-				continue;
-			}
-			if ( is_array( $value ) ) {
-				$r = self::scan_nested( $ctx, $source, $param, $value, $depth + 1 );
-			} elseif ( is_string( $value ) ) {
-				$r = self::scan_value( $ctx, $source, $param, $value, true );
-			} else {
-				continue;
-			}
-			if ( $r ) {
-				return $r;
-			}
-			if ( self::$inspected >= self::TOTAL_CAP ) {
-				self::$truncated = true;
-				return null;
-			}
-		}
-		return null;
+		return array( 'anomaly-001', 'anomaly', 'more than ' . self::LEAF_CAP . ' values', $source . ':' . $name );
 	}
 
 	/**
@@ -749,6 +1015,7 @@ class Perdita_Firewall {
 			'country' => 'country',
 			'rate'    => 'rate_limit',
 			'custom'  => 'custom',
+			'anomaly' => 'anomaly',
 		);
 		$prefix = strtok( (string) $id, '-' );
 		return isset( $map[ $prefix ] ) ? $map[ $prefix ] : '';
@@ -828,24 +1095,93 @@ class Perdita_Firewall {
 	/* ---------- exclusions ---------- */
 
 	/**
-	 * The exclusions whose path prefix covers this path.
+	 * The exclusions whose path covers this path, plus the built-in ones.
 	 *
 	 * @param array  $config Config.
 	 * @param string $npath  Normalized path.
 	 * @return array
 	 */
 	private static function exclusions_for( array $config, $npath ) {
+		$out = self::builtin_exclusions( $npath );
 		if ( empty( $config['exclusions'] ) || ! is_array( $config['exclusions'] ) ) {
-			return array();
+			return $out;
 		}
-		$out = array();
 		foreach ( $config['exclusions'] as $ex ) {
 			if ( ! is_array( $ex ) || empty( $ex['rule'] ) ) {
 				continue;
 			}
-			$prefix = isset( $ex['path'] ) ? strtolower( (string) $ex['path'] ) : '';
-			if ( '' === $prefix || 0 === strpos( $npath, $prefix ) ) {
+			if ( self::path_covers( isset( $ex['path'] ) ? (string) $ex['path'] : '', $npath ) ) {
 				$out[] = $ex;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Whether an exclusion path covers a request path, on a segment
+	 * boundary: /wp-json/my-plugin covers /wp-json/my-plugin and
+	 * /wp-json/my-plugin/v1, never /wp-json/my-plugin-other.
+	 *
+	 * @param string $prefix Exclusion path, '' for every path.
+	 * @param string $npath  Normalized request path.
+	 * @return bool
+	 */
+	public static function path_covers( $prefix, $npath ) {
+		$prefix = rtrim( strtolower( (string) $prefix ), '/' );
+		if ( '' === $prefix ) {
+			return true;
+		}
+		$npath = (string) $npath;
+		return $npath === $prefix || 0 === strpos( $npath, $prefix . '/' );
+	}
+
+	/**
+	 * An exclusion path in the one form the engine compares: no query or
+	 * fragment, URL decoded, lower case, one leading slash, no repeated
+	 * slashes or dot segments, and no trailing slash ('/' stays '/').
+	 *
+	 * @param string $path Path as typed or logged.
+	 * @return string
+	 */
+	public static function exclusion_path( $path ) {
+		$path = (string) $path;
+		$path = substr( $path, 0, strcspn( $path, '?#' ) );
+		$path = strtolower( rawurldecode( $path ) );
+		$path = (string) preg_replace( '~[^\w/.\~@+-]~', '', $path );
+		$keep = array();
+		foreach ( explode( '/', $path ) as $seg ) {
+			if ( '' !== $seg && '.' !== $seg && '..' !== $seg ) {
+				$keep[] = $seg;
+			}
+		}
+		return '/' . implode( '/', $keep );
+	}
+
+	/**
+	 * Exclusions every site gets. The search parameter s and the comment
+	 * field on wp-comments-post.php carry prose about code and security, so
+	 * they skip the traversal and rfi categories and the sqli-005 tautology
+	 * rule. UNION, stacked-query, and time-delay rules still apply.
+	 *
+	 * @param string $npath Normalized request path.
+	 * @return array
+	 */
+	public static function builtin_exclusions( $npath ) {
+		$out = array();
+		foreach ( array( 'traversal', 'rfi', 'sqli-005' ) as $rule ) {
+			$out[] = array(
+				'rule'  => $rule,
+				'path'  => '',
+				'param' => 's',
+			);
+		}
+		if ( '/wp-comments-post.php' === substr( (string) $npath, -21 ) ) {
+			foreach ( array( 'traversal', 'rfi', 'sqli-005' ) as $rule ) {
+				$out[] = array(
+					'rule'  => $rule,
+					'path'  => '',
+					'param' => 'comment',
+				);
 			}
 		}
 		return $out;
@@ -1001,36 +1337,67 @@ class Perdita_Firewall {
 	/* ---------- trust cookie ---------- */
 
 	/**
-	 * The signed trust cookie value for a user.
+	 * The signed trust cookie value for a user and a login session.
 	 *
 	 * @param int    $user_id User id.
 	 * @param int    $expires Unix time.
 	 * @param string $key     HMAC key.
+	 * @param string $token   Session token from the wordpress_logged_in_* cookie.
 	 * @return string
 	 */
-	public static function trust_value( $user_id, $expires, $key ) {
+	public static function trust_value( $user_id, $expires, $key, $token ) {
 		$data = (int) $user_id . '.' . (int) $expires;
-		return $data . '.' . hash_hmac( 'sha256', $data, (string) $key );
+		return $data . '.' . hash_hmac( 'sha256', $data . '|' . (string) $token, (string) $key );
 	}
 
 	/**
-	 * Verify a trust cookie.
+	 * Verify a trust cookie against the session tokens the request carries.
+	 * An expiry further out than TRUST_TTL (plus a minute of clock slack)
+	 * never verifies.
 	 *
-	 * @param string   $value Cookie value.
-	 * @param string   $key   HMAC key.
-	 * @param int|null $now   Unix time, for tests.
+	 * @param string   $value  Cookie value.
+	 * @param string   $key    HMAC key.
+	 * @param int|null $now    Unix time, for tests.
+	 * @param string[] $tokens Session tokens from session_tokens().
 	 * @return int|false The user id, or false.
 	 */
-	public static function verify_trust( $value, $key, $now = null ) {
-		if ( '' === (string) $key || ! preg_match( '/^(\d{1,20})\.(\d{1,12})\.([0-9a-f]{64})$/', (string) $value, $m ) ) {
+	public static function verify_trust( $value, $key, $now = null, array $tokens = array() ) {
+		if ( '' === (string) $key || ! $tokens || ! preg_match( '/^(\d{1,20})\.(\d{1,12})\.([0-9a-f]{64})$/', (string) $value, $m ) ) {
 			return false;
 		}
 		$now = null === $now ? time() : (int) $now;
-		if ( (int) $m[1] < 1 || (int) $m[2] < $now ) {
+		if ( (int) $m[1] < 1 || (int) $m[2] < $now || (int) $m[2] > $now + self::TRUST_TTL + 60 ) {
 			return false;
 		}
-		$want = hash_hmac( 'sha256', $m[1] . '.' . $m[2], (string) $key );
-		return hash_equals( $want, $m[3] ) ? (int) $m[1] : false;
+		foreach ( $tokens as $token ) {
+			$want = hash_hmac( 'sha256', $m[1] . '.' . $m[2] . '|' . (string) $token, (string) $key );
+			if ( hash_equals( $want, $m[3] ) ) {
+				return (int) $m[1];
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Session tokens from the request's wordpress_logged_in_* cookies, read
+	 * split the way WordPress splits them (user|expiration|token|hmac).
+	 * Nothing here proves the cookie is genuine: WordPress checks that later.
+	 *
+	 * @param array $cookie $_COOKIE.
+	 * @return string[]
+	 */
+	public static function session_tokens( array $cookie ) {
+		$out = array();
+		foreach ( $cookie as $name => $value ) {
+			if ( 0 !== strpos( (string) $name, 'wordpress_logged_in_' ) || ! is_string( $value ) ) {
+				continue;
+			}
+			$parts = explode( '|', $value );
+			if ( 4 === count( $parts ) && preg_match( '/^[A-Za-z0-9]{20,128}$/', $parts[2] ) ) {
+				$out[] = $parts[2];
+			}
+		}
+		return $out;
 	}
 
 	/* ---------- Pro sections ---------- */

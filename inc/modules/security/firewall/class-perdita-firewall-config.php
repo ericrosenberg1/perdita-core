@@ -69,7 +69,6 @@ class Perdita_Firewall_Config {
 			return;
 		}
 		add_action( 'set_logged_in_cookie', array( __CLASS__, 'on_set_logged_in_cookie' ), 10, 6 );
-		add_action( 'wp_login', array( __CLASS__, 'on_wp_login' ), 10, 2 );
 		add_action( 'wp_logout', array( __CLASS__, 'clear_trust_cookie' ) );
 		add_action( 'init', array( __CLASS__, 'refresh_trust_cookie' ), 1 );
 
@@ -229,7 +228,7 @@ class Perdita_Firewall_Config {
 	/* ---------- key ---------- */
 
 	/**
-	 * The trust cookie HMAC key, generated once.
+	 * The trust cookie HMAC key. compile() writes a new one each time.
 	 *
 	 * @return string 64 hex characters.
 	 */
@@ -238,6 +237,18 @@ class Perdita_Firewall_Config {
 		if ( is_string( $key ) && preg_match( '/^[0-9a-f]{64}$/', $key ) ) {
 			return $key;
 		}
+		$key = bin2hex( random_bytes( 32 ) );
+		update_option( self::KEY_OPTION, $key, true );
+		return $key;
+	}
+
+	/**
+	 * Write a new trust key. Every trust cookie signed with the old one stops
+	 * verifying, and init reissues one to each user who still qualifies.
+	 *
+	 * @return string The new key.
+	 */
+	public static function rotate_key() {
 		$key = bin2hex( random_bytes( 32 ) );
 		update_option( self::KEY_OPTION, $key, true );
 		return $key;
@@ -283,6 +294,8 @@ class Perdita_Firewall_Config {
 			'key'            => $enabled ? self::key() : '',
 			'cf_ranges'      => class_exists( 'Perdita_Client_IP' ) ? Perdita_Client_IP::cloudflare_ranges() : array(),
 			'host'           => strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) ),
+			'abspath'        => ABSPATH,
+			'trust_cap'      => sanitize_key( is_string( $settings['fw_trust_roles'] ) && '' !== $settings['fw_trust_roles'] ? $settings['fw_trust_roles'] : 'edit_posts' ),
 			'log_dir'        => self::log_dir(),
 			'disable_xmlrpc' => ! empty( $settings['disable_xmlrpc'] ),
 		);
@@ -320,14 +333,21 @@ class Perdita_Firewall_Config {
 		$settings = self::settings();
 		$core     = get_option( 'perdita_core', array() );
 		$module   = is_array( $core ) && ! empty( $core['modules']['security'] );
-		$config   = self::build( $settings, $module );
+		if ( $module && ! empty( $settings['firewall'] ) ) {
+			self::rotate_key();
+		}
+		$config = self::build( $settings, $module );
 		require_once __DIR__ . '/class-perdita-firewall-loader.php';
 
 		if ( empty( $config['enabled'] ) ) {
 			// Off writes nothing new: no key, no state row, no files.
 			self::delete_file( self::config_path() );
-			$state = Perdita_Firewall_Loader::sync( 'off', false );
-			delete_option( self::STATE_OPTION );
+			$state = self::retire_bootstrap( Perdita_Firewall_Loader::sync( 'off', false ) );
+			if ( empty( $state['bootstrap_until'] ) ) {
+				delete_option( self::STATE_OPTION );
+			} else {
+				update_option( self::STATE_OPTION, $state, false );
+			}
 			return $state;
 		}
 		if ( ! self::ensure_dir() ) {
@@ -342,15 +362,69 @@ class Perdita_Firewall_Config {
 		$source = '<?php' . "\n" . '// ' . self::MARKER . ' config. Perdita Core writes this file on every security settings save. Edits here are lost.' . "\n"
 			. "defined( 'ABSPATH' ) || defined( 'PERDITA_FIREWALL_EARLY' ) || exit;\n"
 			. 'return ' . var_export( $config, true ) . ";\n"; // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_var_export -- writes a PHP array file.
-		$ok = self::write_atomic( self::config_path(), $source );
-		self::write_atomic( self::bootstrap_path(), self::bootstrap_source() );
-		$mode  = in_array( $settings['firewall_load'], array( 'plugin', 'mu', 'prepend' ), true ) ? $settings['firewall_load'] : 'plugin';
+		$ok   = self::write_atomic( self::config_path(), $source );
+		$mode = in_array( $settings['firewall_load'], array( 'plugin', 'mu', 'prepend' ), true ) ? $settings['firewall_load'] : 'plugin';
+		// The mu-plugin and the prepend line include the bootstrap. Plugin
+		// mode runs the engine from Core itself and needs no file there.
+		if ( 'plugin' !== $mode ) {
+			self::write_atomic( self::bootstrap_path(), self::bootstrap_source() );
+		}
 		$state = Perdita_Firewall_Loader::sync( $mode, self::$allow_server_config );
+		if ( 'plugin' === $mode ) {
+			$state = self::retire_bootstrap( $state );
+		}
 		if ( ! $ok ) {
 			$state['config'] = 'unwritable';
 		}
 		update_option( self::STATE_OPTION, $state, false );
 		return $state;
+	}
+
+	/**
+	 * Remove the bootstrap once no loader can include it. PHP may keep
+	 * reading a cached .user.ini for user_ini.cache_ttl seconds after the
+	 * prepend line comes out, and a missing prepend file is a fatal error,
+	 * so while that can happen the file stays (it does nothing without its
+	 * config) and the state carries bootstrap_until.
+	 *
+	 * @param array $state Loader state from sync().
+	 * @return array The state, with bootstrap_until while the file stays.
+	 */
+	public static function retire_bootstrap( array $state ) {
+		unset( $state['bootstrap_until'] );
+		$path = self::bootstrap_path();
+		if ( ! is_file( $path ) ) {
+			return $state;
+		}
+		$prev  = get_option( self::STATE_OPTION, array() );
+		$until = is_array( $prev ) && ! empty( $prev['bootstrap_until'] ) ? (int) $prev['bootstrap_until'] : 0;
+		require_once __DIR__ . '/class-perdita-firewall-loader.php';
+		if ( Perdita_Firewall_Loader::bootstrap_still_needed() ) {
+			$until = max( $until, time() + max( 60, (int) ini_get( 'user_ini.cache_ttl' ) ) + 60 );
+		}
+		if ( $until > time() ) {
+			$state['bootstrap_until'] = $until;
+			return $state;
+		}
+		self::delete_file( $path );
+		return $state;
+	}
+
+	/**
+	 * Settings screen: remove a bootstrap kept past a prepend removal once
+	 * its wait is over.
+	 */
+	public static function sweep_bootstrap() {
+		$state = get_option( self::STATE_OPTION, array() );
+		if ( ! is_array( $state ) || empty( $state['bootstrap_until'] ) || (int) $state['bootstrap_until'] > time() || in_array( isset( $state['mode'] ) ? $state['mode'] : '', array( 'mu', 'prepend' ), true ) ) {
+			return;
+		}
+		$state = self::retire_bootstrap( $state );
+		if ( 'off' === ( isset( $state['mode'] ) ? $state['mode'] : '' ) && empty( $state['bootstrap_until'] ) ) {
+			delete_option( self::STATE_OPTION );
+		} else {
+			update_option( self::STATE_OPTION, $state, false );
+		}
 	}
 
 	/**
@@ -514,54 +588,52 @@ class Perdita_Firewall_Config {
 	}
 
 	/**
-	 * set_logged_in_cookie callback.
+	 * set_logged_in_cookie callback: sign the new session's token.
 	 *
 	 * @param string $cookie     Logged-in cookie.
 	 * @param int    $expire     Cookie expiry for the browser (0 for a session cookie).
 	 * @param int    $expiration Token expiration.
 	 * @param int    $user_id    User id.
+	 * @param string $scheme     Cookie scheme.
+	 * @param string $token      Session token.
 	 */
-	public static function on_set_logged_in_cookie( $cookie, $expire, $expiration, $user_id ) {
-		self::maybe_set_trust_cookie( (int) $user_id, (int) $expiration, (int) $expire );
+	public static function on_set_logged_in_cookie( $cookie, $expire, $expiration, $user_id, $scheme = '', $token = '' ) {
+		self::maybe_set_trust_cookie( (int) $user_id, (string) $token );
 	}
 
 	/**
-	 * wp_login callback.
-	 *
-	 * @param string  $login User login.
-	 * @param WP_User $user  User.
-	 */
-	public static function on_wp_login( $login, $user ) {
-		if ( $user instanceof WP_User && ! isset( $_COOKIE[ Perdita_Firewall_Config::cookie_name() ] ) ) {
-			self::maybe_set_trust_cookie( (int) $user->ID, time() + 2 * DAY_IN_SECONDS, 0 );
-		}
-	}
-
-	/**
-	 * On init, give a signed-in user with the capability a trust cookie when
-	 * theirs is missing or no longer verifies (the firewall went on after they
-	 * signed in, or the key changed), and drop it when they lost the capability.
+	 * On init: drop the trust cookie for a visitor who isn't signed in or
+	 * lost the capability, and reissue it (bound to this session's token)
+	 * when it's missing, doesn't verify, or is older than TRUST_RENEW.
 	 */
 	public static function refresh_trust_cookie() {
+		$have = isset( $_COOKIE[ self::cookie_name() ] ) ? sanitize_text_field( wp_unslash( $_COOKIE[ self::cookie_name() ] ) ) : '';
 		if ( ! is_user_logged_in() ) {
+			if ( '' !== $have ) {
+				self::clear_trust_cookie();
+			}
 			return;
 		}
-		require_once self::engine_path();
 		$user_id = get_current_user_id();
-		$have    = isset( $_COOKIE[ self::cookie_name() ] ) ? sanitize_text_field( wp_unslash( $_COOKIE[ self::cookie_name() ] ) ) : '';
-		$valid   = '' !== $have && Perdita_Firewall::verify_trust( $have, self::key() ) === $user_id;
 		if ( ! user_can( $user_id, self::trust_cap() ) ) {
 			if ( '' !== $have ) {
 				self::clear_trust_cookie();
 			}
 			return;
 		}
-		if ( $valid ) {
+		$token = (string) wp_get_session_token();
+		if ( '' === $token ) {
 			return;
 		}
-		$parsed = wp_parse_auth_cookie( '', 'logged_in' );
-		$until  = is_array( $parsed ) && ! empty( $parsed['expiration'] ) ? (int) $parsed['expiration'] : time() + 2 * DAY_IN_SECONDS;
-		self::maybe_set_trust_cookie( $user_id, $until, 0 );
+		require_once self::engine_path();
+		$now = time();
+		if ( '' !== $have && Perdita_Firewall::verify_trust( $have, self::key(), $now, array( $token ) ) === $user_id ) {
+			$parts = explode( '.', $have );
+			if ( (int) $parts[1] - $now > Perdita_Firewall::TRUST_TTL - Perdita_Firewall::TRUST_RENEW ) {
+				return;
+			}
+		}
+		self::maybe_set_trust_cookie( $user_id, $token );
 	}
 
 	/**
@@ -572,26 +644,27 @@ class Perdita_Firewall_Config {
 	}
 
 	/**
-	 * Set the signed trust cookie when the user has the capability.
+	 * Set the signed trust cookie, good for TRUST_TTL seconds, when the user
+	 * has the capability. A browser session cookie: the signature carries
+	 * the expiry.
 	 *
-	 * @param int $user_id    User id.
-	 * @param int $expiration When the signature stops verifying.
-	 * @param int $expire     Browser expiry, 0 for a session cookie.
+	 * @param int    $user_id User id.
+	 * @param string $token   Session token from the wordpress_logged_in_* cookie.
 	 * @return string The value set, or ''.
 	 */
-	public static function maybe_set_trust_cookie( $user_id, $expiration, $expire ) {
-		if ( $user_id < 1 || ! user_can( $user_id, self::trust_cap() ) ) {
+	public static function maybe_set_trust_cookie( $user_id, $token ) {
+		if ( $user_id < 1 || '' === (string) $token || ! user_can( $user_id, self::trust_cap() ) ) {
 			return '';
 		}
 		require_once self::engine_path();
-		$value = Perdita_Firewall::trust_value( $user_id, $expiration, self::key() );
+		$value = Perdita_Firewall::trust_value( $user_id, time() + Perdita_Firewall::TRUST_TTL, self::key(), (string) $token );
 		$_COOKIE[ self::cookie_name() ] = $value;
 		if ( ! headers_sent() ) {
 			setcookie(
 				self::cookie_name(),
 				$value,
 				array(
-					'expires'  => $expire,
+					'expires'  => 0,
 					'path'     => defined( 'COOKIEPATH' ) && COOKIEPATH ? COOKIEPATH : '/',
 					'domain'   => defined( 'COOKIE_DOMAIN' ) && COOKIE_DOMAIN ? COOKIE_DOMAIN : '',
 					'secure'   => is_ssl(),
@@ -662,7 +735,8 @@ class Perdita_Firewall_Config {
 
 	/**
 	 * The exclusion an Allow click writes for one log entry: the rule id,
-	 * the request path as the prefix, and the parameter name.
+	 * the request path in the engine's exclusion form (see
+	 * Perdita_Firewall::exclusion_path()), and the parameter name.
 	 *
 	 * @param array $entry Log entry.
 	 * @return array|null
@@ -673,7 +747,8 @@ class Perdita_Firewall_Config {
 			return null;
 		}
 		$uri   = isset( $entry['uri'] ) ? (string) $entry['uri'] : '/';
-		$path  = (string) wp_parse_url( $uri, PHP_URL_PATH );
+		require_once self::engine_path();
+		$path  = Perdita_Firewall::exclusion_path( (string) wp_parse_url( $uri, PHP_URL_PATH ) );
 		$field = isset( $entry['field'] ) ? (string) $entry['field'] : '';
 		$param = '';
 		if ( preg_match( '/^(?:query|post|json|cookie|file):(.+)$/', $field, $m ) ) {
@@ -681,7 +756,7 @@ class Perdita_Firewall_Config {
 		}
 		return array(
 			'rule'  => $rule,
-			'path'  => '' === $path ? '/' : $path,
+			'path'  => $path,
 			'param' => $param,
 		);
 	}
@@ -737,7 +812,10 @@ class Perdita_Firewall_Config {
 	 */
 	public static function on_deactivate() {
 		require_once __DIR__ . '/class-perdita-firewall-loader.php';
-		Perdita_Firewall_Loader::sync( 'off', false );
+		$state = self::retire_bootstrap( Perdita_Firewall_Loader::sync( 'off', false ) );
+		if ( ! empty( $state['bootstrap_until'] ) ) {
+			update_option( self::STATE_OPTION, $state, false );
+		}
 		self::delete_file( self::config_path() );
 		self::teardown_security();
 	}
