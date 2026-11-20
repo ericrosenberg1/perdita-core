@@ -1252,6 +1252,7 @@ $psr_canon = has_action( 'template_redirect', 'redirect_canonical' );
 $ok( 1 === $psr_pri && ( false === $psr_canon || $psr_pri < $psr_canon ), 'author scan: block_author_scan runs on template_redirect at priority 1, ahead of redirect_canonical' );
 
 /* ---------- 7. oEmbed and the users sitemap ---------- */
+
 // WordPress hooks get_oembed_response_data_rich() on this filter, and it
 // reads the post's ID, so the filter gets a post the way core calls it.
 $psr_oe_post = get_post(
