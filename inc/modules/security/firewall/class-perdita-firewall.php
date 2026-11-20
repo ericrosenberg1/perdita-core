@@ -125,6 +125,22 @@ class Perdita_Firewall {
 	const REST_SETTLE_PRIORITY = 101;
 
 	/**
+	 * Custom rules the engine evaluates, at most.
+	 */
+	const CUSTOM_MAX = 100;
+
+	/**
+	 * Bytes of each value a custom rule compares.
+	 */
+	const CUSTOM_SUBJECT_CAP = 65536;
+
+	/**
+	 * pcre.backtrack_limit while a custom regex runs, so a catastrophic
+	 * owner pattern fails fast instead of costing milliseconds per field.
+	 */
+	const CUSTOM_BACKTRACK = 10000;
+
+	/**
 	 * Log cap per day, in bytes.
 	 */
 	const LOG_CAP = 5242880;
@@ -1701,8 +1717,14 @@ class Perdita_Firewall {
 		if ( '' === $file ) {
 			return false;
 		}
-		$list = include $file;
-		return is_array( $list ) && isset( $list[ $ip ] ) && (int) $list[ $ip ] > time();
+		try {
+			$list = include $file;
+		} catch ( \Throwable $e ) {
+			// A truncated or corrupt file counts as empty, never a fatal error
+			// before WordPress loads.
+			return false;
+		}
+		return is_array( $list ) && isset( $list[ $ip ] ) && is_string( $ip ) && is_int( $list[ $ip ] ) && $list[ $ip ] > time();
 	}
 
 	/**
@@ -1821,7 +1843,7 @@ class Perdita_Firewall {
 	private static function check_custom( array $rules, array $server, array $get, array $post, array $cookie, $ip, $uri, $npath, array &$verdict, $block_action ) {
 		$curi = null;
 		$cget = null;
-		foreach ( $rules as $rule ) {
+		foreach ( array_slice( $rules, 0, self::CUSTOM_MAX ) as $rule ) {
 			if ( ! is_array( $rule ) || empty( $rule['enabled'] ) || ! isset( $rule['field'], $rule['op'], $rule['value'] ) ) {
 				continue;
 			}
@@ -1856,17 +1878,25 @@ class Perdita_Firewall {
 			if ( '' === (string) $rule['value'] ) {
 				continue;
 			}
+			$id  = 'custom-' . preg_replace( '/[^a-z0-9_-]/i', '', (string) ( isset( $rule['id'] ) ? $rule['id'] : '' ) );
 			$hit = null;
 			foreach ( $vals as $v ) {
-				if ( self::custom_match( (string) $rule['op'], (string) $rule['value'], (string) $v, 'ip' === $field ) ) {
-					$hit = (string) $v;
+				$v = substr( (string) $v, 0, self::CUSTOM_SUBJECT_CAP );
+				$m = self::custom_match( (string) $rule['op'], (string) $rule['value'], $v, 'ip' === $field );
+				if ( null === $m ) {
+					// The pattern hit the backtrack limit or another PCRE
+					// error: skip the rule for this request and say so once.
+					self::custom_error( $verdict, $id );
+					break;
+				}
+				if ( $m ) {
+					$hit = $v;
 					break;
 				}
 			}
 			if ( null === $hit ) {
 				continue;
 			}
-			$id     = 'custom-' . preg_replace( '/[^a-z0-9_-]/i', '', (string) ( isset( $rule['id'] ) ? $rule['id'] : '' ) );
 			$action = isset( $rule['action'] ) ? (string) $rule['action'] : 'block';
 			if ( 'allow' === $action ) {
 				$verdict['reason'] = $id;
@@ -1909,7 +1939,7 @@ class Perdita_Firewall {
 	 * @param string $want  Rule value.
 	 * @param string $have  Request value.
 	 * @param bool   $is_ip Whether the field is the visitor address.
-	 * @return bool
+	 * @return bool|null null when the regex failed with a PCRE error.
 	 */
 	private static function custom_match( $op, $want, $have, $is_ip ) {
 		if ( 'contains' === $op ) {
@@ -1925,9 +1955,36 @@ class Perdita_Firewall {
 			return 0 === strcasecmp( $have, $want );
 		}
 		if ( 'regex' === $op ) {
-			return 1 === @preg_match( '#' . str_replace( '#', '\#', $want ) . '#i', $have ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- a broken owner pattern never matches.
+			$old = ini_get( 'pcre.backtrack_limit' );
+			ini_set( 'pcre.backtrack_limit', (string) self::CUSTOM_BACKTRACK ); // phpcs:ignore WordPress.PHP.IniSet.Risky -- restored below.
+			$r   = @preg_match( '#' . str_replace( '#', '\#', $want ) . '#i', $have ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- a broken owner pattern never matches.
+			$err = preg_last_error();
+			ini_set( 'pcre.backtrack_limit', (string) $old ); // phpcs:ignore WordPress.PHP.IniSet.Risky -- restores the value from above.
+			if ( false === $r || PREG_NO_ERROR !== $err ) {
+				return null;
+			}
+			return 1 === $r;
 		}
 		return false;
+	}
+
+	/**
+	 * Note a custom rule skipped on a PCRE error, once per request, and send
+	 * it to the PHP error log once per process.
+	 *
+	 * @param array  $verdict Verdict, by reference.
+	 * @param string $id      Rule id.
+	 */
+	private static function custom_error( array &$verdict, $id ) {
+		static $logged = array();
+		$note = 'custom_rule_error:' . $id;
+		if ( ! in_array( $note, $verdict['notes'], true ) ) {
+			$verdict['notes'][] = $note;
+		}
+		if ( ! isset( $logged[ $id ] ) ) {
+			$logged[ $id ] = true;
+			error_log( 'Perdita firewall: skipped custom rule ' . $id . ' after a regex error (' . preg_last_error() . ')' ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- runs before WordPress.
+		}
 	}
 
 	/**

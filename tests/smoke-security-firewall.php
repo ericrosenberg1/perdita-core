@@ -903,6 +903,32 @@ foreach ( array( '/private-area/x', '/private%2Darea/x', '/%70rivate-area/x', '/
 $ok( 'custom-adm' === $pfw_run( array( 'config' => $pfw_ccfg, 'uri' => '//./members/x' ) )['rule'] && 'custom-adm' === $pfw_run( array( 'config' => $pfw_ccfg, 'uri' => '/%6dembers/x?a=1' ) )['rule'], 'firewall Pro finding 2: a starts rule sees repeated slashes and ./ collapsed' );
 $ok( 'custom-tok' === $pfw_run( array( 'config' => $pfw_ccfg, 'uri' => '/?mode=%2564ebug', 'get' => array( 'mode' => '%64ebug' ) ) )['rule'], 'firewall Pro finding 2: a custom query rule sees the decoded value' );
 $ok( 'custom-raw' === $pfw_run( array( 'config' => $pfw_ccfg, 'uri' => '/a/%2E%2E/b' ) )['rule'] && 'allow' === $pfw_run( array( 'config' => $pfw_ccfg, 'uri' => '/public/x' ) )['action'], 'firewall Pro finding 2: uri_raw keeps the raw form, and other pages pass' );
+// Review Pro: custom rules run bounded.
+$pfw_rcfg2                 = $pfw_cfg;
+$pfw_rcfg2['custom_rules'] = array(
+	array( 'id' => 'bt', 'field' => 'query', 'op' => 'regex', 'value' => '^(\\d+)+$', 'action' => 'block', 'enabled' => true ),
+	array( 'id' => 'next', 'field' => 'query', 'op' => 'contains', 'value' => 'needle', 'action' => 'block', 'enabled' => true ),
+);
+$pfw_bt = array();
+for ( $pfw_i = 0; $pfw_i < 200; $pfw_i++ ) {
+	$pfw_bt[ 'f' . $pfw_i ] = str_repeat( '1', 40 ) . 'x';
+}
+$pfw_limit = ini_get( 'pcre.backtrack_limit' );
+$pfw_t     = microtime( true );
+$pfw_v     = $pfw_run( array( 'config' => $pfw_rcfg2, 'get' => $pfw_bt ) );
+$pfw_ms    = ( microtime( true ) - $pfw_t ) * 1000;
+$ok( 'allow' === $pfw_v['action'] && 1 === count( array_keys( $pfw_v['notes'], 'custom_rule_error:custom-bt', true ) ) && $pfw_ms < 50, sprintf( 'firewall Pro: a catastrophic custom regex fails fast (%.1f ms for 200 fields), is skipped, and is noted once', $pfw_ms ) );
+$ok( ini_get( 'pcre.backtrack_limit' ) === $pfw_limit, 'firewall Pro: the custom regex check restores pcre.backtrack_limit' );
+$ok( 'custom-next' === $pfw_run( array( 'config' => $pfw_rcfg2, 'get' => array( 'a' => str_repeat( '1', 40 ) . 'x', 'b' => 'needle' ) ) )['rule'], 'firewall Pro: the rules after a skipped regex still run' );
+$ok( 'custom-bt' === $pfw_run( array( 'config' => $pfw_rcfg2, 'get' => array( 'a' => '12345' ) ) )['rule'], 'firewall Pro: the same regex still matches a value it can finish' );
+$pfw_rcfg2['custom_rules'] = array();
+for ( $pfw_i = 0; $pfw_i < 100; $pfw_i++ ) {
+	$pfw_rcfg2['custom_rules'][] = array( 'id' => 'n' . $pfw_i, 'field' => 'query', 'op' => 'equals', 'value' => 'never-' . $pfw_i, 'action' => 'block', 'enabled' => true );
+}
+$pfw_rcfg2['custom_rules'][] = array( 'id' => 'over', 'field' => 'query', 'op' => 'contains', 'value' => 'needle', 'action' => 'block', 'enabled' => true );
+$ok( 'allow' === $pfw_run( array( 'config' => $pfw_rcfg2, 'get' => array( 'a' => 'needle' ) ) )['action'], 'firewall Pro: the engine evaluates at most 100 custom rules' );
+$pfw_rcfg2['custom_rules'] = array( array( 'id' => 'tail', 'field' => 'post', 'op' => 'contains', 'value' => 'needle', 'action' => 'block', 'enabled' => true ) );
+$ok( 'allow' === $pfw_run( array( 'config' => $pfw_rcfg2, 'server' => array( 'REQUEST_METHOD' => 'POST' ), 'post' => array( 'a' => str_repeat( 'x', 65536 ) . 'needle' ) ) )['action'] && 'custom-tail' === $pfw_run( array( 'config' => $pfw_rcfg2, 'server' => array( 'REQUEST_METHOD' => 'POST' ), 'post' => array( 'a' => str_repeat( 'x', 65000 ) . 'needle' ) ) )['rule'], 'firewall Pro: a custom rule compares the first 64 KB of each value' );
 $ok( 'country-001' === $pfw_prun( array( 'server' => array( 'REMOTE_ADDR' => '173.245.48.10', 'HTTP_CF_CONNECTING_IP' => '203.0.113.9', 'HTTP_CF_IPCOUNTRY' => 'KP' ) ) )['rule'], 'firewall Pro: CF-IPCountry from a Cloudflare connection blocks a listed country' );
 $ok( 'allow' === $pfw_prun( array( 'server' => array( 'HTTP_CF_IPCOUNTRY' => 'KP' ) ) )['action'], 'firewall Pro: CF-IPCountry from outside Cloudflare is ignored' );
 $ok( 'allow' === $pfw_prun( array( 'server' => array( 'GEOIP_COUNTRY_CODE' => 'KP' ) ) )['action'], 'firewall Pro: a server country variable counts only when the owner says the server sets it' );
@@ -937,6 +963,23 @@ file_put_contents( $pfw_outside, '<?php return array( "203.0.113.77" => ' . ( ti
 $pfw_bcfg['blocked_file'] = $pfw_outside;
 $ok( 'allow' === $pfw_run( array( 'config' => $pfw_bcfg, 'server' => array( 'REMOTE_ADDR' => '203.0.113.77' ) ) )['action'] && '' === Perdita_Firewall::safe_file( $pfw_cfg, $pfw_outside ), 'firewall Pro: the engine never includes a blocked_file outside wp-content and the firewall folder' );
 $ok( null === Perdita_Firewall_Config::exclusion_for_entry( array( 'rule' => 'ip-002', 'uri' => '/' ) ), 'firewall Pro: an auto-block offers no Allow button' );
+$pfw_bad = array(
+	'truncated' => '<?php return array( "203.0.113.77" => ' . ( time() + 600 ),
+	'throws'    => '<?php throw new RuntimeException( "corrupt" );',
+	'types'     => '<?php return array( "203.0.113.77" => "' . ( time() + 600 ) . '" );',
+	'scalar'    => '<?php return "203.0.113.77";',
+);
+foreach ( $pfw_bad as $pfw_kind => $pfw_src ) {
+	file_put_contents( $pfw_fwdir . 'blocked.php', $pfw_src );
+	$pfw_bcfg['blocked_file'] = $pfw_fwdir . 'blocked.php';
+	$pfw_v = null;
+	try {
+		$pfw_v = $pfw_run( array( 'config' => $pfw_bcfg, 'server' => array( 'REMOTE_ADDR' => '203.0.113.77' ) ) );
+	} catch ( \Throwable $pfw_e ) {
+		$pfw_v = null;
+	}
+	$ok( is_array( $pfw_v ) && 'allow' === $pfw_v['action'], 'firewall Pro: a ' . $pfw_kind . ' blocked_file counts as empty and never throws' );
+}
 
 $pfw_lcfg                = $pfw_cfg;
 $pfw_lcfg['login_paths'] = array( 'my-login', '/Team-Door/' );
