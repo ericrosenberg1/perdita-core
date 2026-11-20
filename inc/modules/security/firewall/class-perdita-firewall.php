@@ -1976,14 +1976,10 @@ class Perdita_Firewall {
 	 * @param string $id      Rule id.
 	 */
 	private static function custom_error( array &$verdict, $id ) {
-		static $logged = array();
+		// The note reaches the firewall log, so we write nothing to the PHP error log.
 		$note = 'custom_rule_error:' . $id;
 		if ( ! in_array( $note, $verdict['notes'], true ) ) {
 			$verdict['notes'][] = $note;
-		}
-		if ( ! isset( $logged[ $id ] ) ) {
-			$logged[ $id ] = true;
-			error_log( 'Perdita firewall: skipped custom rule ' . $id . ' after a regex error (' . preg_last_error() . ')' ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- runs before WordPress.
 		}
 	}
 
