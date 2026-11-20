@@ -318,8 +318,18 @@ ok "no unguarded sodium_memzero() in packaged tree"
 #     print straight into a live page, and error_log() fills a customer's disk
 #     with lines only we can read. Every one of these belongs in a local
 #     session, never in an artifact.
-if grep -rn --include='*.php' -E '\b(var_dump|var_export|print_r)[[:space:]]*\(|\berror_log[[:space:]]*\(' "$work/$slug" >/dev/null 2>&1; then
-	grep -rn --include='*.php' -E '\b(var_dump|var_export|print_r)[[:space:]]*\(|\berror_log[[:space:]]*\(' "$work/$slug" | sed 's|^'"$work"'/|    |'
+#     One exception: the firewall writes PHP files, and var_export() is how we
+#     write a PHP literal. A line may call var_export() only with the phpcs
+#     justification below on the same line, and nothing else is exempt.
+debug_hits() {
+	grep -rn --include='*.php' -E '\b(var_dump|var_export|print_r)[[:space:]]*\(|\berror_log[[:space:]]*\(' "$work/$slug" \
+		| grep -vE 'phpcs:ignore WordPress\.PHP\.DevelopmentFunctions\.error_log_var_export -- (a PHP string literal|writes)' \
+		|| true
+}
+grep -rn --include='*.php' -E '\b(var_dump|print_r)[[:space:]]*\(|\berror_log[[:space:]]*\(' "$work/$slug" >/dev/null 2>&1 && exempt_ok=0 || exempt_ok=1
+if [ -n "$(debug_hits)" ] || [ "$exempt_ok" = 0 ]; then
+	grep -rn --include='*.php' -E '\b(var_dump|var_export|print_r)[[:space:]]*\(|\berror_log[[:space:]]*\(' "$work/$slug" \
+		| grep -vE 'error_log_var_export -- (a PHP string literal|writes)' | sed 's|^'"$work"'/|    |'
 	die "release gate failed: debugging output in the packaged tree"
 fi
 if grep -rn --include='*.js' -E '\bconsole\.(log|debug)[[:space:]]*\(' "$work/$slug" >/dev/null 2>&1; then

@@ -4,7 +4,7 @@ Tags: forms, seo, caching, security, newsletter
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.19.31-beta
+Stable tag: 0.19.32-beta
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -77,6 +77,13 @@ Form entries, subscribers, orders, products, form definitions, the SMTP log, you
 Yes, that's what Pro is built on. Pro registers its own modules into this plugin's registry, so they appear on the same Modules screen and behave the same way.
 
 == Changelog ==
+
+= 0.19.32-beta =
+* New: in Security, you can run a firewall in monitor or block mode, as a plugin, a must-use plugin, or before WordPress loads. You choose which attack types to block: SQL injection, cross-site scripting, path traversal, remote includes, PHP uploads, scanner bots, sensitive-file probes, and XML-RPC.
+* New: login protection with IP allowlists, longer lockouts for repeat offenders, one generic login error, an emailed link to end your own lockout, and Cloudflare Turnstile on the login, registration, and lost password forms.
+* New: hardening options to hide the WordPress version, block PHP in uploads, turn off application passwords, hide the REST users list, and stop author scans. We also added HSTS, a daily core file check, and a status panel.
+* New: you can switch to Perdita from Wordfence, Sucuri, Solid Security, All In One WP Security, Shield, Defender, and Patchstack, with a preview and an undo.
+* We ship every new protection turned off, and we change nothing on your site until you choose a protection.
 
 = 0.19.31-beta =
 * Fix: we mark every page the page cache skips (search, feeds, and URLs with an unknown query arg) private and no-store, so nobody gets another visitor's search results from a CDN's cache.
