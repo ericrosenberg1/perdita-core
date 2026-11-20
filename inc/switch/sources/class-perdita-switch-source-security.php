@@ -40,7 +40,7 @@ abstract class Perdita_Switch_Security_Source extends Perdita_Switch_Source {
 	}
 
 	/**
-	 * Allowlisted addresses: exact IPs go in, ranges and CIDR blocks don't.
+	 * Allowlisted addresses: exact IPs and CIDR blocks go in, other ranges don't.
 	 *
 	 * @param string   $setting Setting name.
 	 * @param string[] $entries Entries.
@@ -53,8 +53,8 @@ abstract class Perdita_Switch_Security_Source extends Perdita_Switch_Source {
 			if ( '' === $entry ) {
 				continue;
 			}
-			if ( false === filter_var( $entry, FILTER_VALIDATE_IP ) ) {
-				$this->skip( $setting, $entry, __( 'In Perdita, you can allowlist exact addresses but not ranges. Add each address on Perdita, Security.', 'perdita-core' ), $target );
+			if ( '' === Perdita_Security::clean_allow_entry( $entry ) ) {
+				$this->skip( $setting, $entry, __( 'In Perdita, you can allowlist exact addresses and CIDR blocks such as 10.0.0.0/8, but not other ranges. Add each address or block on Perdita, Security.', 'perdita-core' ), $target );
 				continue;
 			}
 			$ips[] = $entry;

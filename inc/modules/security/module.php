@@ -14,7 +14,7 @@ defined( 'ABSPATH' ) || exit;
 return array(
 	'id'          => 'security',
 	'label'       => __( 'Security hardening', 'perdita-core' ),
-	'description' => __( 'Login rate limiting, security headers, disable the file editor, and lock down XML-RPC and author enumeration.', 'perdita-core' ),
+	'description' => __( 'Login limits and lockouts, Turnstile on login forms, security headers and HSTS, hardening, a core file check, and the firewall.', 'perdita-core' ),
 	'group'       => 'security',
 	'default'     => false,
 	// Login limiting hooks the login page, headers run on the front end, and

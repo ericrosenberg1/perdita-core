@@ -11,3 +11,19 @@
 	margin: 8px 0 4px 20px;
 	color: var(--perdita-ui-text, #33312c);
 }
+
+.perdita-security .perdita-security-status {
+	max-width: 900px;
+	margin: 8px 0 16px;
+}
+.perdita-security .perdita-security-status th {
+	width: 240px;
+	font-weight: 600;
+}
+.perdita-security .perdita-security-status td:nth-child(2) {
+	width: 64px;
+	white-space: nowrap;
+}
+.perdita-security .perdita-security-seconds {
+	width: 9em;
+}
