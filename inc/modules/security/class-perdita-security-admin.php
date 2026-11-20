@@ -319,6 +319,15 @@ class Perdita_Security_Admin {
 			'note'  => $note,
 		);
 
+		// A challenge can't run over XML-RPC, so a password guess there skips it.
+		if ( $on( 'login_turnstile' ) && ! $on( 'disable_xmlrpc' ) ) {
+			$rows[] = array(
+				'label' => __( 'Turnstile and XML-RPC', 'perdita-core' ),
+				'on'    => false,
+				'note'  => __( 'Warning: visitors can guess passwords over XML-RPC with no Turnstile check. Turn on "XML-RPC off" below unless you use Jetpack or the WordPress apps.', 'perdita-core' ),
+			);
+		}
+
 		$rows[] = array(
 			'label' => __( 'Security headers', 'perdita-core' ),
 			'on'    => $on( 'headers' ),
@@ -349,6 +358,18 @@ class Perdita_Security_Admin {
 			'on'    => isset( $s['restrict_rest'] ) && 'users' === $s['restrict_rest'],
 			'note'  => ( isset( $s['restrict_rest'] ) && 'users' === $s['restrict_rest'] ) ? __( 'Logged-out visitors cannot list usernames.', 'perdita-core' ) : __( 'Choose "Hide the users list" under Hardening.', 'perdita-core' ),
 		);
+		$same = $this->admins_showing_login();
+		if ( $same ) {
+			$rows[] = array(
+				'label' => __( 'Administrator display names', 'perdita-core' ),
+				'on'    => false,
+				'note'  => sprintf(
+					/* translators: %s: comma-separated login names. */
+					__( 'Visitors can read the display name in feeds and on author pages, and for %s it matches the login name. Under Users, Profile, set "Display name publicly as" to something else.', 'perdita-core' ),
+					implode( ', ', $same )
+				),
+			);
+		}
 		$rows[] = array(
 			'label' => __( 'WordPress version hidden', 'perdita-core' ),
 			'on'    => $on( 'hide_wp_version' ),
@@ -373,6 +394,29 @@ class Perdita_Security_Admin {
 			'note'  => $on( 'core_check' ) ? Perdita_Security::core_check_summary() : __( 'Turn it on, then press Check now.', 'perdita-core' ),
 		);
 		return $rows;
+	}
+
+	/**
+	 * Login names of administrators whose public display name is the login
+	 * name itself. Feeds print the display name, so the login leaks there.
+	 *
+	 * @return string[] Up to 5 login names.
+	 */
+	private function admins_showing_login() {
+		$users = get_users(
+			array(
+				'role'   => 'administrator',
+				'number' => 100,
+				'fields' => array( 'user_login', 'display_name' ),
+			)
+		);
+		$names = array();
+		foreach ( $users as $user ) {
+			if ( '' !== $user->user_login && strtolower( $user->user_login ) === strtolower( $user->display_name ) ) {
+				$names[] = $user->user_login;
+			}
+		}
+		return array_slice( $names, 0, 5 );
 	}
 
 	/**
@@ -404,7 +448,7 @@ class Perdita_Security_Admin {
 
 		echo '<tr><th scope="row">' . esc_html__( 'One error message', 'perdita-core' ) . '</th><td>';
 		echo '<label><input type="checkbox" name="login_generic_errors" value="1" ' . checked( ! empty( $s['login_generic_errors'] ), true, false ) . ' /> ' . esc_html__( 'Show the same message for a wrong username, a wrong email, and a wrong password', 'perdita-core' ) . '</label>';
-		echo '<p class="description">' . esc_html__( 'Visitors see "The username or password you entered is incorrect." The lockout notice and two-factor prompts keep their own messages, and XML-RPC and REST requests are left alone.', 'perdita-core' ) . '</p>';
+		echo '<p class="description">' . esc_html__( 'Visitors see "The username or password you entered is incorrect." The lockout notice and two-factor prompts keep their own messages, and XML-RPC and REST requests are left alone. Visitors also get the same lost password result for every username and email, and no email goes out for an unknown one.', 'perdita-core' ) . '</p>';
 		echo '</td></tr>';
 
 		echo '<tr><th scope="row">' . esc_html__( 'Longer lockouts', 'perdita-core' ) . '</th><td>';

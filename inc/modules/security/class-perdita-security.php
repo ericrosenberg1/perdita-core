@@ -30,6 +30,18 @@ class Perdita_Security {
 	const TRANSIENT_PREFIX = 'perdita_sec_login_';
 
 	/**
+	 * Transient prefixes for the owner unlock link: one per link (keyed on
+	 * the token's hash), and one per address for the hourly send limit.
+	 */
+	const UNLOCK_PREFIX      = 'perdita_sec_unlock_';
+	const UNLOCK_LIMIT_PREFIX = 'perdita_sec_unlock_rl_';
+
+	/**
+	 * Unlock emails an address can ask for each hour.
+	 */
+	const UNLOCK_SENDS_PER_HOUR = 3;
+
+	/**
 	 * Option that holds the last core file check.
 	 */
 	const CORE_CHECK_OPTION = 'perdita_security_core_check';
@@ -89,6 +101,9 @@ class Perdita_Security {
 			add_filter( 'authenticate', array( $this, 'check_lockout' ), 30 );
 			add_action( 'wp_login_failed', array( $this, 'record_failure' ) );
 			add_action( 'wp_login', array( $this, 'clear_failures' ), 10, 2 );
+			// Owner recovery: an emailed link that clears the lockout.
+			add_action( 'login_form_perdita_unlock', array( $this, 'handle_unlock' ) );
+			add_filter( 'login_message', array( $this, 'unlock_login_message' ) );
 		}
 
 		// 2. Security headers.
@@ -104,7 +119,11 @@ class Perdita_Security {
 
 		// 5. Author enumeration.
 		if ( ! empty( $this->settings['block_author_enum'] ) ) {
-			add_action( 'template_redirect', array( $this, 'block_author_scan' ) );
+			// Priority 1: redirect_canonical sits on template_redirect at 10 and
+			// turns /?author=1 into /author/admin/ before a later hook runs.
+			add_action( 'template_redirect', array( $this, 'block_author_scan' ), 1 );
+			add_filter( 'oembed_response_data', array( $this, 'strip_oembed_author' ) );
+			add_filter( 'wp_sitemaps_add_provider', array( $this, 'drop_users_sitemap' ), 10, 2 );
 		}
 
 		// 6. REST users restriction. get_settings() maps an older
@@ -116,6 +135,8 @@ class Perdita_Security {
 		// 7. Same message for every failed login.
 		if ( ! empty( $this->settings['login_generic_errors'] ) ) {
 			add_filter( 'authenticate', array( $this, 'generic_login_error' ), 99 );
+			// After the Turnstile check (10), so a failed challenge still shows.
+			add_action( 'lostpassword_post', array( $this, 'hide_unknown_account' ), 99, 2 );
 		}
 
 		// 8. Turnstile on login, registration, and lost password.
@@ -434,7 +455,44 @@ class Perdita_Security {
 	 * @return string
 	 */
 	private function transient_key( $ip ) {
-		return self::TRANSIENT_PREFIX . md5( $ip );
+		return self::TRANSIENT_PREFIX . md5( self::lock_id( $ip ) );
+	}
+
+	/**
+	 * What a lockout is counted against. An IPv4 address counts on its own.
+	 * An IPv6 address counts as its /64, since one connection owns the whole
+	 * block and can pick any address inside it. An IPv4-mapped IPv6 address
+	 * counts as the IPv4 address. The allowlist still checks the full address.
+	 *
+	 * @param string $ip Client IP.
+	 * @return string
+	 */
+	private static function lock_id( $ip ) {
+		if ( false === strpos( $ip, ':' ) || ! filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6 ) ) {
+			return $ip;
+		}
+		$bin = inet_pton( $ip );
+		if ( false === $bin || 16 !== strlen( $bin ) ) {
+			return $ip;
+		}
+		if ( "\0\0\0\0\0\0\0\0\0\0\xff\xff" === substr( $bin, 0, 12 ) ) {
+			return implode( '.', array_values( unpack( 'C4', substr( $bin, 12 ) ) ) );
+		}
+		return bin2hex( substr( $bin, 0, 8 ) ) . '/64';
+	}
+
+	/**
+	 * When an address's lockout ends, or 0 when it is not locked out.
+	 *
+	 * @param string $ip Client IP.
+	 * @return int Unix time.
+	 */
+	private function locked_until( $ip ) {
+		$record = get_transient( $this->transient_key( $ip ) );
+		if ( is_array( $record ) && ! empty( $record['locked_until'] ) && time() < (int) $record['locked_until'] ) {
+			return (int) $record['locked_until'];
+		}
+		return 0;
 	}
 
 	/**
@@ -451,9 +509,9 @@ class Perdita_Security {
 			return $user;
 		}
 
-		$record = get_transient( $this->transient_key( $ip ) );
-		if ( is_array( $record ) && ! empty( $record['locked_until'] ) && time() < (int) $record['locked_until'] ) {
-			$minutes = max( 1, (int) ceil( ( (int) $record['locked_until'] - time() ) / 60 ) );
+		$until = $this->locked_until( $ip );
+		if ( $until ) {
+			$minutes = max( 1, (int) ceil( ( $until - time() ) / 60 ) );
 			return new WP_Error(
 				'perdita_security_locked',
 				sprintf(
@@ -490,22 +548,22 @@ class Perdita_Security {
 				'locked_until' => 0,
 			);
 		}
+		$now = time();
+		if ( (int) $record['locked_until'] > $now ) {
+			// A failure during a lockout changes nothing. Otherwise one guess
+			// every few minutes from a shared address would keep the owner
+			// out for good. The lockout ends when it was set to end.
+			return;
+		}
 		$record['count'] = (int) $record['count'] + 1;
 
 		if ( $record['count'] >= $max ) {
-			$now       = time();
-			$was_locked = (int) $record['locked_until'] > $now;
-			$length    = $lockout;
-			if ( ! $was_locked ) {
-				// A new lockout. Count it, and once enough have piled up
-				// inside 24 hours, make this one the long one.
-				$length = $this->next_lockout_length( $ip, $lockout );
-			}
-			// Start (or extend) the lockout. A long lockout is never cut
-			// short by a failure that lands while it runs. The transient TTL
-			// is the longer of the remaining window and the lockout so the
-			// record always outlives the block and self-expires afterward.
-			$until                  = max( (int) $record['locked_until'], $now + $length );
+			// A new lockout. Count it, and once enough have piled up inside
+			// 24 hours, make this one the long one. The transient TTL is the
+			// longer of the window and the lockout, so the record outlives
+			// the block and self-expires afterward.
+			$length                 = $this->next_lockout_length( $ip, $lockout );
+			$until                  = $now + $length;
 			$record['locked_until'] = $until;
 			set_transient( $key, $record, max( $window, $until - $now ) );
 			return;
@@ -521,7 +579,7 @@ class Perdita_Security {
 	 * @return string
 	 */
 	private function history_key( $ip ) {
-		return self::TRANSIENT_PREFIX . 'h_' . md5( $ip );
+		return self::TRANSIENT_PREFIX . 'h_' . md5( self::lock_id( $ip ) );
 	}
 
 	/**
@@ -658,6 +716,31 @@ class Perdita_Security {
 	}
 
 	/**
+	 * Drop the author's name and archive link from an oEmbed response. The
+	 * archive link carries the login name.
+	 *
+	 * @param array $data oEmbed response data.
+	 * @return array
+	 */
+	public function strip_oembed_author( $data ) {
+		if ( is_array( $data ) ) {
+			unset( $data['author_name'], $data['author_url'] );
+		}
+		return $data;
+	}
+
+	/**
+	 * Remove the users sitemap, which lists every author archive URL.
+	 *
+	 * @param WP_Sitemaps_Provider|false $provider Sitemap provider.
+	 * @param string                     $name     Provider name.
+	 * @return WP_Sitemaps_Provider|false
+	 */
+	public function drop_users_sitemap( $provider, $name = '' ) {
+		return 'users' === $name ? false : $provider;
+	}
+
+	/**
 	 * Remove the REST users collection endpoint for logged-out requests, so an
 	 * unauthenticated caller cannot list the site's users (and their slugs) via
 	 * /wp/v2/users. Logged-in requests keep the endpoint, which the block editor
@@ -705,6 +788,166 @@ class Perdita_Security {
 			return $user;
 		}
 		return new WP_Error( 'incorrect_password', self::generic_login_message() );
+	}
+
+	/**
+	 * On lostpassword_post, after the Turnstile check: an unknown login or
+	 * email gets the same outcome as a known one, a redirect to the "check
+	 * your email" screen with no mail sent. Other errors (an empty field, a
+	 * failed challenge) keep their own messages, and the "no account" errors
+	 * are dropped so they never show next to them.
+	 *
+	 * @param WP_Error       $errors    Errors so far.
+	 * @param WP_User|false  $user_data The user found, or false.
+	 */
+	public function hide_unknown_account( $errors, $user_data = false ) {
+		if ( ! ( $errors instanceof WP_Error ) || ! $this->is_login_form_post() ) {
+			return;
+		}
+		$errors->remove( 'invalid_email' );
+		$errors->remove( 'invalidcombo' );
+		if ( $errors->has_errors() || $user_data ) {
+			return;
+		}
+		// The same redirect core sends after a mail goes out.
+		$redirect_to = ! empty( $_REQUEST['redirect_to'] ) ? wp_unslash( $_REQUEST['redirect_to'] ) : add_query_arg( 'checkemail', 'confirm', wp_login_url() ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- pre-auth form with no nonce, and wp_safe_redirect() validates the target.
+		/** This filter is documented in wp-login.php */
+		$redirect_to = apply_filters( 'lostpassword_redirect', $redirect_to );
+		wp_safe_redirect( $redirect_to );
+		exit;
+	}
+
+	/* ---------- 6b. owner unlock link ---------- */
+
+	/**
+	 * The login screen messages for the unlock flow: the result of a request
+	 * or a link click, and the "email me an unlock link" form while this
+	 * address is locked out.
+	 *
+	 * @param string $message Message HTML so far.
+	 * @return string
+	 */
+	public function unlock_login_message( $message ) {
+		$state = isset( $_GET['perdita_unlock'] ) ? sanitize_key( wp_unslash( $_GET['perdita_unlock'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only notice.
+		$texts = array(
+			'sent'    => __( 'If that username or email belongs to an administrator, Perdita sent an unlock link. Use it within 15 minutes.', 'perdita-core' ),
+			'done'    => __( 'Your address is unlocked. You can log in now.', 'perdita-core' ),
+			'invalid' => __( 'That unlock link expired or was already used.', 'perdita-core' ),
+		);
+		if ( isset( $texts[ $state ] ) ) {
+			$message .= '<p class="message">' . esc_html( $texts[ $state ] ) . '</p>';
+		}
+
+		$action = isset( $_REQUEST['action'] ) ? sanitize_key( wp_unslash( $_REQUEST['action'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display check.
+		$ip     = $this->client_ip();
+		if ( ( '' === $action || 'login' === $action ) && '' !== $ip && ! $this->is_allowlisted( $ip ) && $this->locked_until( $ip ) ) {
+			$message .= '<form method="post" action="' . esc_url( add_query_arg( 'action', 'perdita_unlock', wp_login_url() ) ) . '" class="perdita-unlock" style="margin:0 0 16px;padding:16px;background:#fff;border:1px solid #c3c4c7;box-shadow:0 1px 3px rgba(0,0,0,.04)">';
+			$message .= '<p style="margin:0 0 8px"><label for="perdita-unlock-user">' . esc_html__( 'Own this site? Enter your username or email.', 'perdita-core' ) . '</label></p>';
+			$message .= '<p style="margin:0 0 8px"><input type="text" name="perdita_unlock_user" id="perdita-unlock-user" class="input" value="" autocomplete="username" style="width:100%;box-sizing:border-box"></p>';
+			$message .= '<p style="margin:0"><button type="submit" class="button">' . esc_html__( 'Email me an unlock link', 'perdita-core' ) . '</button></p>';
+			$message .= '</form>';
+		}
+		return $message;
+	}
+
+	/**
+	 * wp-login.php?action=perdita_unlock. A POST asks for a link. A GET with
+	 * a key uses one. Both end in a redirect to the login screen.
+	 */
+	public function handle_unlock() {
+		$ip     = $this->client_ip();
+		$method = isset( $_SERVER['REQUEST_METHOD'] ) ? strtoupper( sanitize_text_field( wp_unslash( $_SERVER['REQUEST_METHOD'] ) ) ) : '';
+		if ( 'POST' === $method ) {
+			$this->send_unlock_link( $ip );
+			$this->unlock_redirect( 'sent' );
+		}
+
+		$key = isset( $_GET['key'] ) ? preg_replace( '/[^A-Za-z0-9]/', '', sanitize_text_field( wp_unslash( $_GET['key'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- the one-time key is the credential.
+		if ( '' === $key || '' === $ip ) {
+			$this->unlock_redirect( '' );
+		}
+		$token = self::UNLOCK_PREFIX . hash( 'sha256', $key );
+		$data  = get_transient( $token );
+		delete_transient( $token ); // Single use, whatever happens next.
+		$user  = is_array( $data ) && ! empty( $data['user'] ) ? get_userdata( (int) $data['user'] ) : false;
+		if ( ! $user || ! user_can( $user, 'manage_options' ) ) {
+			$this->unlock_redirect( 'invalid' );
+		}
+		delete_transient( $this->transient_key( $ip ) );
+		$this->unlock_redirect( 'done' );
+	}
+
+	/**
+	 * Redirect to the login screen with a result code.
+	 *
+	 * @param string $state sent, done, invalid, or empty.
+	 */
+	private function unlock_redirect( $state ) {
+		$url = wp_login_url();
+		if ( '' !== $state ) {
+			$url = add_query_arg( 'perdita_unlock', $state, $url );
+		}
+		wp_safe_redirect( $url );
+		exit;
+	}
+
+	/**
+	 * Mail an unlock link to the account the form named, when it belongs to
+	 * someone who can manage options. The caller answers the same way
+	 * whatever happens here. An address gets 3 sends an hour, counted whether
+	 * or not the account exists.
+	 *
+	 * @param string $ip Client IP.
+	 */
+	private function send_unlock_link( $ip ) {
+		if ( '' === $ip ) {
+			return;
+		}
+		$limit_key = self::UNLOCK_LIMIT_PREFIX . md5( self::lock_id( $ip ) );
+		$now       = time();
+		$limit     = get_transient( $limit_key );
+		if ( ! is_array( $limit ) || empty( $limit['until'] ) || (int) $limit['until'] <= $now ) {
+			$limit = array(
+				'count' => 0,
+				'until' => $now + HOUR_IN_SECONDS,
+			);
+		}
+		if ( (int) $limit['count'] >= self::UNLOCK_SENDS_PER_HOUR ) {
+			return;
+		}
+		$limit['count'] = (int) $limit['count'] + 1;
+		set_transient( $limit_key, $limit, max( 1, (int) $limit['until'] - $now ) );
+
+		$login = isset( $_POST['perdita_unlock_user'] ) ? sanitize_text_field( wp_unslash( $_POST['perdita_unlock_user'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- pre-auth form, no nonce exists yet. The hourly limit covers abuse.
+		if ( '' === $login ) {
+			return;
+		}
+		$user = is_email( $login ) ? get_user_by( 'email', $login ) : get_user_by( 'login', $login );
+		if ( ! $user || ! user_can( $user, 'manage_options' ) ) {
+			return;
+		}
+
+		$key = wp_generate_password( 32, false, false );
+		set_transient( self::UNLOCK_PREFIX . hash( 'sha256', $key ), array( 'user' => (int) $user->ID ), 15 * MINUTE_IN_SECONDS );
+		$url  = add_query_arg(
+			array(
+				'action' => 'perdita_unlock',
+				'key'    => $key,
+			),
+			wp_login_url()
+		);
+		$site = wp_specialchars_decode( get_option( 'blogname' ), ENT_QUOTES );
+		wp_mail(
+			$user->user_email,
+			/* translators: %s: site name. */
+			sprintf( __( '[%s] Your unlock link', 'perdita-core' ), $site ),
+			sprintf(
+				/* translators: 1: site name, 2: unlock URL. */
+				__( "Someone asked to unlock a login address on %1\$s. Open the link below from the device you want to unlock, within 15 minutes. You can use it once.\n\n%2\$s\n\nIf you didn't ask for this, you can ignore this email.", 'perdita-core' ),
+				$site,
+				$url
+			)
+		);
 	}
 
 	/* ---------- 7. Turnstile on the login screens ---------- */

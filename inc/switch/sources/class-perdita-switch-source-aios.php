@@ -86,7 +86,22 @@ class Perdita_Switch_Source_AIOS extends Perdita_Switch_Security_Source {
 		};
 
 		$lock = $on( 'aiowps_enable_login_lockdown' );
-		$this->offer_limit( __( 'Enable login lockout feature', 'perdita-core' ), $lock, isset( $c['aiowps_max_login_attempts'] ) ? max( 1, (int) $c['aiowps_max_login_attempts'] ) : 3 );
+		// A count that isn't a positive whole number (an array, 'abc', '') would
+		// cast to 0 and import as a lockout after 1 failure. Skip the row and
+		// keep Perdita's default instead.
+		$tries = 3;
+		if ( isset( $c['aiowps_max_login_attempts'] ) ) {
+			$raw = $c['aiowps_max_login_attempts'];
+			if ( ( is_int( $raw ) || ( is_string( $raw ) && ctype_digit( trim( $raw ) ) ) ) && (int) $raw >= 1 ) {
+				$tries = (int) $raw;
+			} else {
+				$tries = null;
+			}
+		}
+		$this->offer_limit( __( 'Enable login lockout feature', 'perdita-core' ), $lock, $tries );
+		if ( null === $tries ) {
+			$this->unsupported( __( 'Max login attempts', 'perdita-core' ), $c['aiowps_max_login_attempts'], __( 'This value is not a whole number of 1 or more, so Perdita keeps its own default of 5 attempts.', 'perdita-core' ) );
+		}
 		$this->offer_whole_minutes( __( 'Login retry time period (minutes)', 'perdita-core' ), isset( $c['aiowps_retry_time_period'] ) ? (int) $c['aiowps_retry_time_period'] : 5, 'login_window', __( 'Count failures over (minutes)', 'perdita-core' ) );
 		$this->offer_whole_minutes( __( 'Time length of lockout (minutes)', 'perdita-core' ), isset( $c['aiowps_lockout_time_length'] ) ? (int) $c['aiowps_lockout_time_length'] : 5, 'login_lockout', __( 'Lockout length (minutes)', 'perdita-core' ) );
 		if ( $lock ) {

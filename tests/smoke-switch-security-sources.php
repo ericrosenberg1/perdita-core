@@ -565,6 +565,28 @@ if ( '' !== $pss_ap && ! is_file( $pss_base . '/aios/firewall-rules/settings.php
 	} ) ), 'aios: the captcha secret is never shown' );
 	$ok( $pss_r['undo']['ok'] && $pss_r['restored'], 'aios: Undo puts perdita_security_settings back byte for byte' );
 	$ok( $pss_s0 === $pss_state() && is_file( $pss_base . '/aios/firewall-rules/settings.php' ), 'aios: its option and files are untouched' );
+	// A max login attempts value that isn't a positive whole number never imports as "lock out after 1 failure".
+	$pss_aio_cfg = get_option( 'aio_wp_security_configs' );
+	foreach ( array( 'abc', '', '0', '-3', '2.5', array( '5' ) ) as $pss_bad_max ) {
+		$pss_cfg = $pss_aio_cfg;
+		$pss_cfg['aiowps_max_login_attempts'] = $pss_bad_max;
+		update_option( 'aio_wp_security_configs', $pss_cfg );
+		Perdita_Switch::sources( true );
+		$pss_r = $pss_cycle( 'aios-core' );
+		$pss_label = is_array( $pss_bad_max ) ? 'an array' : '"' . $pss_bad_max . '"';
+		$pss_note  = $pss_row( $pss_r['plan'], 'Max login attempts' );
+		$ok( null === $pss_row( $pss_r['plan'], 'Allowed retries' ) && $pss_note && 'none' === $pss_note['status'] && 5 === $pss_r['settings']['login_max'], 'aios: a max login attempts of ' . $pss_label . ' is skipped with a note, and the default of 5 holds' );
+	}
+	foreach ( array( '7' => '7', 7 => 7 ) as $pss_good_max => $pss_expect ) {
+		$pss_cfg = $pss_aio_cfg;
+		$pss_cfg['aiowps_max_login_attempts'] = is_int( $pss_expect ) ? $pss_expect : (string) $pss_good_max;
+		update_option( 'aio_wp_security_configs', $pss_cfg );
+		Perdita_Switch::sources( true );
+		$pss_r = $pss_cycle( 'aios-core' );
+		$ok( 7 === $pss_r['settings']['login_max'], 'aios: a max login attempts of ' . var_export( $pss_cfg['aiowps_max_login_attempts'], true ) . ' still imports as 7' );
+	}
+	update_option( 'aio_wp_security_configs', $pss_aio_cfg );
+	Perdita_Switch::sources( true );
 	// A firewall file written for a Perdita-less site is plain text, never executed.
 	$pss_put( $pss_base . '/aios/firewall-rules/settings.php', "<?php __halt_compiler();\n/**\n * x\n * y\n */\n" . '{"aiowps_enable_pingback_firewall":true}' . "\n<?php die('boom');" );
 	Perdita_Switch::sources( true );

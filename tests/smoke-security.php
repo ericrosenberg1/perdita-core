@@ -1204,6 +1204,306 @@ $psn_rm = function ( $d ) use ( &$psn_rm ) {
 $psn_rm( $psn_root );
 $ok( ! is_dir( $psn_root ), 'core check: the temp tree is gone' );
 
+/* =============================================================
+ * Round 2 review fixes: author scan order, IPv6 /64 lockouts, lost
+ * password answers, lockouts that don't stretch, the owner unlock
+ * link, the XML-RPC and display-name notes, and oEmbed and sitemap
+ * login-name leaks.
+ * ============================================================= */
+echo "\n--- security round 2 (tests/smoke-security.php) ---\n";
+
+$psr_users   = array();
+$psr_tokens  = array();
+$psr_ips     = array( '203.0.113.60', '203.0.113.61', '2001:db8:1:2::1', '2001:db8:1:2::ffff', '2001:db8:1:2::5', '2001:db8:1:3::1', '::ffff:203.0.113.60', '198.51.100.99' );
+$psr_clean   = function () use ( $psr_ips, $psn_lock_keys ) {
+	foreach ( $psr_ips as $ip ) {
+		foreach ( $psn_lock_keys( $ip ) as $k ) { delete_transient( $k ); }
+		delete_transient( Perdita_Security::UNLOCK_LIMIT_PREFIX . md5( $ip ) );
+	}
+	foreach ( array( '20010db800010002/64', '20010db800010003/64' ) as $id ) {
+		delete_transient( Perdita_Security::TRANSIENT_PREFIX . md5( $id ) );
+		delete_transient( Perdita_Security::TRANSIENT_PREFIX . 'h_' . md5( $id ) );
+		delete_transient( Perdita_Security::UNLOCK_LIMIT_PREFIX . md5( $id ) );
+	}
+};
+$psr_clean();
+$psr_fail = function ( $m, $n ) { for ( $i = 0; $i < $n; $i++ ) { $m->record_failure(); } };
+$psr_locked = function ( $m ) { return is_wp_error( $m->check_lockout( null ) ); };
+
+$psr_redirect = '';
+$psr_catch    = function ( $location ) use ( &$psr_redirect ) { $psr_redirect = $location; throw new Exception( 'perdita-smoke-redirect' ); };
+add_filter( 'wp_redirect', $psr_catch, 1 );
+$psr_mails = array();
+$psr_mock  = function ( $pre, $atts ) use ( &$psr_mails ) { $psr_mails[] = $atts; return true; };
+add_filter( 'pre_wp_mail', $psr_mock, 10, 2 );
+// Run a callable that ends in a redirect, and return where it went ('' for none).
+$psr_run = function ( $fn ) use ( &$psr_redirect ) {
+	$psr_redirect = '';
+	try { $fn(); } catch ( Exception $e ) { unset( $e ); }
+	return $psr_redirect;
+};
+
+/* ---------- 1. author scan runs ahead of redirect_canonical ---------- */
+update_option( 'perdita_security_settings', array_merge( Perdita_Security::defaults(), array( 'block_author_enum' => true ) ) );
+$psr_w = new Perdita_Security( perdita_core() );
+$psr_pri = has_action( 'template_redirect', array( $psr_w, 'block_author_scan' ) );
+$psr_canon = has_action( 'template_redirect', 'redirect_canonical' );
+$ok( 1 === $psr_pri && ( false === $psr_canon || $psr_pri < $psr_canon ), 'author scan: block_author_scan runs on template_redirect at priority 1, ahead of redirect_canonical' );
+
+/* ---------- 7. oEmbed and the users sitemap ---------- */
+$psr_oe = apply_filters( 'oembed_response_data', array( 'version' => '1.0', 'title' => 'T', 'author_name' => 'admin', 'author_url' => 'http://example.com/author/admin/' ), null, 0, 0 );
+$ok( ! isset( $psr_oe['author_name'] ) && ! isset( $psr_oe['author_url'] ) && 'T' === $psr_oe['title'], 'oembed: author_name and author_url are dropped and the rest stays, with block_author_enum on' );
+$ok( false === apply_filters( 'wp_sitemaps_add_provider', new stdClass(), 'users' ) && is_object( apply_filters( 'wp_sitemaps_add_provider', new stdClass(), 'posts' ) ), 'sitemap: the users provider is removed and the others stay' );
+$psn_unhook( $psr_w );
+$psr_oe = apply_filters( 'oembed_response_data', array( 'author_name' => 'admin', 'author_url' => 'x' ), null, 0, 0 );
+$ok( isset( $psr_oe['author_name'] ) && is_object( apply_filters( 'wp_sitemaps_add_provider', new stdClass(), 'users' ) ), 'oembed and sitemap: with block_author_enum off both are left alone' );
+
+/* ---------- 2. IPv6 lockouts key on the /64 ---------- */
+$psr_m = $psn_make( array( 'login_limit' => true, 'login_max' => 3, 'ip_allowlist' => array( '2001:db8:1:2::5' ) ) );
+$_SERVER['REMOTE_ADDR'] = '2001:db8:1:2::1';
+$psr_fail( $psr_m, 3 );
+$ok( $psr_locked( $psr_m ), 'ipv6: three failures lock the address' );
+$_SERVER['REMOTE_ADDR'] = '2001:db8:1:2::ffff';
+$ok( $psr_locked( $psr_m ), 'ipv6: another address in the same /64 is locked too' );
+$_SERVER['REMOTE_ADDR'] = '2001:db8:1:3::1';
+$ok( ! $psr_locked( $psr_m ), 'ipv6: a different /64 is not locked' );
+$psr_m2 = $psn_make( array( 'login_limit' => true, 'login_max' => 3 ) );
+$_SERVER['REMOTE_ADDR'] = '2001:db8:1:2::1';
+$psr_clean();
+$psr_fail( $psr_m2, 1 );
+$_SERVER['REMOTE_ADDR'] = '2001:db8:1:2::ffff';
+$psr_fail( $psr_m2, 1 );
+$_SERVER['REMOTE_ADDR'] = '2001:db8:1:2::1';
+$psr_fail( $psr_m2, 1 );
+$ok( $psr_locked( $psr_m2 ), 'ipv6: failures from different addresses in one /64 add up to one lockout' );
+$_SERVER['REMOTE_ADDR'] = '2001:db8:1:2::5';
+$psr_fail( $psr_m, 5 );
+$ok( ! $psr_locked( $psr_m ), 'ipv6: the allowlist still matches the full address, and an allowlisted address is never locked' );
+$_SERVER['REMOTE_ADDR'] = '2001:db8:1:2::1';
+$psr_clean();
+$psr_fail( $psr_m2, 3 );
+$_SERVER['REMOTE_ADDR'] = '2001:db8:1:2::1';
+$psr_m2->clear_failures();
+$ok( ! $psr_locked( $psr_m2 ), 'ipv6: a good login clears the /64 count' );
+$psr_clean();
+$_SERVER['REMOTE_ADDR'] = '203.0.113.60';
+$psr_fail( $psr_m2, 3 );
+$ok( $psr_locked( $psr_m2 ), 'ipv4: still counted per address' );
+$_SERVER['REMOTE_ADDR'] = '203.0.113.61';
+$ok( ! $psr_locked( $psr_m2 ), 'ipv4: a neighbor address is not locked' );
+$_SERVER['REMOTE_ADDR'] = '::ffff:203.0.113.60';
+$ok( $psr_locked( $psr_m2 ), 'ipv6: an IPv4-mapped address counts as its IPv4 address' );
+$psr_clean();
+
+/* ---------- 5. a lockout is never stretched ---------- */
+$_SERVER['REMOTE_ADDR'] = '203.0.113.60';
+list( $psr_rk, $psr_hk ) = $psn_lock_keys( '203.0.113.60' );
+$psr_m = $psn_make( array( 'login_limit' => true, 'login_max' => 2, 'login_lockout' => 15, 'login_long_lockout' => true, 'login_long_after' => 9 ) );
+$psr_fail( $psr_m, 2 );
+$psr_before  = get_transient( $psr_rk );
+$psr_hist    = get_transient( $psr_hk );
+$psr_expires = (int) get_option( '_transient_timeout_' . $psr_rk );
+$psr_fail( $psr_m, 4 );
+$psr_after = get_transient( $psr_rk );
+$ok( $psr_before === $psr_after && (int) $psr_before['locked_until'] > time(), 'lockout: failures during a lockout change nothing, so it ends when it was set to end' );
+$ok( $psr_hist === get_transient( $psr_hk ) && 1 === count( $psr_hist ), 'lockout: escalation counts lockouts, not the failures inside one' );
+$ok( $psr_expires === (int) get_option( '_transient_timeout_' . $psr_rk ), 'lockout: the record expiry does not move either' );
+set_transient( $psr_rk, array( 'count' => 2, 'locked_until' => time() - 5 ), 900 );
+$psr_fail( $psr_m, 1 );
+$psr_new = get_transient( $psr_rk );
+$ok( (int) $psr_new['locked_until'] > time() && 2 === count( get_transient( $psr_hk ) ), 'lockout: once a lockout has ended, the next failure starts a new one and escalation counts it' );
+$psr_clean();
+
+/* ---------- 5. owner unlock link ---------- */
+$psr_admin_id = wp_insert_user( array( 'user_login' => 'perdita_smoke_r2_admin', 'user_email' => 'perdita-smoke-r2-admin@example.com', 'user_pass' => wp_generate_password(), 'role' => 'administrator' ) );
+$psr_sub_id   = wp_insert_user( array( 'user_login' => 'perdita_smoke_r2_sub', 'user_email' => 'perdita-smoke-r2-sub@example.com', 'user_pass' => wp_generate_password(), 'role' => 'subscriber' ) );
+$psr_users    = array( $psr_admin_id, $psr_sub_id );
+$_SERVER['REMOTE_ADDR'] = '203.0.113.60';
+$psr_m = $psn_make( array( 'login_limit' => true, 'login_max' => 2, 'login_lockout' => 15 ) );
+$_REQUEST = array();
+$_GET     = array();
+$ok( false === strpos( $psr_m->unlock_login_message( '' ), 'Email me an unlock link' ), 'unlock: no form while the address is not locked out' );
+$psr_fail( $psr_m, 2 );
+$psr_form = $psr_m->unlock_login_message( '' );
+$ok( false !== strpos( $psr_form, 'Email me an unlock link' ) && false !== strpos( $psr_form, 'name="perdita_unlock_user"' ) && false !== strpos( $psr_form, 'action=perdita_unlock' ), 'unlock: a locked address sees the "Email me an unlock link" form' );
+$_REQUEST = array( 'action' => 'lostpassword' );
+$ok( false === strpos( $psr_m->unlock_login_message( '' ), 'Email me an unlock link' ), 'unlock: the form shows only on the login screen' );
+$_REQUEST = array();
+
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$psr_ask = function ( $who ) use ( $psr_m, $psr_run ) {
+	$_POST = array( 'perdita_unlock_user' => $who );
+	return $psr_run( function () use ( $psr_m ) { $psr_m->handle_unlock(); } );
+};
+$psr_mails = array();
+$psr_to_admin = $psr_ask( 'perdita_smoke_r2_admin' );
+$ok( 1 === count( $psr_mails ) && 'perdita-smoke-r2-admin@example.com' === $psr_mails[0]['to'], 'unlock: an administrator login gets one email' );
+$psr_body = $psr_mails ? $psr_mails[0]['message'] : '';
+preg_match( '/key=([A-Za-z0-9]+)/', $psr_body, $psr_km );
+$psr_key = isset( $psr_km[1] ) ? $psr_km[1] : '';
+$ok( 32 === strlen( $psr_key ) && false !== strpos( $psr_body, 'action=perdita_unlock' ), 'unlock: the email carries a 32 character random key' );
+$ok( false === strpos( $psr_body . $psr_mails[0]['subject'], "\u{2014}" ) && false === strpos( $psr_body . $psr_mails[0]['subject'], ';' ), 'unlock: the email has no em dash and no semicolon' );
+$psr_tk = Perdita_Security::UNLOCK_PREFIX . hash( 'sha256', $psr_key );
+$psr_tokens[] = $psr_tk;
+$ok( is_array( get_transient( $psr_tk ) ) && false === get_transient( Perdita_Security::UNLOCK_PREFIX . $psr_key ), 'unlock: the token is stored under its hash, never the raw key' );
+$psr_ttl = (int) get_option( '_transient_timeout_' . $psr_tk ) - time();
+$ok( $psr_ttl > 14 * 60 && $psr_ttl <= 15 * 60, 'unlock: the link lasts 15 minutes' );
+$ok( false !== strpos( $psr_to_admin, 'perdita_unlock=sent' ), 'unlock: the answer is a redirect with the sent notice' );
+$psr_mails = array();
+$psr_unknown = $psr_ask( 'perdita_smoke_r2_nobody' );
+$psr_subr    = $psr_ask( 'perdita_smoke_r2_sub' );
+$psr_emailr  = $psr_ask( 'perdita-smoke-r2-sub@example.com' );
+$ok( 0 === count( $psr_mails ), 'unlock: an unknown login, a subscriber, and a subscriber email send nothing' );
+$ok( $psr_unknown === $psr_to_admin && $psr_subr === $psr_to_admin && $psr_emailr === $psr_to_admin, 'unlock: every answer is the same redirect, whether or not the account exists' );
+// Rate limit: 3 sends an hour per address.
+$psr_clean();
+$psr_mails = array();
+for ( $psr_i = 0; $psr_i < 5; $psr_i++ ) { $psr_ask( 'perdita-smoke-r2-admin@example.com' ); }
+$ok( 3 === count( $psr_mails ), 'unlock: an address gets 3 sends an hour, found by email too' );
+foreach ( $psr_mails as $psr_mail ) {
+	if ( preg_match( '/key=([A-Za-z0-9]+)/', $psr_mail['message'], $psr_km2 ) ) { $psr_tokens[] = Perdita_Security::UNLOCK_PREFIX . hash( 'sha256', $psr_km2[1] ); }
+}
+$psr_ask( 'perdita_smoke_r2_admin' );
+$ok( 3 === count( $psr_mails ), 'unlock: the fourth ask in the hour is answered the same and sends nothing' );
+$psr_other = $psn_make( array( 'login_limit' => true, 'login_max' => 2 ) );
+$_SERVER['REMOTE_ADDR'] = '203.0.113.61';
+$_POST = array( 'perdita_unlock_user' => 'perdita_smoke_r2_admin' );
+$psr_run( function () use ( $psr_other ) { $psr_other->handle_unlock(); } );
+$ok( 4 === count( $psr_mails ), 'unlock: the limit is per address, so another address can still ask' );
+$psr_tokens[] = Perdita_Security::UNLOCK_PREFIX . hash( 'sha256', preg_match( '/key=([A-Za-z0-9]+)/', $psr_mails[3]['message'], $psr_km3 ) ? $psr_km3[1] : '' );
+// Click the link.
+$_SERVER['REMOTE_ADDR'] = '203.0.113.60';
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$_POST = array();
+$psr_clean();
+$psr_fail( $psr_m, 2 );
+$_SERVER['REMOTE_ADDR'] = '198.51.100.99';
+$psr_fail( $psr_m, 2 );
+$ok( $psr_locked( $psr_m ), 'unlock: setup, a second address is locked out' );
+$_GET = array( 'key' => 'wrongkeywrongkeywrongkeywrongkey12' );
+$psr_bad = $psr_run( function () use ( $psr_m ) { $psr_m->handle_unlock(); } );
+$ok( false !== strpos( $psr_bad, 'perdita_unlock=invalid' ) && $psr_locked( $psr_m ), 'unlock: a wrong key says it expired and unlocks nothing' );
+$_GET = array( 'key' => $psr_key );
+$psr_good = $psr_run( function () use ( $psr_m ) { $psr_m->handle_unlock(); } );
+$ok( false !== strpos( $psr_good, 'perdita_unlock=done' ) && ! $psr_locked( $psr_m ), 'unlock: the link clears the lockout for the address that clicked it' );
+$_SERVER['REMOTE_ADDR'] = '203.0.113.60';
+$ok( $psr_locked( $psr_m ), 'unlock: another locked address stays locked' );
+$_SERVER['REMOTE_ADDR'] = '198.51.100.99';
+$psr_fail( $psr_m, 2 );
+$psr_again = $psr_run( function () use ( $psr_m ) { $psr_m->handle_unlock(); } );
+$ok( false !== strpos( $psr_again, 'perdita_unlock=invalid' ) && $psr_locked( $psr_m ), 'unlock: the link works once' );
+$ok( false === get_transient( $psr_tk ), 'unlock: the used token is gone' );
+// A link for an account that lost its rights.
+$psr_mails = array();
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_SERVER['REMOTE_ADDR'] = '203.0.113.60';
+$psr_clean();
+$_GET = array();
+$psr_ask( 'perdita_smoke_r2_admin' );
+preg_match( '/key=([A-Za-z0-9]+)/', $psr_mails ? $psr_mails[0]['message'] : '', $psr_km4 );
+$psr_tokens[] = Perdita_Security::UNLOCK_PREFIX . hash( 'sha256', isset( $psr_km4[1] ) ? $psr_km4[1] : '' );
+( new WP_User( $psr_admin_id ) )->set_role( 'subscriber' );
+$psr_fail( $psr_m, 2 );
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$_GET = array( 'key' => isset( $psr_km4[1] ) ? $psr_km4[1] : 'none' );
+$psr_demoted = $psr_run( function () use ( $psr_m ) { $psr_m->handle_unlock(); } );
+$ok( false !== strpos( $psr_demoted, 'perdita_unlock=invalid' ) && $psr_locked( $psr_m ), 'unlock: a link does nothing once its account can no longer manage options' );
+// The hooks.
+update_option( 'perdita_security_settings', array_merge( Perdita_Security::defaults(), array( 'login_limit' => true ) ) );
+$psr_w = new Perdita_Security( perdita_core() );
+$ok( false !== has_action( 'login_form_perdita_unlock', array( $psr_w, 'handle_unlock' ) ) && false !== has_filter( 'login_message', array( $psr_w, 'unlock_login_message' ) ), 'unlock: the login limit wires the unlock action and the form' );
+$psn_unhook( $psr_w );
+update_option( 'perdita_security_settings', Perdita_Security::defaults() );
+$psr_w = new Perdita_Security( perdita_core() );
+$ok( false === has_action( 'login_form_perdita_unlock', array( $psr_w, 'handle_unlock' ) ), 'unlock: with the login limit off there is no unlock action' );
+$psn_unhook( $psr_w );
+$_GET = array();
+$_POST = array();
+$psr_clean();
+
+/* ---------- 3. lost password gives one answer ---------- */
+$GLOBALS['pagenow']        = 'wp-login.php';
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_REQUEST                  = array();
+$psr_m = $psn_make( array( 'login_generic_errors' => true ) );
+$psr_lp = function ( WP_Error $errors, $user_data ) use ( $psr_m, $psr_run ) {
+	return $psr_run( function () use ( $psr_m, $errors, $user_data ) { $psr_m->hide_unknown_account( $errors, $user_data ); } );
+};
+$psr_go = $psr_lp( new WP_Error( 'invalid_email', 'Unknown email.' ), false );
+$ok( false !== strpos( $psr_go, 'checkemail=confirm' ), 'lost password: an unknown email redirects to the check-your-email screen' );
+$psr_go = $psr_lp( new WP_Error(), false );
+$ok( false !== strpos( $psr_go, 'checkemail=confirm' ), 'lost password: an unknown login redirects the same way' );
+$psr_known = new WP_Error();
+$psr_go    = $psr_lp( $psr_known, get_userdata( $psr_sub_id ) );
+$ok( '' === $psr_go && ! $psr_known->has_errors(), 'lost password: a known user carries on to the real flow' );
+$psr_mixed = new WP_Error( 'perdita_turnstile', 'Challenge failed.' );
+$psr_mixed->add( 'invalid_email', 'Unknown email.' );
+$psr_go = $psr_lp( $psr_mixed, false );
+$ok( '' === $psr_go && array( 'perdita_turnstile' ) === $psr_mixed->get_error_codes(), 'lost password: a failed challenge still shows, and the "no account" error is removed beside it' );
+$psr_empty = new WP_Error( 'empty_username', 'Enter a username or email.' );
+$psr_go    = $psr_lp( $psr_empty, false );
+$ok( '' === $psr_go && array( 'empty_username' ) === $psr_empty->get_error_codes(), 'lost password: an empty field keeps its own message' );
+$GLOBALS['pagenow'] = 'index.php';
+$psr_go = $psr_lp( new WP_Error( 'invalid_email', 'Unknown email.' ), false );
+$ok( '' === $psr_go, 'lost password: other forms that call retrieve_password() are left alone' );
+$GLOBALS['pagenow'] = 'wp-login.php';
+// Through WordPress's own retrieve_password(), with the hook wired the way the module wires it.
+update_option( 'perdita_security_settings', array_merge( Perdita_Security::defaults(), array( 'login_generic_errors' => true ) ) );
+$psr_w = new Perdita_Security( perdita_core() );
+$ok( 99 === has_action( 'lostpassword_post', array( $psr_w, 'hide_unknown_account' ) ), 'lost password: generic errors wire the hook after the Turnstile check' );
+$psr_mails = array();
+$_POST = array( 'user_login' => 'perdita_smoke_r2_nobody' );
+$psr_go = $psr_run( function () { retrieve_password(); } );
+$ok( false !== strpos( $psr_go, 'checkemail=confirm' ) && 0 === count( $psr_mails ), 'lost password: through WordPress, an unknown login gets the confirm redirect and no mail' );
+$_POST = array( 'user_login' => 'nobody-r2@example.com' );
+$psr_go = $psr_run( function () { retrieve_password(); } );
+$ok( false !== strpos( $psr_go, 'checkemail=confirm' ) && 0 === count( $psr_mails ), 'lost password: through WordPress, an unknown email gets the same answer' );
+$_POST = array( 'user_login' => 'perdita_smoke_r2_sub' );
+$psr_res = null;
+$psr_go  = $psr_run( function () use ( &$psr_res ) { $psr_res = retrieve_password(); } );
+$ok( '' === $psr_go && true === $psr_res && 1 === count( $psr_mails ) && 'perdita-smoke-r2-sub@example.com' === $psr_mails[0]['to'] && false !== strpos( $psr_mails[0]['message'], 'action=rp' ), 'lost password: a real user still gets the reset email' );
+$psn_unhook( $psr_w );
+update_option( 'perdita_security_settings', Perdita_Security::defaults() );
+$psr_w = new Perdita_Security( perdita_core() );
+$_POST = array( 'user_login' => 'perdita_smoke_r2_nobody' );
+$psr_res = null;
+$psr_go  = $psr_run( function () use ( &$psr_res ) { $psr_res = retrieve_password(); } );
+$ok( '' === $psr_go && is_wp_error( $psr_res ), 'lost password: with generic errors off, WordPress keeps its own behavior' );
+$psn_unhook( $psr_w );
+
+/* ---------- 6 and 7. status panel notes ---------- */
+wp_set_current_user( 1 );
+$psr_rows_for = function ( array $settings ) use ( $psn_make ) {
+	$adm = new Perdita_Security_Admin( $psn_make(), perdita_core() ); // psn_make() clears the option, so save after it.
+	update_option( 'perdita_security_settings', array_merge( Perdita_Security::defaults(), $settings ) );
+	return $adm->status_rows( Perdita_Security::get_settings() );
+};
+$psr_labels = function ( $rows ) { return wp_list_pluck( $rows, 'label' ); };
+$ok( in_array( 'Turnstile and XML-RPC', $psr_labels( $psr_rows_for( array( 'login_turnstile' => true ) ) ), true ), 'status: Turnstile on with XML-RPC open shows a warning row' );
+$ok( ! in_array( 'Turnstile and XML-RPC', $psr_labels( $psr_rows_for( array( 'login_turnstile' => true, 'disable_xmlrpc' => true ) ) ), true ), 'status: no warning once XML-RPC is off' );
+$ok( ! in_array( 'Turnstile and XML-RPC', $psr_labels( $psr_rows_for( array() ) ), true ), 'status: no warning with Turnstile off' );
+$psr_warn = null;
+foreach ( $psr_rows_for( array( 'login_turnstile' => true ) ) as $psr_row ) { if ( 'Turnstile and XML-RPC' === $psr_row['label'] ) { $psr_warn = $psr_row; } }
+$ok( $psr_warn && false === $psr_warn['on'] && false !== strpos( $psr_warn['note'], 'XML-RPC off' ), 'status: the warning row is off and points at the XML-RPC block' );
+wp_update_user( array( 'ID' => $psr_admin_id, 'role' => 'administrator', 'display_name' => 'perdita_smoke_r2_admin' ) );
+$psr_dn = null;
+foreach ( $psr_rows_for( array() ) as $psr_row ) { if ( 'Administrator display names' === $psr_row['label'] ) { $psr_dn = $psr_row; } }
+$ok( $psr_dn && false !== strpos( $psr_dn['note'], 'perdita_smoke_r2_admin' ), 'status: an administrator whose display name equals the login is named in a note' );
+wp_update_user( array( 'ID' => $psr_admin_id, 'display_name' => 'Smoke Round Two' ) );
+$psr_dn = null;
+foreach ( $psr_rows_for( array() ) as $psr_row ) { if ( 'Administrator display names' === $psr_row['label'] ) { $psr_dn = $psr_row; } }
+$ok( ! $psr_dn || false === strpos( $psr_dn['note'], 'perdita_smoke_r2_admin' ), 'status: a different display name drops that administrator from the note' );
+
+/* ---------- put the round 2 fixtures back ---------- */
+foreach ( $psr_users as $psr_uid ) { wp_delete_user( $psr_uid ); }
+foreach ( $psr_tokens as $psr_t ) { delete_transient( $psr_t ); }
+$psr_clean();
+remove_filter( 'wp_redirect', $psr_catch, 1 );
+remove_filter( 'pre_wp_mail', $psr_mock, 10 );
+$_GET = array(); $_POST = array(); $_REQUEST = array();
+delete_option( 'perdita_security_settings' );
+$ok( ! get_option( '_transient_' . $psr_rk ) && 0 === (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name LIKE %s", $wpdb->esc_like( '_transient_' . Perdita_Security::UNLOCK_PREFIX ) . '%' ) ), 'round 2: no unlock transients are left behind' );
+
 /* ---------- the screen ---------- */
 $psn_orig_user3 = get_current_user_id();
 wp_set_current_user( 1 );
