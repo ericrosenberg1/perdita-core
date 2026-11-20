@@ -95,6 +95,17 @@ class Perdita_Caching {
 	const CLIENT_CACHE_MAX_AGE = 300;
 
 	/**
+	 * Longest s-maxage the edge setting accepts: 30 days.
+	 */
+	const EDGE_MAX_AGE_CAP = 2592000;
+
+	/**
+	 * Skip reasons that mean the response is personal: it always goes out
+	 * private, no-store, whatever another plugin queued.
+	 */
+	const PERSONAL_SKIPS = array( 'logged in', 'password-protected', 'DONOTCACHEPAGE', 'cookie' );
+
+	/**
 	 * The Perdita core singleton.
 	 *
 	 * @var Perdita
@@ -333,6 +344,12 @@ class Perdita_Caching {
 		add_action( 'perdita_cache_preload_start', array( __CLASS__, 'run_preload_start' ) );
 		add_action( 'perdita_cache_purged_url', array( __CLASS__, 'queue_preload_url' ) );
 		add_action( 'perdita_cache_purged_all', array( __CLASS__, 'queue_preload_all' ) );
+		// A managed host's own cache, and LiteSpeed's, hear about every purge.
+		add_action( 'perdita_cache_purged_all', array( __CLASS__, 'purge_downstream_all' ), 20, 0 );
+		add_action( 'perdita_cache_purged_url', array( __CLASS__, 'purge_downstream_url' ), 20, 1 );
+		if ( ! is_admin() ) {
+			add_action( 'template_redirect', array( __CLASS__, 'send_pending_litespeed' ), 0 );
+		}
 		if ( is_admin() ) {
 			add_action( 'admin_init', array( __CLASS__, 'sync_schedules' ) );
 		} elseif ( wp_doing_cron() || ( defined( 'WP_CLI' ) && WP_CLI ) ) {
@@ -359,6 +376,46 @@ class Perdita_Caching {
 	}
 
 	/**
+	 * `perdita_cache_purged_all`: pass a full purge to the host's cache and
+	 * to LiteSpeed.
+	 */
+	public static function purge_downstream_all() {
+		if ( '' !== self::managed_host() ) {
+			Perdita_Caching_Hosts::purge_all();
+		}
+		if ( self::litespeed_active( self::settings() ) ) {
+			self::load( 'litespeed' );
+			Perdita_Caching_LiteSpeed::purge_all();
+		}
+	}
+
+	/**
+	 * `perdita_cache_purged_url`: pass a one-page purge on.
+	 *
+	 * @param mixed $url URL.
+	 */
+	public static function purge_downstream_url( $url ) {
+		if ( '' !== self::managed_host() ) {
+			Perdita_Caching_Hosts::purge_url( $url );
+		}
+		if ( self::litespeed_active( self::settings() ) ) {
+			self::load( 'litespeed' );
+			Perdita_Caching_LiteSpeed::purge_url( $url );
+		}
+	}
+
+	/**
+	 * A LiteSpeed purge from WP-CLI waits for a request with a response.
+	 */
+	public static function send_pending_litespeed() {
+		$settings = self::settings();
+		if ( self::litespeed_active( $settings ) && is_file( self::cache_dir() . 'litespeed-purge.pending' ) ) {
+			self::load( 'litespeed' );
+			Perdita_Caching_LiteSpeed::send_pending();
+		}
+	}
+
+	/**
 	 * Load one of the module's helper classes on first use.
 	 *
 	 * @param string $which preload, cdn or tools.
@@ -368,6 +425,9 @@ class Perdita_Caching {
 			'preload' => 'class-perdita-caching-preload.php',
 			'cdn'     => 'class-perdita-caching-cdn.php',
 			'tools'   => 'class-perdita-caching-tools.php',
+			'edge'      => 'class-perdita-caching-edge.php',
+			'hosts'     => 'class-perdita-caching-hosts.php',
+			'litespeed' => 'class-perdita-caching-litespeed.php',
 		);
 		if ( isset( $files[ $which ] ) ) {
 			require_once __DIR__ . '/' . $files[ $which ];
@@ -406,6 +466,8 @@ class Perdita_Caching {
 			'cdn_exclude'     => array( '.php' ),
 			'debug_log'       => false,          // Write cache decisions to a log file.
 			'debug_log_until' => 0,              // When the log switches itself off.
+			'edge_max_age'    => 0,              // s-maxage for a CDN on stored anonymous pages (0 is off).
+			'litespeed'       => false,          // Hand stored pages to LiteSpeed's own cache too.
 		);
 	}
 
@@ -458,6 +520,8 @@ class Perdita_Caching {
 		// stored flag stays as it is, because writing this option clears the
 		// whole cache.
 		$s['debug_log'] = ! empty( $s['debug_log'] ) && $s['debug_log_until'] > time();
+		$s['edge_max_age'] = max( 0, min( self::EDGE_MAX_AGE_CAP, (int) $s['edge_max_age'] ) );
+		$s['litespeed']    = ! empty( $s['litespeed'] );
 		return $s;
 	}
 
@@ -555,6 +619,8 @@ class Perdita_Caching {
 			'debug_log_until'        => $debug_until,
 			'max_size_mb'            => isset( $input['max_size_mb'] ) && is_scalar( $input['max_size_mb'] ) ? min( 1048576, max( 0, (int) $input['max_size_mb'] ) ) : 1024,
 			'purge_on_save'          => isset( $input['purge_on_save'] ) && 'smart' === $input['purge_on_save'] ? 'smart' : 'all',
+			'edge_max_age'           => isset( $input['edge_max_age'] ) && is_scalar( $input['edge_max_age'] ) ? min( self::EDGE_MAX_AGE_CAP, max( 0, (int) $input['edge_max_age'] ) ) : 0,
+			'litespeed'              => ! empty( $input['litespeed'] ),
 		);
 	}
 
@@ -857,7 +923,7 @@ class Perdita_Caching {
 	 *
 	 * @return string
 	 */
-	private static function site_host() {
+	public static function site_host() {
 		return strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) );
 	}
 
@@ -1037,7 +1103,11 @@ class Perdita_Caching {
 		}
 		if ( ! $this->is_cacheable( $settings ) ) {
 			self::log( 'SKIP', self::log_uri() . ' (' . $this->skip_reason . ')' );
-			self::send_skip_cache_control();
+			if ( in_array( $this->skip_reason, self::PERSONAL_SKIPS, true ) ) {
+				self::send_personal_no_store();
+			} else {
+				self::send_skip_cache_control();
+			}
 			return;
 		}
 
@@ -1117,7 +1187,8 @@ class Perdita_Caching {
 		// leave for a stale one, which is about to be replaced.
 		// (A logged-in visitor's page keeps WordPress's private, no-store headers.)
 		if ( ! $this->logged_in_allowed ) {
-			header( 'Cache-Control: max-age=' . ( 'stale' === $state ? 0 : self::CLIENT_CACHE_MAX_AGE ) . ', public' );
+			header( 'Cache-Control: ' . self::public_cache_control( $settings, 'stale' === $state ? 'stale' : 'fresh' ) );
+			self::send_litespeed_store( $settings, 'stale' !== $state );
 		}
 		self::send_vary_headers( $settings );
 		header( 'Age: ' . $age );
@@ -1494,15 +1565,212 @@ class Perdita_Caching {
 		if ( headers_sent() ) {
 			return;
 		}
+		$settings = self::settings();
 		if ( $stored && ! $this->logged_in_allowed ) {
-			header( 'Cache-Control: max-age=' . self::CLIENT_CACHE_MAX_AGE . ', public' );
+			header( 'Cache-Control: ' . self::public_cache_control( $settings, 'fresh' ) );
+			self::send_litespeed_store( $settings, true );
 			return;
 		}
+		self::send_litespeed_store( $settings, false );
 		$current = self::response_header( 'Cache-Control' );
 		if ( '' !== $current && preg_match( '/\b(?:no-store|private)\b/i', $current ) ) {
 			return;
 		}
 		header( 'Cache-Control: private, no-store, max-age=0' );
+	}
+
+	/**
+	 * The s-maxage a stored anonymous page carries for a CDN, in seconds,
+	 * or 0 for none.
+	 *
+	 * Off with the phone copy on: that copy varies on User-Agent, and a CDN
+	 * that ignores Vary: User-Agent for HTML would hand a desktop visitor
+	 * the phone page. Cloudflare caches HTML only under a Cache Rule, and a
+	 * rule that respects origin headers takes its edge TTL from s-maxage
+	 * (developers.cloudflare.com/cache/how-to/cache-rules/settings/, "Use
+	 * cache-control header if present, bypass cache if not").
+	 *
+	 * @param array $settings Settings.
+	 * @return int
+	 */
+	public static function edge_max_age( $settings ) {
+		if ( ! empty( $settings['mobile_cache'] ) ) {
+			return 0;
+		}
+		/**
+		 * The s-maxage, in seconds, a stored anonymous page carries for a
+		 * shared cache such as a CDN. 0 sends none. Perdita Pro raises it
+		 * while its Cloudflare edge rule is on.
+		 *
+		 * @param int   $seconds  The Caching screen's value.
+		 * @param array $settings Settings.
+		 */
+		$age = (int) apply_filters( 'perdita_cache_edge_max_age', (int) $settings['edge_max_age'], $settings );
+		return max( 0, min( self::EDGE_MAX_AGE_CAP, $age ) );
+	}
+
+	/**
+	 * The Cache-Control value for an anonymous page the cache stored.
+	 *
+	 * A fresh page may sit a few minutes in the browser and, with the edge
+	 * setting on, longer at a CDN. A stale one gets neither: it's about to
+	 * be replaced. s-maxage implies proxy-revalidate, so a CDN never serves
+	 * it past that age (developers.cloudflare.com/cache/concepts/revalidation/).
+	 *
+	 * @param array  $settings Settings.
+	 * @param string $state    fresh or stale.
+	 * @return string
+	 */
+	public static function public_cache_control( $settings, $state = 'fresh' ) {
+		if ( 'fresh' !== $state ) {
+			return 'max-age=0, public';
+		}
+		$value = 'max-age=' . self::CLIENT_CACHE_MAX_AGE . ', public';
+		$edge  = self::edge_max_age( $settings );
+		if ( $edge > 0 ) {
+			$value .= ', s-maxage=' . $edge;
+		}
+		return $value;
+	}
+
+	/**
+	 * A personal response (a logged-in visitor, a cart or comment cookie, a
+	 * password-protected post, DONOTCACHEPAGE) always goes out private and
+	 * no-store, so no CDN or proxy can keep it, even when a plugin queued a
+	 * public Cache-Control. Cloudflare never stores a response marked
+	 * private or no-store under a rule that respects origin headers
+	 * (developers.cloudflare.com/cache/concepts/cache-responses/).
+	 *
+	 * The header goes out now and is checked again just before PHP sends
+	 * the headers, in case something later in the request queued a public
+	 * one.
+	 */
+	private static function send_personal_no_store() {
+		if ( headers_sent() ) {
+			return;
+		}
+		header( 'Cache-Control: private, no-store, max-age=0' );
+		header_register_callback( array( __CLASS__, 'enforce_personal_no_store' ) );
+	}
+
+	/**
+	 * header_register_callback(): replace a Cache-Control that lets a shared
+	 * cache keep a personal response.
+	 */
+	public static function enforce_personal_no_store() {
+		$current = self::response_header( 'Cache-Control' );
+		if ( ! self::is_private_cache_control( $current ) ) {
+			header( 'Cache-Control: private, no-store, max-age=0' );
+		}
+		if ( '' !== self::response_header( 'X-LiteSpeed-Cache-Control' ) || self::litespeed_active( self::settings() ) ) {
+			header( 'X-LiteSpeed-Cache-Control: no-cache' );
+		}
+	}
+
+	/**
+	 * Whether a Cache-Control value keeps every shared cache out: it says
+	 * no-store or private.
+	 *
+	 * @param string $value Header value.
+	 * @return bool
+	 */
+	public static function is_private_cache_control( $value ) {
+		return (bool) preg_match( '/(?:^|[\s,])(?:no-store|private)(?:$|[\s,=])/i', (string) $value );
+	}
+
+	/* ---------- LiteSpeed ---------- */
+
+	/**
+	 * Whether this server is LiteSpeed or OpenLiteSpeed. Neither documents a
+	 * PHP constant for it, so this reads the server software string, which
+	 * both report as "LiteSpeed".
+	 *
+	 * @return bool
+	 */
+	public static function server_is_litespeed() {
+		$software = isset( $_SERVER['SERVER_SOFTWARE'] ) ? (string) $_SERVER['SERVER_SOFTWARE'] : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- compared, never printed.
+		return false !== stripos( $software, 'litespeed' );
+	}
+
+	/**
+	 * Whether stored pages go to LiteSpeed's cache: the setting is on, the
+	 * server is LiteSpeed, the LiteSpeed Cache plugin isn't active (Perdita
+	 * stands down for it, see other_page_cache()), the phone copy is off,
+	 * and the .htaccess block that keeps personal visitors out of
+	 * LiteSpeed's cache is in place and passed its live check.
+	 *
+	 * @param array $settings Settings.
+	 * @return bool
+	 */
+	public static function litespeed_active( $settings ) {
+		if ( empty( $settings['litespeed'] ) || ! empty( $settings['mobile_cache'] ) || ! self::server_is_litespeed() ) {
+			return false;
+		}
+		$state = get_option( 'perdita_cache_litespeed', array() );
+		return is_array( $state ) && ! empty( $state['ok'] );
+	}
+
+	/**
+	 * After a save: write or remove the LiteSpeed .htaccess block and run
+	 * the live check. Pages go to LiteSpeed only once the check passes.
+	 *
+	 * @param array $before Settings before the save.
+	 * @param array $after  Settings after the save.
+	 * @return string One sentence for the admin notice, or ''.
+	 */
+	public static function apply_litespeed( $before, $after ) {
+		$want = ! empty( $after['litespeed'] ) && empty( $after['mobile_cache'] ) && ! empty( $after['enabled'] ) && self::server_is_litespeed() && '' === self::other_page_cache();
+		$had  = ! empty( $before['litespeed'] );
+		if ( ! $want && ! $had ) {
+			return '';
+		}
+		self::load( 'litespeed' );
+		if ( ! $want ) {
+			Perdita_Caching_LiteSpeed::sync_htaccess( false );
+			delete_option( Perdita_Caching_LiteSpeed::STATE_OPTION );
+			if ( ! headers_sent() ) {
+				header( 'X-LiteSpeed-Purge: ' . Perdita_Caching_LiteSpeed::purge_header( array( self::litespeed_site_tag() ) ), false );
+			}
+			return __( 'LiteSpeed no longer keeps Perdita\'s pages.', 'perdita-core' );
+		}
+		if ( ! Perdita_Caching_LiteSpeed::sync_htaccess( true ) ) {
+			delete_option( Perdita_Caching_LiteSpeed::STATE_OPTION );
+			return __( 'Perdita couldn\'t write its LiteSpeed block to .htaccess, so LiteSpeed caching stays off. Check the file\'s permissions.', 'perdita-core' );
+		}
+		$state = Perdita_Caching_LiteSpeed::verify();
+		return (string) $state['message'];
+	}
+
+	/**
+	 * Plugin deactivation: take the LiteSpeed block out, so LiteSpeed keeps
+	 * no Perdita page past the plugin.
+	 */
+	public static function remove_litespeed() {
+		$settings = self::settings();
+		if ( empty( $settings['litespeed'] ) ) {
+			return;
+		}
+		self::load( 'litespeed' );
+		Perdita_Caching_LiteSpeed::sync_htaccess( false );
+		delete_option( Perdita_Caching_LiteSpeed::STATE_OPTION );
+	}
+
+	/**
+	 * Tell LiteSpeed whether it may keep this response. LiteSpeed reads
+	 * X-LiteSpeed-Cache-Control and X-LiteSpeed-Tag and ignores neither
+	 * when its cache is on (docs.litespeedtech.com/lscache/devguide/controls/).
+	 * Every stored page carries the site's tag and its own, so a purge can
+	 * name either.
+	 *
+	 * @param array $settings Settings.
+	 * @param bool  $store    Whether the page was stored and is fresh.
+	 */
+	private static function send_litespeed_store( $settings, $store ) {
+		if ( headers_sent() || ! self::litespeed_active( $settings ) ) {
+			return;
+		}
+		self::load( 'litespeed' );
+		Perdita_Caching_LiteSpeed::send_store_headers( $settings, $store );
 	}
 
 	/**
@@ -3242,6 +3510,11 @@ class Perdita_Caching {
 	 * @return string
 	 */
 	public static function other_page_cache() {
+		$host = self::managed_host();
+		if ( '' !== $host ) {
+			self::load( 'hosts' );
+			return Perdita_Caching_Hosts::label( $host );
+		}
 		$known = array(
 			'wp-super-cache/wp-cache.php'          => 'WP Super Cache',
 			'w3-total-cache/w3-total-cache.php'    => 'W3 Total Cache',
@@ -3266,6 +3539,48 @@ class Perdita_Caching {
 		return '';
 	}
 
+	/**
+	 * The managed host whose own page cache runs this site, or ''. See
+	 * class-perdita-caching-hosts.php for each signal and its source.
+	 *
+	 * @return string
+	 */
+	public static function managed_host() {
+		$host = '';
+		if ( function_exists( 'is_wpe' ) && is_wpe() ) {
+			$host = 'wpengine';
+		} elseif ( defined( 'IS_PRESSABLE' ) && IS_PRESSABLE ) {
+			// Pressable runs on the same platform as WordPress.com, so this
+			// check comes first.
+			$host = 'pressable';
+		} elseif ( ( defined( 'IS_ATOMIC' ) && IS_ATOMIC ) || defined( 'ATOMIC_CLIENT_ID' ) ) {
+			$host = 'wpcom';
+		}
+		/**
+		 * The managed host this site runs on, when that host runs its own
+		 * page cache: wpengine, pressable, wpcom, kinsta, godaddy, or any
+		 * label. '' means none, and Perdita's own page cache runs.
+		 *
+		 * @param string $host What Perdita detected.
+		 */
+		$host = (string) apply_filters( 'perdita_cache_managed_host', $host );
+		if ( ! preg_match( '/^[a-z0-9_-]{1,40}$/', $host ) ) {
+			return '';
+		}
+		self::load( 'hosts' );
+		return $host;
+	}
+
+	/**
+	 * The tag every page this site hands to LiteSpeed carries, so a purge
+	 * of everything never touches another site on the same server.
+	 *
+	 * @return string
+	 */
+	public static function litespeed_site_tag() {
+		return 'pd' . substr( md5( home_url( '/' ) ), 0, 8 );
+	}
+
 	/* ---------- early serve (wp-content/advanced-cache.php) ---------- */
 
 	/**
@@ -3278,7 +3593,7 @@ class Perdita_Caching {
 	 * Drop-in format version. Bump when dropin_source() changes, and the
 	 * next admin request rewrites the file.
 	 */
-	const DROPIN_VERSION = '4';
+	const DROPIN_VERSION = '5';
 
 	/**
 	 * @return string Absolute path to wp-content/advanced-cache.php.
@@ -3341,6 +3656,9 @@ class Perdita_Caching {
 			'bad_path'        => self::BAD_PATH_PATTERN,
 			'cookies'         => array_values( array_unique( array_merge( $front['cookies'], $settings['reject_cookies'] ) ) ),
 			'max_age'         => self::CLIENT_CACHE_MAX_AGE,
+			'edge'            => (int) $front['edge'],
+			'ls'              => self::litespeed_active( $settings ) ? (int) $settings['ttl_hours'] * HOUR_IN_SECONDS : 0,
+			'ls_tag'          => self::litespeed_active( $settings ) ? self::litespeed_site_tag() : '',
 			'charset'         => (string) get_option( 'blog_charset', 'UTF-8' ),
 			'reject_ua'       => array_values( $settings['reject_user_agents'] ),
 			'mobile'          => ! empty( $settings['mobile_cache'] ),
@@ -3498,7 +3816,11 @@ class Perdita_Caching {
 			'	}',
 			'	header( \'X-Cache: \' . $state );',
 			'	header( \'X-Perdita-Cache: early\' );',
-			'	header( \'Cache-Control: max-age=\' . ( \'STALE\' === $state ? 0 : (int) $c[\'max_age\'] ) . \', public\' );',
+			'	header( \'Cache-Control: max-age=\' . ( \'STALE\' === $state ? 0 : (int) $c[\'max_age\'] ) . \', public\' . ( \'STALE\' !== $state && $c[\'edge\'] > 0 ? \', s-maxage=\' . (int) $c[\'edge\'] : \'\' ) );',
+			'	if ( $c[\'ls\'] > 0 ) {',
+			'		header( \'X-LiteSpeed-Cache-Control: \' . ( \'STALE\' === $state ? \'no-cache\' : \'public,max-age=\' . (int) $c[\'ls\'] ) );',
+			'		header( \'X-LiteSpeed-Tag: \' . $c[\'ls_tag\'] . \',\' . $c[\'ls_tag\'] . \'_\' . substr( md5( $c[\'host\'] . $path ), 0, 12 ) );',
+			'	}',
 			'	if ( $c[\'gzip\'] ) {',
 			'		header( \'Vary: Accept-Encoding\', false );',
 			'	}',
@@ -3612,6 +3934,7 @@ class Perdita_Caching {
 			'mobile_ua'       => self::mobile_user_agents(),
 			'mobile_filtered' => (bool) has_filter( 'wp_is_mobile' ),
 			'stale_max'       => self::stale_max_age(),
+			'edge'            => self::edge_max_age( self::settings() ),
 		);
 	}
 
@@ -3643,6 +3966,7 @@ class Perdita_Caching {
 		$values['mobile_ua']       = array_values( array_map( 'strval', (array) $values['mobile_ua'] ) );
 		$values['mobile_filtered'] = (bool) $values['mobile_filtered'];
 		$values['stale_max']       = max( 0, (int) $values['stale_max'] );
+		$values['edge']            = max( 0, (int) ( $values['edge'] ?? 0 ) );
 		return $values;
 	}
 
@@ -3659,6 +3983,7 @@ class Perdita_Caching {
 		$values['mobile_ua']       = array_values( array_map( 'strval', (array) $values['mobile_ua'] ) );
 		$values['mobile_filtered'] = (bool) $values['mobile_filtered'];
 		$values['stale_max']       = max( 0, (int) $values['stale_max'] );
+		$values['edge']            = max( 0, (int) ( $values['edge'] ?? 0 ) );
 		ksort( $values );
 		return md5( (string) wp_json_encode( $values ) );
 	}

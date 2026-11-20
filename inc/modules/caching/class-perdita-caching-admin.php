@@ -158,6 +158,11 @@ class Perdita_Caching_Admin {
 			$msg = __( 'Settings saved and browser-cache rules removed from .htaccess.', 'perdita-core' );
 		}
 
+		$ls_msg = Perdita_Caching::apply_litespeed( $before, $clean );
+		if ( '' !== $ls_msg ) {
+			$msg .= ' ' . $ls_msg;
+		}
+
 		$dropin = Perdita_Caching::sync_dropin();
 		if ( $clean['early_serve'] && $clean['enabled'] ) {
 			$msg .= ' ' . $this->dropin_message( $dropin );

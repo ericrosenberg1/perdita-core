@@ -72,6 +72,8 @@ function perdita_core_uninstall_options() {
 		'perdita_backups_settings',
 		'perdita_caching_settings',
 		'perdita_cache_preload',     // Preload progress.
+		'perdita_cache_litespeed',   // LiteSpeed live check result.
+		'perdita_cache_folder_probe', // Cache folder exposure check.
 		// perdita_forms_settings is kept, like perdita_seo: notification recipients and
 		// spam-provider configuration are site configuration, not plugin bookkeeping.
 		// perdita_forms_cf7_map is kept with the forms: old [contact-form-7] shortcodes
