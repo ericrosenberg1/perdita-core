@@ -1754,6 +1754,32 @@ class Perdita_Caching {
 	/* ---------- exclusions (the safety feature) ---------- */
 
 	/**
+	 * Whether an Accept header asks for Markdown (text/markdown or
+	 * text/x-markdown) with a nonzero q value. The page cache stores HTML
+	 * only, so such a request goes to WordPress. The early-serve drop-in
+	 * hands any Accept header naming markdown to WordPress, which then asks
+	 * this.
+	 *
+	 * @param string $accept Accept header.
+	 * @return bool
+	 */
+	public static function accept_wants_markdown( $accept ) {
+		foreach ( explode( ',', strtolower( (string) $accept ) ) as $part ) {
+			$bits = array_map( 'trim', explode( ';', $part ) );
+			if ( ! in_array( $bits[0], array( 'text/markdown', 'text/x-markdown' ), true ) ) {
+				continue;
+			}
+			foreach ( array_slice( $bits, 1 ) as $param ) {
+				if ( preg_match( '/^q\s*=\s*0(?:\.0*)?$/', $param ) ) {
+					continue 2;
+				}
+			}
+			return true;
+		}
+		return false;
+	}
+
+	/**
 	 * Whether the current request may be cached. This is the heart of the
 	 * module. When in doubt it returns false: it is always safe to skip caching,
 	 * never safe to serve a stale or personalized page to the wrong visitor.
@@ -1773,6 +1799,12 @@ class Perdita_Caching {
 		// A POST body means a form/comment/checkout is happening.
 		if ( ! empty( $_POST ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- presence check only, not processing input.
 			return $this->skip( 'post body' );
+		}
+		// An agent asking for Markdown (BetterDocs and similar plugins answer
+		// with a text/markdown copy and Vary: Accept) must never get the
+		// cached HTML, and the Markdown answer must never land in the HTML key.
+		if ( self::accept_wants_markdown( isset( $_SERVER['HTTP_ACCEPT'] ) ? sanitize_text_field( wp_unslash( $_SERVER['HTTP_ACCEPT'] ) ) : '' ) ) {
+			return $this->skip( 'markdown accept' );
 		}
 		// Logged-in users see personalized chrome (admin bar, edit links), so
 		// they stay out unless another plugin vouches for the request AND
@@ -3230,7 +3262,7 @@ class Perdita_Caching {
 	 * Drop-in format version. Bump when dropin_source() changes, and the
 	 * next admin request rewrites the file.
 	 */
-	const DROPIN_VERSION = '3';
+	const DROPIN_VERSION = '4';
 
 	/**
 	 * @return string Absolute path to wp-content/advanced-cache.php.
@@ -3333,6 +3365,9 @@ class Perdita_Caching {
 			'		return;',
 			'	}',
 			'	if ( \'GET\' !== strtoupper( (string) ( $_SERVER[\'REQUEST_METHOD\'] ?? \'GET\' ) ) || ! empty( $_POST ) ) {',
+			'		return;',
+			'	}',
+			'	if ( false !== stripos( (string) ( $_SERVER[\'HTTP_ACCEPT\'] ?? \'\' ), \'markdown\' ) ) {',
 			'		return;',
 			'	}',
 			'	$host = strtolower( (string) preg_replace( \'/:\\d+$/\', \'\', (string) ( $_SERVER[\'HTTP_HOST\'] ?? \'\' ) ) );',
