@@ -856,7 +856,7 @@ if ( '' !== $chd_php ) {
 	file_put_contents( $chd_log, "<?php exit; ?>\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
 	$chd_drun( '/hard-page/' );
 	$ok( false !== strpos( (string) file_get_contents( $chd_log ), 'HIT early /hard-page/' ), 'cache hardening 10: a fresh log takes the next line' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
-	$ok( 0 === strpos( $chd_src, '<?php' ) && false !== strpos( $chd_src, Perdita_Caching::DROPIN_MARKER . ' v4' ), 'cache hardening: the drop-in says it is version 4' );
+	$ok( 0 === strpos( $chd_src, '<?php' ) && false !== strpos( $chd_src, Perdita_Caching::DROPIN_MARKER . ' v5' ), 'cache hardening: the drop-in says it is version 5' );
 } else {
 	echo "SKIP  cache hardening drop-in: needs a CLI PHP binary\n";
 }
