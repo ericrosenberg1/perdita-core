@@ -91,14 +91,29 @@ class Perdita_Firewall {
 	const VERSION = '1';
 
 	/**
-	 * Cap on one inspected value, in bytes.
+	 * Bytes inspected from the start of each value. A longer value also gets
+	 * its last TAIL_CAP bytes inspected, so filler can't push an attack past
+	 * the cap. Every field gets both, whatever the request size.
 	 */
 	const VALUE_CAP = 65536;
 
 	/**
-	 * Cap on everything inspected in one request, in bytes.
+	 * Bytes inspected from the end of a value longer than VALUE_CAP + TAIL_CAP.
 	 */
-	const TOTAL_CAP = 262144;
+	const TAIL_CAP = 8192;
+
+	/**
+	 * Bytes inspected in full (VALUE_CAP head, TAIL_CAP tail) per request.
+	 * Past it, every remaining field still gets LEAN_CAP bytes from each end,
+	 * so no field goes unchecked, and the verdict notes
+	 * inspection_budget_reached.
+	 */
+	const INSPECT_BUDGET = 1048576;
+
+	/**
+	 * Head and tail size per field once INSPECT_BUDGET is spent.
+	 */
+	const LEAN_CAP = 4096;
 
 	/**
 	 * Log cap per day, in bytes.
@@ -109,11 +124,6 @@ class Perdita_Firewall {
 	 * Days of log files kept.
 	 */
 	const LOG_DAYS = 14;
-
-	/**
-	 * Cap on a JSON body read for inspection, in bytes.
-	 */
-	const BODY_CAP = 4194304;
 
 	/**
 	 * JSON nesting depth, the same as WordPress's REST server.
@@ -168,18 +178,25 @@ class Perdita_Firewall {
 	private static $regex = array();
 
 	/**
-	 * Bytes inspected in the current run().
+	 * Whether the current run() hit the inspection cap.
+	 *
+	 * @var bool
+	 */
+	private static $truncated = false;
+
+	/**
+	 * Bytes inspected in the current run(), against INSPECT_BUDGET.
 	 *
 	 * @var int
 	 */
 	private static $inspected = 0;
 
 	/**
-	 * Whether the current run() hit the inspection cap.
+	 * Whether the current run() spent INSPECT_BUDGET.
 	 *
 	 * @var bool
 	 */
-	private static $truncated = false;
+	private static $budget_reached = false;
 
 	/**
 	 * Values walked in the current run().
@@ -353,7 +370,7 @@ class Perdita_Firewall {
 			if ( false === strpos( $type, 'json' ) ) {
 				return '';
 			}
-			$raw = @file_get_contents( 'php://input', false, null, 0, self::BODY_CAP + 1 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- runs before WordPress.
+			$raw = @file_get_contents( 'php://input' ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- runs before WordPress.
 			return is_string( $raw ) ? $raw : '';
 		};
 		$verdict = self::run( $config, $server, $_GET, $_POST, $_COOKIE, $_FILES, $body_fn ); // phpcs:ignore WordPress.Security.NonceVerification -- a firewall reads every request.
@@ -538,9 +555,10 @@ class Perdita_Firewall {
 	 * @return array Verdict, see the file docblock.
 	 */
 	public static function run( array $config, array $server, array $get, array $post, array $cookie, array $files, $body = null ) {
-		self::$inspected = 0;
-		self::$truncated = false;
-		self::$leaves    = 0;
+		self::$truncated      = false;
+		self::$leaves         = 0;
+		self::$inspected      = 0;
+		self::$budget_reached = false;
 		$verdict         = array(
 			'action'   => 'allow',
 			'reason'   => '',
@@ -713,6 +731,9 @@ class Perdita_Firewall {
 		if ( self::$truncated ) {
 			$verdict['notes'][] = 'inspection_truncated';
 		}
+		if ( self::$budget_reached ) {
+			$verdict['notes'][] = 'inspection_budget_reached';
+		}
 		return $verdict;
 	}
 
@@ -738,43 +759,44 @@ class Perdita_Firewall {
 		if ( self::$truncated ) {
 			$verdict['notes'][] = 'inspection_truncated';
 		}
+		if ( self::$budget_reached ) {
+			$verdict['notes'][] = 'inspection_budget_reached';
+		}
 		return $verdict;
 	}
 
 	/* ---------- content scanning ---------- */
 
 	/**
-	 * Scan a JSON body: decoded to WordPress's depth, then walked like a form.
-	 * A body too deep to decode is an anomaly (anomaly-002). A body past
-	 * BODY_CAP, or one that isn't valid JSON, is scanned as text.
+	 * Scan a JSON body: decoded whole to WordPress's depth (WordPress decodes
+	 * the same body anyway, so nothing hides past a size cap), then walked
+	 * like a form. A body too deep to decode is an anomaly (anomaly-002). A
+	 * body that isn't valid JSON is scanned as text.
 	 *
 	 * @param array  $ctx Scan context.
 	 * @param string $raw Raw body.
 	 * @return array|null array( rule, category, match, field ) or null.
 	 */
 	private static function scan_json( array $ctx, $raw ) {
-		if ( strlen( $raw ) <= self::BODY_CAP ) {
-			$json = json_decode( $raw, true, self::JSON_DEPTH );
-			if ( is_array( $json ) ) {
-				return self::scan_array( $ctx, 'json', $json );
-			}
-			if ( null === $json && JSON_ERROR_DEPTH === json_last_error() ) {
-				if ( self::excluded( $ctx['exclusions'], 'anomaly-002', 'anomaly', '' ) ) {
-					self::$truncated = true;
-					return null;
-				}
-				return array( 'anomaly-002', 'anomaly', 'json deeper than ' . self::JSON_DEPTH, 'json:' );
-			}
-			if ( is_string( $json ) ) {
-				$r = self::scan_value( $ctx, 'json', '', $json, true );
-				return $r ? array( $r[0], $r[1], $r[2], 'json:' ) : null;
-			}
-			if ( null !== $json || JSON_ERROR_NONE === json_last_error() ) {
+		$json = json_decode( $raw, true, self::JSON_DEPTH );
+		if ( is_array( $json ) ) {
+			return self::scan_array( $ctx, 'json', $json );
+		}
+		if ( null === $json && JSON_ERROR_DEPTH === json_last_error() ) {
+			if ( self::excluded( $ctx['exclusions'], 'anomaly-002', 'anomaly', '' ) ) {
+				self::$truncated = true;
 				return null;
 			}
+			return array( 'anomaly-002', 'anomaly', 'json deeper than ' . self::JSON_DEPTH, 'json:' );
 		}
-		self::$truncated = self::$truncated || strlen( $raw ) > self::VALUE_CAP;
-		$r = self::scan_value( $ctx, 'json', '', substr( $raw, 0, self::VALUE_CAP ), false );
+		if ( is_string( $json ) ) {
+			$r = self::scan_value( $ctx, 'json', '', $json, true );
+			return $r ? array( $r[0], $r[1], $r[2], 'json:' ) : null;
+		}
+		if ( null !== $json || JSON_ERROR_NONE === json_last_error() ) {
+			return null;
+		}
+		$r = self::scan_value( $ctx, 'json', '', $raw, false );
 		return $r ? array( $r[0], $r[1], $r[2], 'json:' ) : null;
 	}
 
@@ -824,10 +846,6 @@ class Perdita_Firewall {
 						if ( $r ) {
 							return array( $r[0], $r[1], $r[2], $source . ':' . $name );
 						}
-						if ( self::$inspected >= self::TOTAL_CAP ) {
-							self::$truncated = true;
-							return null;
-						}
 					}
 				}
 				continue;
@@ -835,10 +853,6 @@ class Perdita_Firewall {
 			$r = is_scalar( $value ) ? self::scan_value( $ctx, $source, $name, (string) $value, true ) : null;
 			if ( $r ) {
 				return array( $r[0], $r[1], $r[2], $source . ':' . $name );
-			}
-			if ( self::$inspected >= self::TOTAL_CAP ) {
-				self::$truncated = true;
-				return null;
 			}
 		}
 		return null;
@@ -876,17 +890,39 @@ class Perdita_Firewall {
 		if ( $len < 3 ) {
 			return null;
 		}
-		if ( $len > self::VALUE_CAP ) {
-			$value           = substr( $value, 0, self::VALUE_CAP );
-			$len             = self::VALUE_CAP;
-			self::$truncated = true;
+		if ( self::$inspected < self::INSPECT_BUDGET ) {
+			$head = self::VALUE_CAP;
+			$tail = self::TAIL_CAP;
+		} else {
+			$head                 = self::LEAN_CAP;
+			$tail                 = self::LEAN_CAP;
+			self::$budget_reached = true;
 		}
-		if ( self::$inspected >= self::TOTAL_CAP ) {
-			self::$truncated = true;
-			return null;
+		if ( $len > $head + $tail ) {
+			// The head and the tail, each scanned on its own, so no match can
+			// span the bytes left out. Rules anchored to the start of a value
+			// skip the tail.
+			self::$truncated  = true;
+			self::$inspected += $head + $tail;
+			$r                = self::scan_piece( $ctx, $source, $param, substr( $value, 0, $head ), $is_param );
+			return $r ? $r : self::scan_piece( $ctx, $source, $param, substr( $value, -$tail ), false );
 		}
 		self::$inspected += $len;
+		return self::scan_piece( $ctx, $source, $param, $value, $is_param );
+	}
 
+	/**
+	 * Scan one piece of a value (all of it, or its head or tail).
+	 *
+	 * @param array  $ctx      Scan context.
+	 * @param string $source   Source.
+	 * @param string $param    Top-level parameter name, or ''.
+	 * @param string $value    Raw piece.
+	 * @param bool   $is_param Whether parameter-only rules apply.
+	 * @return array|null array( rule, category, match ) or null.
+	 */
+	private static function scan_piece( array $ctx, $source, $param, $value, $is_param ) {
+		$len = strlen( $value );
 		if ( $ctx['trav'] && false !== strpos( $value, "\0" ) && ! self::excluded( $ctx['exclusions'], 'trav-003', 'traversal', $param ) ) {
 			return array( 'trav-003', 'traversal', 'null byte' );
 		}

@@ -716,7 +716,7 @@ $pfw_json = str_repeat( '[', 600 ) . '1' . str_repeat( ']', 600 );
 $pfw_v    = $pfw_run( array( 'server' => $pfw_jsrv, 'body' => $pfw_json ) );
 $ok( 'anomaly-001' !== $pfw_v['rule'] && 'anomaly-002' === $pfw_v['rule'] && 'block' === $pfw_v['action'], 'firewall finding 2: JSON deeper than 512 levels blocks as anomaly-002' );
 $pfw_json = wp_json_encode( array( 'content' => "1' or '1'='1", 'pad' => str_repeat( 'a', 300000 ) ) );
-$ok( 'sqli-005' === $pfw_run( array( 'server' => $pfw_jsrv, 'body' => $pfw_json ) )['rule'], 'firewall finding 2: a JSON body over 256 KB still decodes and blocks' );
+$ok( 'sqli-005' === $pfw_run( array( 'server' => $pfw_jsrv, 'body' => $pfw_json ) )['rule'], 'firewall finding 2: a JSON body over 256 KB decodes and blocks' );
 $pfw_many = array_fill( 0, Perdita_Firewall::LEAF_CAP + 5, 'ok' );
 $pfw_v    = $pfw_run( array( 'server' => $pfw_jsrv, 'body' => wp_json_encode( array( 'list' => $pfw_many ) ) ) );
 $ok( 'anomaly-001' === $pfw_v['rule'] && 'block' === $pfw_v['action'] && 'json:list' === $pfw_v['field'], 'firewall finding 2: a request past ' . Perdita_Firewall::LEAF_CAP . ' values blocks as anomaly-001' );
@@ -919,8 +919,30 @@ foreach ( Perdita_Firewall::rules() as $pfw_cat => $pfw_list ) {
 	}
 }
 $ok( count( $pfw_ids ) === count( array_unique( $pfw_ids ) ), 'firewall: every rule id is unique' );
-$pfw_big = $pfw_run( array( 'server' => array( 'REQUEST_METHOD' => 'POST' ), 'post' => array( 'a' => str_repeat( 'x ', 150000 ), 'b' => "1' OR '1'='1" ) ) );
-$ok( in_array( 'inspection_truncated', $pfw_big['notes'], true ), 'firewall: a body over the inspection cap notes inspection_truncated' );
+// Padding: no request-wide cap, and each field gets its first 64 KB and last 8 KB.
+$pfw_post = array( 'REQUEST_METHOD' => 'POST' );
+$pfw_big  = $pfw_run( array( 'server' => $pfw_post, 'post' => array( 'a' => str_repeat( 'x ', 150000 ), 'b' => "1' OR '1'='1" ) ) );
+$ok( 'sqli-005' === $pfw_big['rule'] && 'post:b' === $pfw_big['field'], 'firewall padding: 300 KB of filler in one field never hides an attack in the next' );
+$pfw_many = array();
+for ( $pfw_i = 0; $pfw_i < 40; $pfw_i++ ) {
+	$pfw_many[ 'pad' . $pfw_i ] = str_repeat( 'lorem ipsum ', 6000 );
+}
+$pfw_many['last'] = '<script>alert(1)</script>';
+$pfw_v = $pfw_run( array( 'server' => $pfw_post, 'post' => $pfw_many ) );
+$ok( 'xss-001' === $pfw_v['rule'] && in_array( 'inspection_budget_reached', $pfw_v['notes'], true ), 'firewall padding: an attack after 2.8 MB of filler fields still blocks, and the verdict notes inspection_budget_reached' );
+unset( $pfw_many['last'] );
+$pfw_many['late'] = str_repeat( 'lorem ipsum ', 6000 ) . '<script>alert(1)</script>';
+$ok( 'xss-001' === $pfw_run( array( 'server' => $pfw_post, 'post' => $pfw_many ) )['rule'], 'firewall padding: past the 1 MB budget, a field still gets its last 4 KB checked' );
+$pfw_many['late'] = '<script>alert(1)</script>' . str_repeat( 'lorem ipsum ', 6000 );
+$ok( 'xss-001' === $pfw_run( array( 'server' => $pfw_post, 'post' => $pfw_many ) )['rule'], 'firewall padding: past the 1 MB budget, a field still gets its first 4 KB checked' );
+$pfw_v = $pfw_run( array( 'server' => $pfw_post, 'post' => array( 'a' => str_repeat( 'lorem ipsum ', 6000 ) ) ) );
+$ok( 'allow' === $pfw_v['action'] && ! in_array( 'inspection_budget_reached', $pfw_v['notes'], true ), 'firewall padding: a 72 KB field stays inside the budget' );
+$pfw_v = $pfw_run( array( 'server' => $pfw_post, 'post' => array( 'a' => str_repeat( 'x ', 150000 ) . " 1' OR '1'='1" ) ) );
+$ok( 'sqli-005' === $pfw_v['rule'] && in_array( 'inspection_truncated', $pfw_v['notes'], true ), 'firewall padding: an attack at the end of a 300 KB field blocks (the last 8 KB), and the verdict notes inspection_truncated' );
+$pfw_v = $pfw_run( array( 'server' => $pfw_post, 'post' => array( 'a' => "1' OR '1'='1 " . str_repeat( 'x ', 150000 ) ) ) );
+$ok( 'sqli-005' === $pfw_v['rule'], 'firewall padding: an attack at the start of a 300 KB field blocks (the first 64 KB)' );
+$pfw_v = $pfw_run( array( 'server' => array( 'REQUEST_METHOD' => 'POST', 'CONTENT_TYPE' => 'application/json' ), 'body' => wp_json_encode( array( 'pad' => str_repeat( 'a', 5000000 ), 'content' => "1' or '1'='1" ) ) ) );
+$ok( 'sqli-005' === $pfw_v['rule'] && 'json:content' === $pfw_v['field'], 'firewall padding: a 5 MB JSON body decodes whole, so a field after the filler blocks' );
 
 /* ---------- log ---------- */
 

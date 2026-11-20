@@ -93,24 +93,52 @@ $json = json_encode(
 	)
 );
 
+// Large requests: every field gets its first 64 KB and last 8 KB inspected,
+// with no request-wide cap. The filler is block editor markup, the most
+// needle-dense content a real site sends.
+$big_form = function ( $bytes ) use ( $blocks ) {
+	$field = substr( str_repeat( $blocks, 3 ), 0, 65536 );
+	$out   = array();
+	for ( $n = 0; $n * 65536 < $bytes; $n++ ) {
+		$out[ 'field_' . $n ] = $field;
+	}
+	return $out;
+};
+$big_json = json_encode(
+	array(
+		'id'      => 42,
+		'title'   => 'A very long post',
+		'content' => substr( str_repeat( $blocks, (int) ceil( 4194304 / strlen( $blocks ) ) ), 0, 4194304 - 200 ),
+		'status'  => 'publish',
+	)
+);
+$post_srv = array_merge( $server, array( 'REQUEST_METHOD' => 'POST', 'REQUEST_URI' => '/wp-admin/admin-ajax.php' ) );
+
 $cases = array(
 	'plain GET, 3 query args'          => array( $server, array( 'utm_source' => 'news', 'color' => 'blue', 'page' => '2' ), array(), null ),
 	'POST, 20 fields (WooCommerce)'    => array( array_merge( $server, array( 'REQUEST_METHOD' => 'POST', 'REQUEST_URI' => '/?wc-ajax=checkout' ) ), array( 'wc-ajax' => 'checkout' ), $post, null ),
 	'POST, ' . round( strlen( $json ) / 1024 ) . ' KB Gutenberg JSON' => array( array_merge( $server, array( 'REQUEST_METHOD' => 'POST', 'REQUEST_URI' => '/wp-json/wp/v2/posts/42?_locale=user', 'CONTENT_TYPE' => 'application/json' ) ), array( '_locale' => 'user' ), array(), $json ),
+	'POST, 1 MB form (16 x 64 KB)'     => array( $post_srv, array(), $big_form( 1048576 ), null, 200 ),
+	'POST, 1 MB form (one field)'      => array( $post_srv, array(), array( 'content' => substr( str_repeat( $blocks, 40 ), 0, 1048576 ) ), null, 200 ),
+	'POST, 8 MB form (128 x 64 KB)'    => array( $post_srv, array(), $big_form( 8388608 ), null, 100 ),
+	'POST, 4 MB Gutenberg JSON'        => array( array_merge( $post_srv, array( 'REQUEST_URI' => '/wp-json/wp/v2/posts/42', 'CONTENT_TYPE' => 'application/json' ) ), array(), array(), $big_json, 30 ),
+	'POST, padded repro (blocks)'      => array( $post_srv, array(), array( 'a' => str_repeat( 'x ', 150000 ), 'b' => "1' OR '1'='1" ), null, 2000, 'block' ),
 );
 
 printf( "Perdita firewall engine, PHP %s, %d iterations per case\n", PHP_VERSION, $iterations );
 foreach ( $cases as $label => $case ) {
 	list( $srv, $get, $body_post, $body ) = $case;
+	$runs   = isset( $case[4] ) ? min( $iterations, $case[4] ) : $iterations;
+	$expect = isset( $case[5] ) ? $case[5] : 'allow';
 	$v = Perdita_Firewall::run( $config, $srv, $get, $body_post, $cookie, array(), $body );
-	if ( 'allow' !== $v['action'] ) {
+	if ( $expect !== $v['action'] ) {
 		printf( "  %s: unexpected %s %s on %s\n", $label, $v['action'], $v['rule'], $v['field'] );
 	}
-	for ( $w = 0; $w < 200; $w++ ) {
+	for ( $w = 0; $w < min( 200, $runs ); $w++ ) {
 		Perdita_Firewall::run( $config, $srv, $get, $body_post, $cookie, array(), $body );
 	}
 	$times = array();
-	for ( $n = 0; $n < $iterations; $n++ ) {
+	for ( $n = 0; $n < $runs; $n++ ) {
 		$t = hrtime( true );
 		Perdita_Firewall::run( $config, $srv, $get, $body_post, $cookie, array(), $body );
 		$times[] = hrtime( true ) - $t;
