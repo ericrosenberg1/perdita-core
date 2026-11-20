@@ -851,30 +851,97 @@ class Perdita_Security {
 	}
 
 	/**
-	 * wp-login.php?action=perdita_unlock. A POST asks for a link. A GET with
-	 * a key uses one. Both end in a redirect to the login screen.
+	 * A short-lived proof that the confirm page was served for this key. The
+	 * visitor isn't logged in, so this is an HMAC of the key and a 15 minute
+	 * tick, not a WordPress nonce.
+	 *
+	 * @param string $key  One-time key.
+	 * @param int    $tick Time tick (15 minute steps).
+	 * @return string
+	 */
+	private function unlock_nonce( $key, $tick = null ) {
+		$tick = null === $tick ? (int) floor( time() / ( 15 * MINUTE_IN_SECONDS ) ) : (int) $tick;
+		return hash_hmac( 'sha256', 'perdita_unlock|' . $key . '|' . $tick, wp_salt( 'nonce' ) );
+	}
+
+	/**
+	 * Whether an unlock nonce is current or from the tick before.
+	 *
+	 * @param string $key   One-time key.
+	 * @param string $nonce Submitted nonce.
+	 * @return bool
+	 */
+	private function unlock_nonce_ok( $key, $nonce ) {
+		$tick = (int) floor( time() / ( 15 * MINUTE_IN_SECONDS ) );
+		return is_string( $nonce ) && '' !== $nonce && ( hash_equals( $this->unlock_nonce( $key, $tick ), $nonce ) || hash_equals( $this->unlock_nonce( $key, $tick - 1 ), $nonce ) );
+	}
+
+	/**
+	 * wp-login.php?action=perdita_unlock. A POST with a username or email
+	 * asks for a link. A GET with a key only shows a confirm button, so a
+	 * mail scanner that opens the link cannot use it up. A POST with the key
+	 * and its nonce spends the key and clears the lockout. All end in a
+	 * redirect to the login screen, except the confirm page.
 	 */
 	public function handle_unlock() {
 		$ip     = $this->client_ip();
 		$method = isset( $_SERVER['REQUEST_METHOD'] ) ? strtoupper( sanitize_text_field( wp_unslash( $_SERVER['REQUEST_METHOD'] ) ) ) : '';
-		if ( 'POST' === $method ) {
+		$post   = 'POST' === $method;
+		if ( $post && ! isset( $_POST['perdita_unlock_key'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- asking for a link, pre-auth. The hourly limit covers abuse.
 			$this->send_unlock_link( $ip );
 			$this->unlock_redirect( 'sent' );
 		}
 
-		$key = isset( $_GET['key'] ) ? preg_replace( '/[^A-Za-z0-9]/', '', sanitize_text_field( wp_unslash( $_GET['key'] ) ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- the one-time key is the credential.
+		// phpcs:disable WordPress.Security.NonceVerification -- the one-time key and its HMAC are the credential.
+		$raw = $post ? ( isset( $_POST['perdita_unlock_key'] ) ? $_POST['perdita_unlock_key'] : '' ) : ( isset( $_GET['key'] ) ? $_GET['key'] : '' );
+		$key = is_string( $raw ) ? preg_replace( '/[^A-Za-z0-9]/', '', sanitize_text_field( wp_unslash( $raw ) ) ) : '';
+		$sent_nonce = $post && isset( $_POST['perdita_unlock_nonce'] ) && is_string( $_POST['perdita_unlock_nonce'] ) ? sanitize_text_field( wp_unslash( $_POST['perdita_unlock_nonce'] ) ) : '';
+		// phpcs:enable
 		if ( '' === $key || '' === $ip ) {
 			$this->unlock_redirect( '' );
 		}
 		$token = self::UNLOCK_PREFIX . hash( 'sha256', $key );
 		$data  = get_transient( $token );
-		delete_transient( $token ); // Single use, whatever happens next.
 		$user  = is_array( $data ) && ! empty( $data['user'] ) ? get_userdata( (int) $data['user'] ) : false;
+
+		if ( ! $post ) {
+			// A GET never spends the key.
+			if ( ! $user || ! user_can( $user, 'manage_options' ) ) {
+				$this->unlock_redirect( 'invalid' );
+			}
+			$this->unlock_confirm_page( $key );
+			return;
+		}
+
+		if ( ! $this->unlock_nonce_ok( $key, $sent_nonce ) ) {
+			$this->unlock_redirect( 'invalid' ); // The key stays valid.
+		}
+		delete_transient( $token ); // Single use, whatever happens next.
 		if ( ! $user || ! user_can( $user, 'manage_options' ) ) {
 			$this->unlock_redirect( 'invalid' );
 		}
 		delete_transient( $this->transient_key( $ip ) );
 		$this->unlock_redirect( 'done' );
+	}
+
+	/**
+	 * The page a link opens: one button that posts the key back.
+	 *
+	 * @param string $key One-time key.
+	 */
+	private function unlock_confirm_page( $key ) {
+		$form  = '<form method="post" action="' . esc_url( add_query_arg( 'action', 'perdita_unlock', wp_login_url() ) ) . '">';
+		$form .= '<input type="hidden" name="perdita_unlock_key" value="' . esc_attr( $key ) . '">';
+		$form .= '<input type="hidden" name="perdita_unlock_nonce" value="' . esc_attr( $this->unlock_nonce( $key ) ) . '">';
+		$form .= '<p>' . esc_html__( 'Unlock the address you are using now.', 'perdita-core' ) . '</p>';
+		$form .= '<p><button type="submit" class="button button-primary button-large">' . esc_html__( 'Unlock my sign-in', 'perdita-core' ) . '</button></p></form>';
+		if ( function_exists( 'login_header' ) && function_exists( 'login_footer' ) ) {
+			login_header( __( 'Unlock your sign-in', 'perdita-core' ), '' );
+			echo $form; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- built from escaped parts above.
+			login_footer();
+			exit;
+		}
+		wp_die( $form, esc_html__( 'Unlock your sign-in', 'perdita-core' ), array( 'response' => 200 ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- built from escaped parts above.
 	}
 
 	/**
