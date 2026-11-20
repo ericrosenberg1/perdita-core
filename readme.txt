@@ -4,7 +4,7 @@ Tags: forms, seo, caching, security, newsletter
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.0
-Stable tag: 0.19.32-beta
+Stable tag: 0.19.33-beta
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -77,6 +77,12 @@ Form entries, subscribers, orders, products, form definitions, the SMTP log, you
 Yes, that's what Pro is built on. Pro registers its own modules into this plugin's registry, so they appear on the same Modules screen and behave the same way.
 
 == Changelog ==
+
+= 0.19.33-beta =
+* New: in Caching, you can let a CDN keep your public pages for a time you choose (s-maxage). We always mark logged-in, cart, form, and excluded pages private.
+* New: on LiteSpeed and OpenLiteSpeed servers, we write the server's cache rules for you and turn on LiteSpeed's headers only after a live check of your home page and a post.
+* New: we detect WP Engine, Pressable, and WordPress.com and clear their caches with ours, and you can add your host with a filter.
+* New: you can turn on WP_CACHE with one button, and we check whether visitors can open your cache folder.
 
 = 0.19.32-beta =
 * New: in Security, you can run a firewall in monitor or block mode, as a plugin, a must-use plugin, or before WordPress loads. You choose which attack types to block: SQL injection, cross-site scripting, path traversal, remote includes, PHP uploads, scanner bots, sensitive-file probes, and XML-RPC.
