@@ -825,7 +825,7 @@ class Perdita_Caching_Admin {
 					printf(
 						/* translators: %s: link to Perdita Pro. */
 						esc_html__( 'CSS and JavaScript minification and combining are part of %s.', 'perdita-core' ),
-						'<a href="' . esc_url( 'https://perdita.ericrosenberg.com' ) . '" target="_blank" rel="noopener noreferrer">' . esc_html__( 'Perdita Pro', 'perdita-core' ) . '</a>' // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- href and link text both escaped above.
+						'<a href="' . esc_url( 'https://perdita.app' ) . '" target="_blank" rel="noopener noreferrer">' . esc_html__( 'Perdita Pro', 'perdita-core' ) . '</a>' // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- href and link text both escaped above.
 					);
 					?>
 				</p>

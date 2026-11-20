@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name:       Perdita Core
- * Plugin URI:        https://perdita.ericrosenberg.com
+ * Plugin URI:        https://perdita.app
  * Description:       The free companion plugin for the Perdita theme. Adds SEO, forms, caching, security, analytics, email, and more as modules you turn on one at a time.
  * Version:           0.19.28-beta
  * Requires at least: 6.4
@@ -10,7 +10,7 @@
  * Author URI:        https://ericrosenberg.com
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
- * Update URI:        https://perdita.ericrosenberg.com/updates/perdita-core.json
+ * Update URI:        https://perdita.app/updates/perdita-core.json
  * Text Domain:       perdita-core
  * Domain Path:       /languages
  *
