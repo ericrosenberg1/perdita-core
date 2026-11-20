@@ -2539,7 +2539,7 @@ class Perdita_Caching {
 		$verdict = false;
 		if ( 0 === strpos( $option, 'perdita_' ) ) {
 			$verdict = true;
-			foreach ( array( 'perdita_mcp_oauth_', 'perdita_indexnow', 'perdita_cache_' ) as $prefix ) {
+			foreach ( array( 'perdita_mcp_oauth_', 'perdita_indexnow', 'perdita_cache_', 'perdita_firewall_', 'perdita_security_core_check', 'perdita_security_pro_vuln', 'perdita_security_pro_alert' ) as $prefix ) {
 				if ( 0 === strpos( $option, $prefix ) ) {
 					$verdict = false;
 				}

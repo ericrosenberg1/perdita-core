@@ -231,7 +231,7 @@ foreach ( $pdcf_cat as $pdcf_cid => $pdcf_e ) {
 		$pdcf_shapes = false;
 	}
 }
-$ok( 25 === count( $pdcf_cat ) && $pdcf_shapes, 'catalog: 25 Pro-only sources, each with a label, plugins, a Pro module and what Pro brings over' );
+$ok( 31 === count( $pdcf_cat ) && $pdcf_shapes, 'catalog: 31 Pro-only sources, each with a label, plugins, a Pro module and what Pro brings over' );
 $pdcf_core_ids = array();
 foreach ( Perdita_Switch::sources( true ) as $pdcf_sid => $pdcf_sobj ) {
 	if ( 0 === strpos( get_class( $pdcf_sobj ), 'Perdita_Switch_Source_' ) ) {

@@ -181,7 +181,7 @@ $pdss_l = Perdita_Security::sanitize_login(
 	)
 );
 $ok( true === $pdss_l['login_limit'] && 100 === $pdss_l['login_max'] && 1 === $pdss_l['login_window'] && 1440 === $pdss_l['login_lockout'], 'switch: sanitize_login() clamps the attempt count and both durations' );
-$ok( array( '1.2.3.4', '::1' ) === $pdss_l['ip_allowlist'], 'switch: sanitize_login() keeps exact, unique IPs only' );
+$ok( array( '1.2.3.4', '10.0.0.0/8', '::1' ) === $pdss_l['ip_allowlist'], 'switch: sanitize_login() keeps exact, unique IPs and CIDR blocks, and drops junk' );
 
 /* =============================================================
  * Rank Math.
@@ -524,17 +524,17 @@ remove_filter( 'perdita_analytics_scm_active', '__return_true' );
 update_option( 'limit_login_allowed_retries', 4 );
 update_option( 'limit_login_lockout_duration', 1200 );
 update_option( 'limit_login_valid_duration', 43200 );
-update_option( 'limit_login_whitelist', array( '1.2.3.4', '10.0.0.0/8', '5.6.7.8-5.6.7.9' ) );
+update_option( 'limit_login_whitelist', array( '1.2.3.4', '10.0.0.0/8', '5.6.7.8-5.6.7.10' ) );
 update_option( 'limit_login_whitelist_usernames', array( 'admin' ) );
 update_option( 'limit_login_allowed_lockouts', 4 );
 delete_option( 'perdita_security_settings' );
 $pdss_p = $pdss_plan( 'limit-login-attempts-reloaded' );
 $ok( 4 === $pdss_p['patch']['login_max'] && 20 === $pdss_p['patch']['login_lockout'] && 720 === $pdss_p['patch']['login_window'] && true === $pdss_p['patch']['login_limit'], 'llar: retries, lockout and reset window convert to Perdita\'s minutes' );
-$ok( array( '1.2.3.4' ) === $pdss_p['patch']['ip_allowlist'] && 2 === count( $pdss_rows( $pdss_p, null, 'skip' ) ), 'llar: exact IPs import and each range shows as refused' );
-$ok( count( $pdss_rows( $pdss_p, '', 'none' ) ) >= 2, 'llar: username safelists and growing lockouts show as no match' );
+$ok( array( '1.2.3.4', '10.0.0.0/8' ) === $pdss_p['patch']['ip_allowlist'] && 1 === count( $pdss_rows( $pdss_p, null, 'skip' ) ), 'llar: exact IPs and CIDR blocks import and a start-end range shows as refused' );
+$ok( count( $pdss_rows( $pdss_p, '', 'none' ) ) >= 1 && true === $pdss_p['patch']['login_long_lockout'] && 4 === $pdss_p['patch']['login_long_after'], 'llar: username safelists show as no match, and the growing lockout maps to escalating lockouts' );
 $pdss_res = Perdita_Switch::import( 'limit-login-attempts-reloaded' );
 $pdss_sec = Perdita_Security::get_settings();
-$ok( $pdss_res['ok'] && 4 === $pdss_sec['login_max'] && array( '1.2.3.4' ) === $pdss_sec['ip_allowlist'], 'llar: the import lands in perdita_security_settings' );
+$ok( $pdss_res['ok'] && 4 === $pdss_sec['login_max'] && array( '1.2.3.4', '10.0.0.0/8' ) === $pdss_sec['ip_allowlist'], 'llar: the import lands in perdita_security_settings' );
 $ok( 4 === (int) get_option( 'limit_login_allowed_retries' ) && 3 === count( get_option( 'limit_login_whitelist' ) ), 'llar: its own options are untouched' );
 Perdita_Switch::undo( 'limit-login-attempts-reloaded' );
 $ok( false === get_option( 'perdita_security_settings', false ), 'llar: undo removes what the import created' );

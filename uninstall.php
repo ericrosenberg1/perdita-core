@@ -200,6 +200,15 @@ function perdita_core_uninstall_site() {
 		);
 	}
 
+	// The firewall: its mu-plugin, its prepend block, its folder and log,
+	// its key, and the security module's own server config and cron.
+	$firewall = __DIR__ . '/inc/modules/security/firewall/class-perdita-firewall-config.php';
+	if ( is_readable( $firewall ) ) {
+		require_once $firewall;
+		Perdita_Firewall_Config::uninstall();
+	}
+	delete_option( 'perdita_security_core_check' );
+
 	// Switch to Perdita's undo marks on terms. The SEO titles and
 	// descriptions an import wrote stay, like perdita_seo.
 	delete_metadata( 'term', 0, '_perdita_switch_from', '', true );

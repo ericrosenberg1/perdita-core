@@ -37,6 +37,18 @@ require_once PERDITA_CORE_DIR . 'inc/perdita-notices.php';
 require_once PERDITA_CORE_DIR . 'inc/class-perdita-client-ip.php';
 require_once PERDITA_CORE_DIR . 'inc/class-perdita-core.php';
 
+// The firewall comes right after Core's own requires: in plugin mode the
+// engine runs here, before the rest of Core and after plugins that sort
+// earlier. register() also hooks the config compiler and the trust cookie.
+// It costs two autoloaded option reads when the firewall is off.
+require_once PERDITA_CORE_DIR . 'inc/modules/security/firewall/class-perdita-firewall-config.php';
+Perdita_Firewall_Config::register();
+if ( is_admin() ) {
+	require_once PERDITA_CORE_DIR . 'inc/modules/security/class-perdita-security-firewall-admin.php';
+}
+register_activation_hook( __FILE__, array( 'Perdita_Firewall_Config', 'on_activate' ) );
+register_deactivation_hook( __FILE__, array( 'Perdita_Firewall_Config', 'on_deactivate' ) );
+
 /**
  * Main accessor. The single source of truth for the plugin instance, and the
  * name every moved class now calls instead of the theme's perdita().

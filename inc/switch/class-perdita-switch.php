@@ -82,6 +82,13 @@ class Perdita_Switch {
 			'Perdita_Switch_Source_LLAR'             => 'class-perdita-switch-source-llar.php',
 			'Perdita_Switch_Source_Loginizer'        => 'class-perdita-switch-source-loginizer.php',
 			'Perdita_Switch_Source_Contact_Form_7'   => 'class-perdita-switch-source-contact-form-7.php',
+			'Perdita_Switch_Source_Wordfence'        => 'class-perdita-switch-source-wordfence.php',
+			'Perdita_Switch_Source_Sucuri'           => 'class-perdita-switch-source-sucuri.php',
+			'Perdita_Switch_Source_Solid'            => 'class-perdita-switch-source-solid.php',
+			'Perdita_Switch_Source_AIOS'             => 'class-perdita-switch-source-aios.php',
+			'Perdita_Switch_Source_Shield'           => 'class-perdita-switch-source-shield.php',
+			'Perdita_Switch_Source_Defender'         => 'class-perdita-switch-source-defender.php',
+			'Perdita_Switch_Source_Patchstack'       => 'class-perdita-switch-source-patchstack.php',
 		);
 	}
 
