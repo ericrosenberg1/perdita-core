@@ -889,6 +889,20 @@ $pfw_v = $pfw_prun( array( 'get' => array( 'code' => 'promo-123' ) ) );
 $ok( 'allow' === $pfw_v['action'] && array( 'custom-r3' ) === $pfw_v['logged'], 'firewall Pro: a custom log rule records its id and lets the request through' );
 $ok( 'custom-r4' === $pfw_prun( array( 'server' => array( 'REMOTE_ADDR' => '203.0.113.61' ) ) )['rule'], 'firewall Pro: a custom ip rule takes a CIDR block' );
 $ok( 'allow' === $pfw_prun( array( 'server' => array( 'HTTP_USER_AGENT' => 'evilbot' ) ) )['action'], 'firewall Pro: a disabled custom rule does nothing' );
+// Review Pro finding 2: a custom uri rule sees the path WordPress routes.
+$pfw_ccfg                 = $pfw_cfg;
+$pfw_ccfg['custom_rules'] = array(
+	array( 'id' => 'priv', 'field' => 'uri', 'op' => 'contains', 'value' => '/private-area/', 'action' => 'block', 'enabled' => true ),
+	array( 'id' => 'adm', 'field' => 'uri', 'op' => 'starts', 'value' => '/members/', 'action' => 'block', 'enabled' => true ),
+	array( 'id' => 'tok', 'field' => 'query', 'op' => 'equals', 'value' => 'debug', 'action' => 'block', 'enabled' => true ),
+	array( 'id' => 'raw', 'field' => 'uri_raw', 'op' => 'contains', 'value' => '%2e%2e', 'action' => 'block', 'enabled' => true ),
+);
+foreach ( array( '/private-area/x', '/private%2Darea/x', '/%70rivate-area/x', '//private-area/x', '/%2570rivate-area/x', '/PRIVATE-AREA/x' ) as $pfw_enc ) {
+	$ok( 'custom-priv' === $pfw_run( array( 'config' => $pfw_ccfg, 'uri' => $pfw_enc ) )['rule'], 'firewall Pro finding 2: a custom uri rule blocks ' . $pfw_enc );
+}
+$ok( 'custom-adm' === $pfw_run( array( 'config' => $pfw_ccfg, 'uri' => '//./members/x' ) )['rule'] && 'custom-adm' === $pfw_run( array( 'config' => $pfw_ccfg, 'uri' => '/%6dembers/x?a=1' ) )['rule'], 'firewall Pro finding 2: a starts rule sees repeated slashes and ./ collapsed' );
+$ok( 'custom-tok' === $pfw_run( array( 'config' => $pfw_ccfg, 'uri' => '/?mode=%2564ebug', 'get' => array( 'mode' => '%64ebug' ) ) )['rule'], 'firewall Pro finding 2: a custom query rule sees the decoded value' );
+$ok( 'custom-raw' === $pfw_run( array( 'config' => $pfw_ccfg, 'uri' => '/a/%2E%2E/b' ) )['rule'] && 'allow' === $pfw_run( array( 'config' => $pfw_ccfg, 'uri' => '/public/x' ) )['action'], 'firewall Pro finding 2: uri_raw keeps the raw form, and other pages pass' );
 $ok( 'country-001' === $pfw_prun( array( 'server' => array( 'REMOTE_ADDR' => '173.245.48.10', 'HTTP_CF_CONNECTING_IP' => '203.0.113.9', 'HTTP_CF_IPCOUNTRY' => 'KP' ) ) )['rule'], 'firewall Pro: CF-IPCountry from a Cloudflare connection blocks a listed country' );
 $ok( 'allow' === $pfw_prun( array( 'server' => array( 'HTTP_CF_IPCOUNTRY' => 'KP' ) ) )['action'], 'firewall Pro: CF-IPCountry from outside Cloudflare is ignored' );
 $ok( 'allow' === $pfw_prun( array( 'server' => array( 'GEOIP_COUNTRY_CODE' => 'KP' ) ) )['action'], 'firewall Pro: a server country variable counts only when the owner says the server sets it' );

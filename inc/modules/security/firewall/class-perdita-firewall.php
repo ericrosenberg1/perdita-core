@@ -80,7 +80,7 @@
  *   'geo'          => array( 'class_file' => path to the Perdita_Firewall_Geo
  *                     class file, under wp-content or the firewall folder,
  *                     plus the lookup settings Pro passes to lookup() ).
- *   'custom_rules' => list of array( 'id' => string, 'field' => 'uri'|'query'|
+ *   'custom_rules' => list of array( 'id' => string, 'field' => 'uri'|'uri_raw'|'query'|
  *                     'post'|'cookie'|'header:<name>'|'user_agent'|'method'|'ip',
  *                     'op' => 'contains'|'equals'|'starts'|'regex', 'value' => string,
  *                     'action' => 'block'|'allow'|'log', 'enabled' => bool ).
@@ -752,7 +752,7 @@ class Perdita_Firewall {
 
 		// 5. Pro: custom rules.
 		if ( ! empty( $config['custom_rules'] ) && is_array( $config['custom_rules'] ) ) {
-			$r = self::check_custom( $config['custom_rules'], $server, $get, $post, $cookie, $ip, $uri, $verdict, $block_action );
+			$r = self::check_custom( $config['custom_rules'], $server, $get, $post, $cookie, $ip, $uri, $npath, $verdict, $block_action );
 			if ( null !== $r ) {
 				return $r;
 			}
@@ -1819,7 +1819,9 @@ class Perdita_Firewall {
 	 * @param string $block_action block or monitor.
 	 * @return array|null A final verdict, or null to go on.
 	 */
-	private static function check_custom( array $rules, array $server, array $get, array $post, array $cookie, $ip, $uri, array &$verdict, $block_action ) {
+	private static function check_custom( array $rules, array $server, array $get, array $post, array $cookie, $ip, $uri, $npath, array &$verdict, $block_action ) {
+		$curi = null;
+		$cget = null;
 		foreach ( $rules as $rule ) {
 			if ( ! is_array( $rule ) || empty( $rule['enabled'] ) || ! isset( $rule['field'], $rule['op'], $rule['value'] ) ) {
 				continue;
@@ -1827,9 +1829,17 @@ class Perdita_Firewall {
 			$field = (string) $rule['field'];
 			$vals  = array();
 			if ( 'uri' === $field ) {
+				if ( null === $curi ) {
+					$curi = self::custom_uri( $uri, $npath );
+				}
+				$vals = array( $curi );
+			} elseif ( 'uri_raw' === $field ) {
 				$vals = array( $uri );
 			} elseif ( 'query' === $field ) {
-				$vals = self::flatten( $get );
+				if ( null === $cget ) {
+					$cget = array_map( array( __CLASS__, 'normalize' ), self::flatten( $get ) );
+				}
+				$vals = $cget;
 			} elseif ( 'post' === $field ) {
 				$vals = self::flatten( $post );
 			} elseif ( 'cookie' === $field ) {
@@ -1870,6 +1880,26 @@ class Perdita_Firewall {
 			return self::hit( $verdict, $block_action, $id, 'custom', $field, $hit, 403 );
 		}
 		return null;
+	}
+
+	/**
+	 * The request URI a custom 'uri' rule sees: the path decoded and
+	 * normalized the way the built-in rules see it, with repeated slashes
+	 * and ./ segments collapsed, plus the decoded query string. WordPress
+	 * routes /%70rivate-area/ and //private-area/ to /private-area/, so a
+	 * rule on the raw form would miss them.
+	 *
+	 * @param string $uri   Raw REQUEST_URI.
+	 * @param string $npath normalize() of the path.
+	 * @return string
+	 */
+	public static function custom_uri( $uri, $npath ) {
+		$path = (string) preg_replace( '~/{2,}~', '/', str_replace( '\\', '/', (string) $npath ) );
+		while ( false !== strpos( $path, '/./' ) ) {
+			$path = str_replace( '/./', '/', $path );
+		}
+		$qpos = strpos( (string) $uri, '?' );
+		return false === $qpos ? $path : $path . '?' . self::normalize( substr( (string) $uri, $qpos + 1 ) );
 	}
 
 	/**
