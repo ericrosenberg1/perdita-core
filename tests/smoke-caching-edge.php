@@ -130,13 +130,27 @@ $ok( in_array( 'excluded path', Perdita_Caching::PERSONAL_SKIPS, true ) && in_ar
 $cse_response_lines = array( 'Cache-Control: private, no-store, max-age=0' );
 $ok( true === Perdita_Caching::is_private_cache_control( (string) $cse_rh->invoke( null, 'Cache-Control' ) ), 'edge: a private header already queued is left as it is' );
 $cse_fatal = false;
+// The suite has printed by now, so PHP refuses header() with a warning. That
+// one warning is the CLI's, and anything else the callback raises is counted.
+$cse_notices = array();
+// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_set_error_handler -- the test reads what the callback raises.
+set_error_handler(
+	static function ( $errno, $errstr ) use ( &$cse_notices ) {
+		if ( ( error_reporting() & $errno ) && false === strpos( $errstr, 'headers already sent' ) ) { // phpcs:ignore WordPress.PHP.DevelopmentFunctions.prevent_path_disclosure_error_reporting, WordPress.PHP.DiscouragedPHPFunctions.runtime_configuration_error_reporting -- read only.
+			$cse_notices[] = $errstr;
+		}
+		return true;
+	}
+);
 try {
 	$cse_response_lines = array( 'Cache-Control: public, max-age=3600' );
 	Perdita_Caching::enforce_personal_no_store();
 } catch ( Throwable $cse_e ) {
 	$cse_fatal = true;
 }
-$ok( ! $cse_fatal, 'edge: the header callback runs without error on a public Cache-Control' );
+restore_error_handler();
+$ok( ! $cse_fatal && array() === $cse_notices, 'edge: the header callback runs without error on a public Cache-Control' );
+unset( $cse_notices );
 $cse_response_lines = array();
 remove_filter( 'perdita_cache_response_headers', $cse_headers_filter );
 
@@ -339,7 +353,9 @@ if ( $cse_fake_wpe ) {
 	$ok( 1 === count( WpeCommon::$calls ), 'hosts: a second purge_all in the same request does nothing' );
 	// A long WP-CLI or cron batch: a change after the window still purges.
 	$cse_window = new ReflectionProperty( 'Perdita_Caching_Hosts', 'purged_all' );
-	$cse_window->setAccessible( true ); // phpcs:ignore Generic.PHP.DeprecatedFunctions -- a no-op on PHP 8.1+, needed below it.
+	if ( PHP_VERSION_ID < 80100 ) {
+		$cse_window->setAccessible( true );
+	}
 	$cse_window->setValue( null, microtime( true ) - Perdita_Caching_Hosts::PURGE_WINDOW - 1 );
 	Perdita_Caching_Hosts::purge_url( get_permalink( $cse_post ) );
 	Perdita_Caching_Hosts::purge_all();
