@@ -1325,3 +1325,11 @@ if ( null === $psn_orig_pagenow ) { unset( $GLOBALS['pagenow'] ); } else { $GLOB
 wp_clear_scheduled_hook( Perdita_Security::CORE_CHECK_CRON );
 $ok( $psn_had_generator === has_action( 'wp_head', 'wp_generator' ), 'security suite: wp_generator is hooked as it was' );
 $ok( is_file( $psn_orig_uploads_ht ) === ( null !== $psn_orig_uploads_md5 ), 'security suite: the real uploads .htaccess is as it was' );
+
+// A daily core check or a firewall state write must not empty the page cache.
+if ( class_exists( 'Perdita_Caching' ) || is_file( PERDITA_CORE_DIR . 'inc/modules/caching/class-perdita-caching.php' ) ) {
+	require_once PERDITA_CORE_DIR . 'inc/modules/caching/class-perdita-caching.php';
+	$ok( ! Perdita_Caching::option_affects_render( 'perdita_security_core_check' ), 'security: the core check result does not purge the page cache' );
+	$ok( ! Perdita_Caching::option_affects_render( 'perdita_firewall_trust_key' ), 'security: firewall state options do not purge the page cache' );
+	$ok( Perdita_Caching::option_affects_render( 'perdita_security_settings' ), 'security: saving the security settings still purges the page cache' );
+}
