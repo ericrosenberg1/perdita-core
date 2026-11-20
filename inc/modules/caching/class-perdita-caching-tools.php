@@ -468,7 +468,15 @@ class Perdita_Caching_Tools {
 			wp_delete_file( $dir . $name );
 			if ( ! is_wp_error( $res ) ) {
 				$code  = (int) wp_remote_retrieve_response_code( $res );
-				$state = ( 200 === $code && false !== strpos( (string) wp_remote_retrieve_body( $res ), $token ) ) ? 'exposed' : 'safe';
+				$body  = (string) wp_remote_retrieve_body( $res );
+				if ( 200 === $code && false !== strpos( $body, $token ) ) {
+					$state = 'exposed';
+				} elseif ( in_array( $code, array( 200, 403, 404, 410 ), true ) ) {
+					// The server refused the file, or answered with a page
+					// that isn't the file. A 401, a challenge page or a 5xx
+					// proves nothing, so those stay unknown.
+					$state = 'safe';
+				}
 			}
 		}
 		$out = array(

@@ -123,7 +123,10 @@ $ok( 'public, max-age=3600' === $cse_seen, 'edge: the page cache reads a queued 
 foreach ( Perdita_Caching::PERSONAL_SKIPS as $cse_reason ) {
 	$ok( false === Perdita_Caching::is_private_cache_control( $cse_seen ), 'edge: a public header queued before a "' . $cse_reason . '" response is not private, so it gets replaced' );
 }
-$ok( 4 === count( Perdita_Caching::PERSONAL_SKIPS ) && in_array( 'logged in', Perdita_Caching::PERSONAL_SKIPS, true ) && in_array( 'password-protected', Perdita_Caching::PERSONAL_SKIPS, true ) && in_array( 'DONOTCACHEPAGE', Perdita_Caching::PERSONAL_SKIPS, true ) && in_array( 'cookie', Perdita_Caching::PERSONAL_SKIPS, true ), 'edge: the personal skip reasons are logged in, password-protected, DONOTCACHEPAGE, and cookie' );
+$ok( 6 === count( Perdita_Caching::PERSONAL_SKIPS ) && in_array( 'logged in', Perdita_Caching::PERSONAL_SKIPS, true ) && in_array( 'password-protected', Perdita_Caching::PERSONAL_SKIPS, true ) && in_array( 'DONOTCACHEPAGE', Perdita_Caching::PERSONAL_SKIPS, true ) && in_array( 'cookie', Perdita_Caching::PERSONAL_SKIPS, true ), 'edge: the personal skip reasons are logged in, password-protected, DONOTCACHEPAGE, and cookie' );
+// A form page (perdita_cache_exclude) or an excluded path may hold a nonce
+// or a personal answer, so the edge never keeps those either.
+$ok( in_array( 'excluded path', Perdita_Caching::PERSONAL_SKIPS, true ) && in_array( 'perdita_cache_exclude', Perdita_Caching::PERSONAL_SKIPS, true ), 'edge: excluded paths and perdita_cache_exclude pages go out private, no-store' );
 $cse_response_lines = array( 'Cache-Control: private, no-store, max-age=0' );
 $ok( true === Perdita_Caching::is_private_cache_control( (string) $cse_rh->invoke( null, 'Cache-Control' ) ), 'edge: a private header already queued is left as it is' );
 $cse_fatal = false;
@@ -334,6 +337,13 @@ if ( $cse_fake_wpe ) {
 	$ok( array( null ) === WpeCommon::$calls, 'hosts: purge_all on WP Engine calls purge_varnish_cache once with no post id' );
 	Perdita_Caching_Hosts::purge_all();
 	$ok( 1 === count( WpeCommon::$calls ), 'hosts: a second purge_all in the same request does nothing' );
+	// A long WP-CLI or cron batch: a change after the window still purges.
+	$cse_window = new ReflectionProperty( 'Perdita_Caching_Hosts', 'purged_all' );
+	$cse_window->setAccessible( true ); // phpcs:ignore Generic.PHP.DeprecatedFunctions -- a no-op on PHP 8.1+, needed below it.
+	$cse_window->setValue( null, microtime( true ) - Perdita_Caching_Hosts::PURGE_WINDOW - 1 );
+	Perdita_Caching_Hosts::purge_url( get_permalink( $cse_post ) );
+	Perdita_Caching_Hosts::purge_all();
+	$ok( array( null, (int) $cse_post, null ) === WpeCommon::$calls, 'hosts: once the window passes, a later page purge and full purge both go out' );
 
 	Perdita_Caching_Hosts::reset();
 	WpeCommon::$calls = array();
@@ -347,6 +357,21 @@ if ( $cse_fake_wpe ) {
 	wp_delete_post( $cse_post, true );
 } else {
 	echo "SKIP  hosts purge calls (a real WpeCommon class is loaded)\n";
+}
+// SiteGround: its Speed Optimizer helpers get every purge on any host.
+$GLOBALS['cse_sg_calls'] = array();
+if ( ! function_exists( 'sg_cachepress_purge_everything' ) && ! function_exists( 'sg_cachepress_purge_cache' ) ) {
+	// phpcs:ignore Squiz.PHP.Eval.Discouraged -- test doubles, only when SiteGround's functions are absent.
+	eval( 'function sg_cachepress_purge_everything() { $GLOBALS["cse_sg_calls"][] = "all"; } function sg_cachepress_purge_cache( $url = null ) { $GLOBALS["cse_sg_calls"][] = (string) $url; }' );
+	Perdita_Caching_Hosts::reset();
+	$ok( '' === Perdita_Caching::managed_host() && Perdita_Caching::siteground_purges(), 'hosts: SiteGround\'s helpers count with no managed host named' );
+	Perdita_Caching::purge_downstream_all();
+	Perdita_Caching_Hosts::reset();
+	Perdita_Caching::purge_downstream_url( home_url( '/sg-page/' ) );
+	$ok( array( 'all', home_url( '/sg-page/' ) ) === $GLOBALS['cse_sg_calls'], 'hosts: full and one-page purges reach SiteGround (got ' . wp_json_encode( $GLOBALS['cse_sg_calls'] ) . ')' );
+	$ok( false === Perdita_Caching_Hosts::can_purge( 'kinsta' ), 'hosts: a host Perdita can\'t purge never reads as purgeable because SiteGround\'s helpers exist' );
+} else {
+	echo "SKIP  hosts SiteGround purges (SiteGround's functions are loaded)\n";
 }
 Perdita_Caching_Hosts::reset();
 $ok( 'WP Engine' === Perdita_Caching_Hosts::label( 'wpengine' ) && 'Foo' === Perdita_Caching_Hosts::label( 'foo' ), 'hosts: a known host has a display name and an unknown one is capitalized' );
@@ -380,6 +405,45 @@ $cse_rules = implode( "\n", Perdita_Caching_LiteSpeed::htaccess_rules() );
 $ok( false !== strpos( $cse_rules, 'CacheLookup on' ), 'litespeed: the .htaccess block turns CacheLookup on' );
 $ok( 1 === preg_match( '/RewriteCond %\{HTTP_COOKIE\} \([^)]*wordpress_logged_in[^)]*\)/', $cse_rules ), 'litespeed: the .htaccess block has a cookie condition that includes wordpress_logged_in' );
 $ok( false !== strpos( $cse_rules, 'QUERY_STRING' ), 'litespeed: the .htaccess block also skips requests with a query string' );
+
+// WP-CLI and cron carry no server software string, and their purges still
+// count once the live check passed on the web.
+$_SERVER['SERVER_SOFTWARE'] = '';
+update_option( 'perdita_cache_litespeed', array( 'ok' => true ) );
+$cse_cron = static function () {
+	return true;
+};
+add_filter( 'wp_doing_cron', $cse_cron );
+$ok( true === Perdita_Caching::litespeed_active( Perdita_Caching::settings() ), 'litespeed: active in cron with a passed check, though cron has no server string' );
+remove_filter( 'wp_doing_cron', $cse_cron );
+$ok( ( defined( 'WP_CLI' ) && WP_CLI ) === Perdita_Caching::litespeed_active( Perdita_Caching::settings() ), 'litespeed: a web request with no LiteSpeed server string stays inactive' );
+
+// The block goes above WordPress's rules, whose [L] flag would otherwise
+// end rewriting before the cookie checks for every permalink.
+$cse_wp_rule = "# BEGIN WordPress\n<IfModule mod_rewrite.c>\nRewriteEngine On\nRewriteRule . /index.php [L]\n</IfModule>\n# END WordPress\n";
+$cse_ht_text = "# BEGIN Other\nHeader set X-Other 1\n# END Other\n\n" . $cse_wp_rule;
+$ok( $cse_ht_text === Perdita_Caching_LiteSpeed::without_block( $cse_ht_text ), 'litespeed: cutting a missing block changes nothing' );
+$cse_ht_file = trailingslashit( ABSPATH ) . '.htaccess';
+$cse_ht_was  = is_file( $cse_ht_file ) ? (string) file_get_contents( $cse_ht_file ) : null; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+if ( ( null === $cse_ht_was && wp_is_writable( ABSPATH ) ) || ( null !== $cse_ht_was && wp_is_writable( $cse_ht_file ) ) ) {
+	file_put_contents( $cse_ht_file, $cse_ht_text ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+	$ok( Perdita_Caching_LiteSpeed::sync_htaccess( true ), 'litespeed: the block writes' );
+	$cse_ht_now = (string) file_get_contents( $cse_ht_file ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+	$cse_at_ls  = strpos( $cse_ht_now, '# BEGIN ' . Perdita_Caching_LiteSpeed::MARKER );
+	$cse_at_wp  = strpos( $cse_ht_now, '# BEGIN WordPress' );
+	$ok( false !== $cse_at_ls && false !== $cse_at_wp && $cse_at_ls < $cse_at_wp && strpos( $cse_ht_now, '# BEGIN Other' ) < $cse_at_ls, 'litespeed: the block lands after the blocks above it and before # BEGIN WordPress' );
+	Perdita_Caching_LiteSpeed::sync_htaccess( true );
+	$ok( 1 === substr_count( (string) file_get_contents( $cse_ht_file ), '# BEGIN ' . Perdita_Caching_LiteSpeed::MARKER ), 'litespeed: writing again keeps one block' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+	Perdita_Caching_LiteSpeed::sync_htaccess( false );
+	$ok( $cse_ht_text === (string) file_get_contents( $cse_ht_file ), 'litespeed: removing the block gives back the file byte for byte' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+	if ( null === $cse_ht_was ) {
+		wp_delete_file( $cse_ht_file );
+	} else {
+		file_put_contents( $cse_ht_file, $cse_ht_was ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+	}
+} else {
+	echo "SKIP  litespeed .htaccess placement (the site's .htaccess isn't writable)\n";
+}
 
 $_SERVER = $cse_state_was;
 $cse_restore_options( 'perdita_cache_litespeed', $cse_ls_state_was );
@@ -447,6 +511,39 @@ wp_delete_file( $cse_cfg );
 @rmdir( $cse_tmp ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged,WordPress.WP.AlternativeFunctions.file_system_operations_rmdir
 $cse_live_after = '' !== $cse_live_cfg && is_file( $cse_live_cfg ) ? md5_file( $cse_live_cfg ) : '';
 $ok( $cse_live_before === $cse_live_after, 'tools: the live wp-config.php is unchanged by these tests' );
+
+/* ------------------------------------------------------------------ */
+/* 10. The cache folder probe.                                          */
+/* ------------------------------------------------------------------ */
+
+Perdita_Caching::load( 'tools' );
+$cse_probe_was  = get_option( Perdita_Caching_Tools::PROBE_OPTION, null );
+$cse_probe_code = 200;
+$cse_probe_mock = static function ( $pre, $args, $url ) use ( &$cse_probe_code ) {
+	if ( false === strpos( $url, '/perdita-cache/perdita-probe-' ) ) {
+		return $pre;
+	}
+	$file = Perdita_Caching::cache_dir() . basename( (string) wp_parse_url( $url, PHP_URL_PATH ) );
+	return array(
+		'headers'  => array(),
+		'body'     => 200 === $cse_probe_code && is_file( $file ) ? (string) file_get_contents( $file ) : 'Challenge', // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		'response' => array( 'code' => $cse_probe_code, 'message' => '' ),
+		'cookies'  => array(),
+		'filename' => null,
+	);
+};
+add_filter( 'pre_http_request', $cse_probe_mock, 10, 3 );
+$cse_probe_code = 200;
+$ok( 'exposed' === Perdita_Caching_Tools::probe_folder()['state'], 'probe: a file served back reads as exposed' );
+$cse_probe_code = 404;
+$ok( 'safe' === Perdita_Caching_Tools::probe_folder()['state'], 'probe: a 404 reads as safe' );
+$cse_probe_code = 403;
+$ok( 'safe' === Perdita_Caching_Tools::probe_folder()['state'], 'probe: a 403 reads as safe' );
+foreach ( array( 401, 503 ) as $cse_probe_code ) {
+	$ok( 'unknown' === Perdita_Caching_Tools::probe_folder()['state'], 'probe: a ' . $cse_probe_code . ' proves nothing and reads as unknown' );
+}
+remove_filter( 'pre_http_request', $cse_probe_mock, 10 );
+$cse_restore_options( Perdita_Caching_Tools::PROBE_OPTION, $cse_probe_was );
 
 /* ------------------------------------------------------------------ */
 /* Clean up.                                                            */

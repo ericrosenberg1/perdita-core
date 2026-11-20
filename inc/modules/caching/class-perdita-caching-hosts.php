@@ -19,7 +19,7 @@
  *   wpcom-site-helper. WordPress.com documents no PHP purge call, so purges
  *   happen from its dashboard.
  * - SiteGround: Perdita already stands down for SiteGround's Speed
- *   Optimizer plugin. While it's active, purges go through
+ *   Optimizer plugin. While its helpers are loaded, on any host, purges go through
  *   sg_cachepress_purge_everything() and sg_cachepress_purge_cache()
  *   (sg-cachepress, helpers/helpers.php).
  *
@@ -33,8 +33,17 @@ defined( 'ABSPATH' ) || exit;
 
 class Perdita_Caching_Hosts {
 
-	/** @var bool A full purge went out in this request. */
-	private static $purged_all = false;
+	/**
+	 * When the last full purge went out (microtime), or 0. A second full
+	 * purge inside PURGE_WINDOW seconds is the same change, so it's skipped.
+	 * A long WP-CLI or cron batch still purges each later change.
+	 *
+	 * @var float
+	 */
+	private static $purged_all = 0.0;
+
+	/** Seconds a full purge covers later purges in the same request. */
+	const PURGE_WINDOW = 2;
 
 	/**
 	 * The host's id, or '' on any other server.
@@ -75,7 +84,7 @@ class Perdita_Caching_Hosts {
 			case 'pressable':
 				return ( class_exists( 'Edge_Cache_Plugin' ) && method_exists( 'Edge_Cache_Plugin', 'get_instance' ) ) || function_exists( 'batcache_clear_url' );
 		}
-		return function_exists( 'sg_cachepress_purge_everything' );
+		return false;
 	}
 
 	/**
@@ -83,10 +92,10 @@ class Perdita_Caching_Hosts {
 	 * request.
 	 */
 	public static function purge_all() {
-		if ( self::$purged_all ) {
+		if ( self::recently_purged() ) {
 			return;
 		}
-		self::$purged_all = true;
+		self::$purged_all = microtime( true );
 		$host             = self::detect();
 		if ( 'wpengine' === $host && class_exists( 'WpeCommon' ) && method_exists( 'WpeCommon', 'purge_varnish_cache' ) ) {
 			WpeCommon::purge_varnish_cache();
@@ -107,7 +116,7 @@ class Perdita_Caching_Hosts {
 	 * @param mixed $url URL.
 	 */
 	public static function purge_url( $url ) {
-		if ( self::$purged_all || ! is_string( $url ) || '' === $url ) {
+		if ( self::recently_purged() || ! is_string( $url ) || '' === $url ) {
 			return;
 		}
 		$host = self::detect();
@@ -147,9 +156,18 @@ class Perdita_Caching_Hosts {
 	}
 
 	/**
-	 * Reset the once-per-request flag. For tests.
+	 * Whether a full purge went out inside the window.
+	 *
+	 * @return bool
+	 */
+	private static function recently_purged() {
+		return self::$purged_all > 0 && ( microtime( true ) - self::$purged_all ) < self::PURGE_WINDOW;
+	}
+
+	/**
+	 * Forget the last full purge. For tests.
 	 */
 	public static function reset() {
-		self::$purged_all = false;
+		self::$purged_all = 0.0;
 	}
 }

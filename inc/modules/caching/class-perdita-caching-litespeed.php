@@ -165,7 +165,9 @@ class Perdita_Caching_LiteSpeed {
 		}
 		$tags        = array_keys( self::$purge );
 		self::$purge = array();
-		if ( ( defined( 'WP_CLI' ) && WP_CLI ) || headers_sent() ) {
+		// WP-CLI has no response, and wp-cron.php may have closed its
+		// response before events run.
+		if ( ( defined( 'WP_CLI' ) && WP_CLI ) || wp_doing_cron() || headers_sent() ) {
 			self::save_pending( $tags );
 			return;
 		}
@@ -242,24 +244,61 @@ class Perdita_Caching_LiteSpeed {
 	}
 
 	/**
-	 * Write or remove the block. insert_with_markers() keeps every other
-	 * block in the file as it was.
+	 * Write or remove the block. The block goes above WordPress's own
+	 * rules, since their [L] flag ends rewrite processing for every
+	 * permalink and the cookie checks below it would never run. LiteSpeed
+	 * Cache places its block the same way. Every other block stays as it was.
 	 *
 	 * @param bool $on Write it, or remove it.
 	 * @return bool
 	 */
 	public static function sync_htaccess( $on ) {
 		$file = trailingslashit( ABSPATH ) . '.htaccess';
-		if ( ! function_exists( 'insert_with_markers' ) ) {
-			require_once ABSPATH . 'wp-admin/includes/misc.php';
-		}
 		if ( ! $on && ( ! is_file( $file ) || false === strpos( (string) file_get_contents( $file ), '# BEGIN ' . self::MARKER ) ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- local file.
 			return true;
 		}
 		if ( ( is_file( $file ) && ! wp_is_writable( $file ) ) || ( ! is_file( $file ) && ! wp_is_writable( ABSPATH ) ) ) {
 			return false;
 		}
-		return (bool) insert_with_markers( $file, self::MARKER, $on ? self::htaccess_rules() : array() );
+		$old  = is_file( $file ) ? (string) file_get_contents( $file ) : ''; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- local file.
+		$new  = self::without_block( $old );
+		if ( $on ) {
+			$eol   = false !== strpos( $old, "\r\n" ) ? "\r\n" : "\n";
+			$block = '# BEGIN ' . self::MARKER . $eol . implode( $eol, self::htaccess_rules() ) . $eol . '# END ' . self::MARKER . $eol;
+			$at    = strpos( $new, '# BEGIN WordPress' );
+			$new   = false === $at ? $block . ( '' === $new ? '' : $eol . $new ) : substr( $new, 0, $at ) . $block . $eol . substr( $new, $at );
+		}
+		if ( $new === $old ) {
+			return true;
+		}
+		return false !== file_put_contents( $file, $new, LOCK_EX ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- .htaccess, the same write insert_with_markers() makes.
+	}
+
+	/**
+	 * The file's text with Perdita's block, and the blank line after it, cut.
+	 *
+	 * @param string $text .htaccess text.
+	 * @return string
+	 */
+	public static function without_block( $text ) {
+		$start = strpos( $text, '# BEGIN ' . self::MARKER );
+		if ( false === $start ) {
+			return $text;
+		}
+		$end = strpos( $text, '# END ' . self::MARKER, $start );
+		if ( false === $end ) {
+			return $text;
+		}
+		$end += strlen( '# END ' . self::MARKER );
+		// The line break after the END marker, then one blank line.
+		foreach ( array( 0, 1 ) as $unused ) {
+			if ( "\r\n" === substr( $text, $end, 2 ) ) {
+				$end += 2;
+			} elseif ( "\n" === substr( $text, $end, 1 ) ) {
+				$end += 1;
+			}
+		}
+		return substr( $text, 0, $start ) . substr( $text, $end );
 	}
 
 	/**
@@ -325,6 +364,30 @@ class Perdita_Caching_LiteSpeed {
 		}
 		if ( 'hit' === $status( $cookie ) ) {
 			return $fail( __( 'LiteSpeed served a cached page to a signed-in visitor, so Perdita turned this back off. Check that your server reads rewrite rules from .htaccess.', 'perdita-core' ) );
+		}
+		// The home page alone can pass while WordPress's rules end rewrite
+		// processing for every other page, so a post gets the same check.
+		$posts = get_posts(
+			array(
+				'post_type'      => 'post',
+				'post_status'    => 'publish',
+				'posts_per_page' => 1,
+				'has_password'   => false,
+				'fields'         => 'ids',
+			)
+		);
+		$inner = $posts ? (string) get_permalink( (int) $posts[0] ) : '';
+		if ( '' !== $inner && untrailingslashit( $inner ) !== untrailingslashit( $url ) ) {
+			$args = array( 'timeout' => 10, 'sslverify' => false, 'redirection' => 0 );
+			wp_remote_get( $inner, $args );
+			$args['headers'] = array( 'Cookie' => 'wordpress_logged_in_perditacheck=1' );
+			$inner_cookie    = wp_remote_get( $inner, $args );
+			if ( is_wp_error( $inner_cookie ) ) {
+				return $fail( __( 'Perdita couldn\'t reach a post to check LiteSpeed.', 'perdita-core' ) );
+			}
+			if ( 'hit' === $status( $inner_cookie ) ) {
+				return $fail( __( 'LiteSpeed served a cached post to a signed-in visitor, so Perdita turned this back off. Check that Perdita\'s block sits above WordPress\'s rules in .htaccess.', 'perdita-core' ) );
+			}
 		}
 		$state = array(
 			'ok'      => true,

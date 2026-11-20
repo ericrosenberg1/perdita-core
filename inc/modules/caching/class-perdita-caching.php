@@ -103,7 +103,7 @@ class Perdita_Caching {
 	 * Skip reasons that mean the response is personal: it always goes out
 	 * private, no-store, whatever another plugin queued.
 	 */
-	const PERSONAL_SKIPS = array( 'logged in', 'password-protected', 'DONOTCACHEPAGE', 'cookie' );
+	const PERSONAL_SKIPS = array( 'logged in', 'password-protected', 'DONOTCACHEPAGE', 'cookie', 'excluded path', 'perdita_cache_exclude' );
 
 	/**
 	 * The Perdita core singleton.
@@ -380,7 +380,8 @@ class Perdita_Caching {
 	 * to LiteSpeed.
 	 */
 	public static function purge_downstream_all() {
-		if ( '' !== self::managed_host() ) {
+		if ( '' !== self::managed_host() || self::siteground_purges() ) {
+			self::load( 'hosts' );
 			Perdita_Caching_Hosts::purge_all();
 		}
 		if ( self::litespeed_active( self::settings() ) ) {
@@ -395,13 +396,24 @@ class Perdita_Caching {
 	 * @param mixed $url URL.
 	 */
 	public static function purge_downstream_url( $url ) {
-		if ( '' !== self::managed_host() ) {
+		if ( '' !== self::managed_host() || self::siteground_purges() ) {
+			self::load( 'hosts' );
 			Perdita_Caching_Hosts::purge_url( $url );
 		}
 		if ( self::litespeed_active( self::settings() ) ) {
 			self::load( 'litespeed' );
 			Perdita_Caching_LiteSpeed::purge_url( $url );
 		}
+	}
+
+	/**
+	 * Whether SiteGround's Speed Optimizer purge helpers are loaded. Perdita
+	 * stands down for that plugin's cache and passes its purges on.
+	 *
+	 * @return bool
+	 */
+	public static function siteground_purges() {
+		return function_exists( 'sg_cachepress_purge_everything' ) || function_exists( 'sg_cachepress_purge_cache' );
 	}
 
 	/**
@@ -1703,7 +1715,14 @@ class Perdita_Caching {
 	 * @return bool
 	 */
 	public static function litespeed_active( $settings ) {
-		if ( empty( $settings['litespeed'] ) || ! empty( $settings['mobile_cache'] ) || ! self::server_is_litespeed() ) {
+		if ( empty( $settings['litespeed'] ) || ! empty( $settings['mobile_cache'] ) ) {
+			return false;
+		}
+		// WP-CLI and system cron run without the web server's software
+		// string. The saved live check proves the server there, so their
+		// purges still reach LiteSpeed through the pending file.
+		$off_web = ( defined( 'WP_CLI' ) && WP_CLI ) || wp_doing_cron();
+		if ( ! $off_web && ! self::server_is_litespeed() ) {
 			return false;
 		}
 		$state = get_option( 'perdita_cache_litespeed', array() );
