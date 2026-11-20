@@ -118,7 +118,7 @@ class Perdita_Switch_Catalog {
 			'aios'                      => array( 'All In One WP Security, Pro settings', 'security-pro', array( 'all-in-one-wp-security-and-firewall/wp-security.php' ), $secure, 'All In One WP Security' ),
 			'sucuri-pro'                => array( 'Sucuri Security, Pro settings', 'security-pro', array( 'sucuri-scanner/sucuri.php' ), $secure, 'Sucuri Security' ),
 			'shield-pro'                => array( 'Shield Security, Pro settings', 'security-pro', array( 'wp-simple-firewall/icwp-wpsf.php' ), $secure, 'Shield Security' ),
-			'defender-pro'              => array( 'Defender, Pro settings', 'security-pro', array( 'defender-security/wp-defender.php', 'wp-defender/wp-defender.php' ), $secure, 'Defender' ),
+			'defender-pro'              => array( 'Defender Security, Pro settings', 'security-pro', array( 'defender-security/wp-defender.php', 'wp-defender/wp-defender.php' ), $secure, 'Defender Security' ),
 			'patchstack-pro'            => array( 'Patchstack, Pro settings', 'security-pro', array( 'patchstack/patchstack.php' ), $secure, 'Patchstack' ),
 			'loginizer-pro'             => array( 'Loginizer, Pro settings', 'security-pro', array( 'loginizer/loginizer.php' ), $secure, 'Loginizer' ),
 			'llar-pro'                  => array( 'Limit Login Attempts Reloaded, Pro settings', 'security-pro', array( 'limit-login-attempts-reloaded/limit-login-attempts-reloaded.php' ), $secure, 'Limit Login Attempts Reloaded' ),
