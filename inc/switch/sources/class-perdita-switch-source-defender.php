@@ -18,7 +18,7 @@ class Perdita_Switch_Source_Defender extends Perdita_Switch_Security_Source {
 	}
 
 	public function plugin_files() {
-		return array( 'wp-defender/wp-defender.php' );
+		return array( 'defender-security/wp-defender.php', 'wp-defender/wp-defender.php' );
 	}
 
 	public function has_settings() {
