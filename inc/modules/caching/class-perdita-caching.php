@@ -1037,6 +1037,7 @@ class Perdita_Caching {
 		}
 		if ( ! $this->is_cacheable( $settings ) ) {
 			self::log( 'SKIP', self::log_uri() . ' (' . $this->skip_reason . ')' );
+			self::send_skip_cache_control();
 			return;
 		}
 
@@ -1499,6 +1500,21 @@ class Perdita_Caching {
 		}
 		$current = self::response_header( 'Cache-Control' );
 		if ( '' !== $current && preg_match( '/\b(?:no-store|private)\b/i', $current ) ) {
+			return;
+		}
+		header( 'Cache-Control: private, no-store, max-age=0' );
+	}
+
+	/**
+	 * Mark a request the page cache skipped (search, a feed, an unknown query
+	 * arg, a logged-in visitor) private and no-store, unless WordPress or a
+	 * plugin already queued a Cache-Control of its own. Without a header, a
+	 * CDN cache rule falls back to its default edge TTL and can serve one
+	 * visitor's search results to the next (mycancertesting.org, 2026-11-19).
+	 * A header set later in the request replaces this one.
+	 */
+	private static function send_skip_cache_control() {
+		if ( headers_sent() || '' !== self::response_header( 'Cache-Control' ) ) {
 			return;
 		}
 		header( 'Cache-Control: private, no-store, max-age=0' );

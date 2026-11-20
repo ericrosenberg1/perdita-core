@@ -1100,6 +1100,11 @@ if ( '' !== $chd_php && function_exists( 'proc_open' ) ) {
 		$ok( '' === $chd_h( $chd_r, 'x-cache' ) && ! $chd_has( '/' ), 'cache hardening 6: over HTTP, ?paged=abc skips the cache and writes nothing' );
 		$chd_r = $chd_get( '//' );
 		$ok( '' === $chd_h( $chd_r, 'x-cache' ) && ! $chd_has( '/' ), 'cache hardening 9: over HTTP, a // request is not keyed as the home page' );
+		// A skipped request gets a Cache-Control of its own, so a CDN rule can't fall back to its default TTL (mycancertesting.org search).
+		foreach ( array( '/?s=perdita' => 'search', '/?feed=rss2' => 'a feed', '/?utm_x=1' => 'an unknown query arg' ) as $chd_path => $chd_what ) {
+			$chd_r = $chd_get( $chd_path );
+			$ok( '' === $chd_h( $chd_r, 'x-cache' ) && 'private, no-store, max-age=0' === $chd_h( $chd_r, 'cache-control' ), 'cache hardening 5: ' . $chd_what . ', which the cache skips, goes out private, no-store, max-age=0' . ' (got "' . $chd_h( $chd_r, 'cache-control' ) . '")' );
+		}
 		Perdita_Caching::purge_everything();
 	} else {
 		echo 'SKIP  cache hardening http: the test server did not start (' . esc_html( (string) @file_get_contents( $chd_tmp . 'server.log' ) ) . ")\n"; // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
