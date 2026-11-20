@@ -71,7 +71,12 @@ class Perdita_Security_Firewall_Admin {
 
 		echo '<h2>' . esc_html__( 'Firewall', 'perdita-core' ) . '</h2>';
 		echo '<input type="hidden" name="perdita_fw_section" value="1" />';
-		echo '<p class="description perdita-security-note">' . esc_html__( 'Start in monitor mode for a few days and read the log below. You stay signed in and trusted: anyone with the role you pick below gets a signed cookie, and Perdita skips the content rules for their requests. The allowlist always wins. To turn the firewall off in an emergency, add define( \'PERDITA_FIREWALL_DISABLE\', true ); to wp-config.php, or delete wp-content/perdita-firewall/.', 'perdita-core' ) . '</p>';
+		echo '<p class="description perdita-security-note">' . esc_html__( 'Start in monitor mode for a few days and read the log below. You stay signed in and trusted: anyone with the role you pick below gets a signed cookie, and Perdita skips the content rules for their requests. The allowlist always wins.', 'perdita-core' ) . ' ' . sprintf(
+			/* translators: 1: a line of PHP for wp-config.php, 2: a folder path */
+			esc_html__( 'To turn the firewall off in an emergency, add %1$s to wp-config.php, or delete %2$s.', 'perdita-core' ),
+			'<code>' . esc_html( "define( 'PERDITA_FIREWALL_DISABLE', true );" ) . '</code>',
+			'<code>wp-content/perdita-firewall/</code>'
+		) . '</p>';
 		echo '<table class="form-table" role="presentation"><tbody>';
 
 		echo '<tr><th scope="row">' . esc_html__( 'Firewall', 'perdita-core' ) . '</th><td><label><input type="checkbox" name="firewall" value="1"' . checked( ! empty( $s['firewall'] ), true, false ) . ' /> ' . esc_html__( 'Turn on the firewall', 'perdita-core' ) . '</label></td></tr>';

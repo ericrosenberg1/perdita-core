@@ -1563,7 +1563,13 @@ $psn_admin->render();
 $psn_html = ob_get_clean();
 $ok( false !== strpos( $psn_html, 'perdita-security-status' ) && false !== strpos( $psn_html, 'Check now' ) && false !== strpos( $psn_html, 'location ~*' ) && false !== strpos( $psn_html, 'name="hsts"' ) && false !== strpos( $psn_html, 'name="restrict_rest"' ) && false !== strpos( $psn_html, 'name="login_long_lockout"' ) && false !== strpos( $psn_html, 'name="core_check"' ), 'screen: renders the status panel, Check now, the nginx rule, and the new controls' );
 $ok( strpos( $psn_html, 'perdita-security-status' ) < strpos( $psn_html, 'Login rate limiting' ), 'screen: the status panel sits above the sections' );
-$psn_visible = preg_replace( array( '#<script.*?</script>#s', '#&[#a-z0-9]+;#i' ), '', $psn_html );
+$psn_visible = (string) $psn_html;
+while ( false !== ( $psn_sa = strpos( $psn_visible, '<script' ) ) ) {
+	$psn_sb      = strpos( $psn_visible, '</script>', $psn_sa );
+	$psn_visible = substr( $psn_visible, 0, $psn_sa ) . ( false === $psn_sb ? '' : substr( $psn_visible, $psn_sb + 9 ) );
+}
+$psn_visible = (string) preg_replace( array( '~<(code|pre|textarea)\b[^>]*>.*?</\1>~is', '~&[#a-z0-9]+;~i' ), '', $psn_visible );
+$ok( '' !== $psn_visible && false !== strpos( $psn_visible, 'perdita-security-status' ), 'screen: the copy check reads the rendered page' );
 $ok( false === strpos( $psn_visible, "\u{2014}" ) && false === strpos( wp_strip_all_tags( $psn_visible ), ';' ), 'screen: the page has no em dash and no semicolon in its copy' );
 $ok( false !== strpos( $psn_html, 'This stays off until you add Turnstile keys' ), 'screen: the Turnstile box says it needs keys' );
 $psn_admin_ref = $psn_admin; $psn_unhook( $psn_admin );
