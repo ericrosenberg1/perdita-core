@@ -152,7 +152,11 @@ done
 # silently reaches nobody who already has it. Refuse to build that. Skipped
 # for --wporg, which publishes nothing to the update server.
 if [ "$wporg" != "1" ] && command -v curl >/dev/null 2>&1; then
-	live="$(curl -fsS --max-time 20 "https://${update_host}/updates/${slug}.json" 2>/dev/null || true)"
+	live=""
+	for live_host in "$update_host" perdita.ericrosenberg.com; do
+		live="$(curl -fsS --max-time 20 "https://${live_host}/updates/${slug}.json" 2>/dev/null || true)"
+		[ -n "$live" ] && break
+	done
 	if [ -n "$live" ]; then
 		live_version="$(printf '%s' "$live" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
 		if [ "$live_version" = "$version" ]; then
@@ -160,7 +164,10 @@ if [ "$wporg" != "1" ] && command -v curl >/dev/null 2>&1; then
 			ok "live manifest already advertises $version -- will verify bytes match before finishing"
 		fi
 	else
-		printf '\033[33m  warn\033[0m could not reach the update server; skipped already-published check\n'
+		printf '\033[33m  warn\033[0m could not reach perdita.app or the old host, so the already-published check did not run\n'
+		if [ "${PERDITA_ALLOW_UNVERIFIED_VERSION:-}" != "1" ]; then
+			die "no update host answered. Fix the network, or set PERDITA_ALLOW_UNVERIFIED_VERSION=1 to build anyway"
+		fi
 	fi
 fi
 
@@ -415,7 +422,3 @@ printf '\n\033[32mbuilt\033[0m %s\n  sha256 %s\n  manifest %s\n' \
 	"$out_dir/$zip_name" "$checksum" "$out_dir/${slug}.json"
 printf '\nPublish with ~/Code/perdita/bin/publish-release.sh (uploads the zip, then the\nmanifest, then proves the live channel names this build and serves these bytes):\n'
 printf '  ~/Code/perdita/bin/publish-release.sh %s\n' "$out_dir"
-printf '\nOr by hand (order matters -- zip first, manifest last, or the\nupdater will fail checksum verification for every user in between), then run\n~/Code/perdita/bin/publish-release.sh --check:\n'
-printf '  scp %s cloudpanel:/tmp/ && ssh cloudpanel "sudo install -o perdita -g perdita -m 644 /tmp/%s %s/"\n' \
-	"$out_dir/$zip_name" "$zip_name" "/home/perdita/htdocs/${update_host}/updates"
-printf '  ...then the same for %s.json\n' "$slug"
