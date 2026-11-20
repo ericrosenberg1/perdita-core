@@ -149,10 +149,58 @@ class Perdita_Switch_Target {
 				$full = Perdita_Analytics::sanitize( array_merge( Perdita_Analytics::defaults(), Perdita_Analytics::raw_settings(), array( $key => $value ) ) );
 				return array_key_exists( $key, $full ) ? $full[ $key ] : null;
 			case 'security':
-				$full = Perdita_Security::sanitize_login( array_merge( Perdita_Security::get_settings(), array( $key => $value ) ) );
-				return array_key_exists( $key, $full ) ? $full[ $key ] : null;
+				$input = Perdita_Security::get_settings();
+				Perdita_Switch_Source::set_path( $input, $key, $value );
+				$clean = self::sanitize_security( $input );
+				foreach ( explode( '.', $key ) as $part ) {
+					if ( ! is_array( $clean ) || ! array_key_exists( $part, $clean ) ) {
+						return null;
+					}
+					$clean = $clean[ $part ];
+				}
+				return $clean;
 		}
 		return null;
+	}
+
+	/**
+	 * The firewall rule categories an import may switch on.
+	 *
+	 * @return string[]
+	 */
+	public static function firewall_categories() {
+		if ( class_exists( 'Perdita_Security_Firewall_Admin' ) && method_exists( 'Perdita_Security_Firewall_Admin', 'categories' ) ) {
+			$cats = array_keys( (array) Perdita_Security_Firewall_Admin::categories() );
+			if ( $cats ) {
+				return $cats;
+			}
+		}
+		return array_keys( (array) Perdita_Security::defaults()['fw_rules'] );
+	}
+
+	/**
+	 * What the Security module stores for a full set of settings: the login
+	 * limit, the protections, the three switches the settings screen reads
+	 * straight from its form, and the firewall switch, mode, and categories.
+	 * The settings screen and this import save through the same pieces.
+	 *
+	 * @param array $input Settings, with fw_rules as category => bool.
+	 * @return array
+	 */
+	public static function sanitize_security( array $input ) {
+		$out = array_merge( Perdita_Security::sanitize_protections( $input ), Perdita_Security::sanitize_login( $input ) );
+		foreach ( array( 'headers', 'disable_file_edit', 'disable_xmlrpc', 'firewall' ) as $flag ) {
+			$out[ $flag ] = ! empty( $input[ $flag ] );
+		}
+		$mode                  = isset( $input['firewall_mode'] ) && is_string( $input['firewall_mode'] ) ? sanitize_key( $input['firewall_mode'] ) : 'monitor';
+		$out['firewall_mode']  = in_array( $mode, array( 'monitor', 'block' ), true ) ? $mode : 'monitor';
+		$given                 = isset( $input['fw_rules'] ) && is_array( $input['fw_rules'] ) ? $input['fw_rules'] : array();
+		$rules                 = array();
+		foreach ( self::firewall_categories() as $cat ) {
+			$rules[ $cat ] = array_key_exists( $cat, $given ) ? ! empty( $given[ $cat ] ) : true;
+		}
+		$out['fw_rules'] = $rules;
+		return $out;
 	}
 
 	/**
@@ -210,7 +258,12 @@ class Perdita_Switch_Target {
 				return true;
 			case 'security':
 				$current = Perdita_Security::get_settings();
-				update_option( Perdita_Security::OPTION, array_merge( $current, Perdita_Security::sanitize_login( array_merge( $current, $patch ) ) ) );
+				$merged  = array_merge( $current, $patch );
+				if ( isset( $patch['fw_rules'] ) && is_array( $patch['fw_rules'] ) ) {
+					$merged['fw_rules'] = array_merge( (array) $current['fw_rules'], $patch['fw_rules'] );
+				}
+				update_option( Perdita_Security::OPTION, array_merge( $current, self::sanitize_security( $merged ) ) );
+				self::after_restore( 'security' );
 				return true;
 		}
 		return false;
@@ -230,6 +283,24 @@ class Perdita_Switch_Target {
 		if ( 'seo' === $module && function_exists( 'perdita_core' ) && isset( perdita_core()->seo ) ) {
 			// The store keeps its document for the request.
 			perdita_core()->seo->refresh();
+		}
+		if ( 'security' === $module && self::load( 'security' ) ) {
+			// The settings screen's save does the same: the uploads block
+			// follows its switch, and the firewall config follows the settings.
+			$settings = Perdita_Security::get_settings();
+			$want     = ! empty( $settings['block_uploads_php'] );
+			if ( $want !== Perdita_Security::uploads_block_present() ) {
+				Perdita_Security::sync_uploads_block( $want );
+			}
+			// The quiet compile never touches server config: that stays an owner's click on the firewall screen.
+			$compile = class_exists( 'Perdita_Firewall_Config' ) ? ( method_exists( 'Perdita_Firewall_Config', 'compile_quiet' ) ? 'compile_quiet' : ( method_exists( 'Perdita_Firewall_Config', 'compile' ) ? 'compile' : '' ) ) : '';
+			if ( '' !== $compile ) {
+				try {
+					Perdita_Firewall_Config::$compile();
+				} catch ( Throwable $e ) { // phpcs:ignore Generic.CodeAnalysis.EmptyStatement.DetectedCatch -- a failed compile must never stop an import or an undo.
+					unset( $e );
+				}
+			}
 		}
 	}
 
