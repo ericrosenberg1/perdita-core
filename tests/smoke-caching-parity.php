@@ -429,6 +429,13 @@ $ok( in_array( 'member_tier', Perdita_Caching::no_cache_cookies(), true ) && in_
 $_COOKIE = array( 'site_member_tier_x' => '1' );
 $ok( false === $cpar_is->invoke( $cpar_cache, $cpar_req ) && 'cookie' === $cpar_p( 'skip_reason' )->getValue( $cpar_cache ), 'cache parity: a visitor carrying a rejected cookie skips the cache' );
 $_COOKIE = array();
+// An agent asking for Markdown gets WordPress, never the cached HTML (nonprofitmanager.app, BetterDocs).
+$_SERVER['HTTP_ACCEPT'] = 'text/markdown, text/html;q=0.5';
+$ok( false === $cpar_is->invoke( $cpar_cache, $cpar_req ) && 'markdown accept' === $cpar_p( 'skip_reason' )->getValue( $cpar_cache ), 'cache parity: an Accept: text/markdown request skips the page cache' );
+$ok( Perdita_Caching::accept_wants_markdown( 'text/html, TEXT/X-Markdown;q=0.9' ) && ! Perdita_Caching::accept_wants_markdown( 'text/html,application/xhtml+xml,*/*;q=0.8' ) && ! Perdita_Caching::accept_wants_markdown( 'text/html, text/markdown;q=0' ) && ! Perdita_Caching::accept_wants_markdown( '' ), 'cache parity: the Markdown test matches text/markdown and text/x-markdown, and ignores a browser Accept and q=0' );
+$_SERVER['HTTP_ACCEPT'] = 'text/html,application/xhtml+xml,*/*;q=0.8';
+$ok( true === $cpar_is->invoke( $cpar_cache, $cpar_req ), 'cache parity: a browser Accept header stays cacheable' );
+unset( $_SERVER['HTTP_ACCEPT'] );
 $cpar_set( array() );
 $ok( false === strpos( Perdita_Caching::dropin_source(), 'badbot-in-dropin' ), 'cache parity: the drop-in holds no rejected user agent until one is set' );
 $cpar_set(
@@ -496,7 +503,7 @@ remove_filter( 'perdita_cache_exclude', $cpar_pin, PHP_INT_MAX );
 /* 7. The drop-in, in its own PHP process.                              */
 /* ------------------------------------------------------------------ */
 
-$ok( '3' === Perdita_Caching::DROPIN_VERSION, 'cache parity: the drop-in version moved to 3 with its new source' );
+$ok( '4' === Perdita_Caching::DROPIN_VERSION, 'cache parity: the drop-in version moved to 4 with the Markdown check' );
 if ( ! file_exists( $cpar_dropin ) ) {
 	$cpar_made_dropin = true;
 	file_put_contents( $cpar_dropin, "<?php\n/**\n * " . Perdita_Caching::DROPIN_MARKER . " v1.\n */\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
@@ -567,6 +574,8 @@ if ( '' !== $cpar_php && wp_mkdir_p( $cpar_tmp ) ) {
 	$ok( 'BYPASS' === $cpar_run( array( 'HTTP_USER_AGENT' => 'x badbot y' ) ), 'cache parity drop-in: a rejected user agent goes to WordPress' );
 	$ok( 'BYPASS' === $cpar_run( array(), array( 'a_member_tier' => '1' ) ), 'cache parity drop-in: a rejected cookie goes to WordPress' );
 	$ok( 'BYPASS' === $cpar_run( array(), array( 'wordpress_logged_in_x' => '1' ) ), 'cache parity drop-in: a login cookie still goes to WordPress' );
+	$ok( 'BYPASS' === $cpar_run( array( 'HTTP_ACCEPT' => 'text/markdown' ) ), 'cache parity drop-in: an Accept: text/markdown request goes to WordPress' );
+	$ok( $cpar_dbody === $cpar_run( array( 'HTTP_ACCEPT' => 'text/html,application/xhtml+xml,*/*;q=0.8' ) ), 'cache parity drop-in: a browser Accept header still gets the cached page' );
 
 	// Stale handling.
 	file_put_contents( $cpar_dfile . '.stale', (string) time() ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
