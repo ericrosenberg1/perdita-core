@@ -459,6 +459,9 @@ final class Perdita_Core {
 			wp_clear_scheduled_hook( $hook );
 		}
 		self::remove_cache_dropin();
+		if ( class_exists( 'Perdita_Caching' ) && is_callable( array( 'Perdita_Caching', 'remove_litespeed' ) ) ) {
+			Perdita_Caching::remove_litespeed();
+		}
 		delete_transient( 'perdita_core_update_manifest' );
 	}
 

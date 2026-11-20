@@ -216,4 +216,4 @@ foreach ( array( 'table.perdita-stack td[data-label]::before', '.perdita-break',
 	$ok( false !== strpos( $aui_css, $aui_sel ), 'admin ui: the shared sheet styles ' . $aui_sel );
 }
 $aui_cache = $aui_src( 'inc/modules/caching/class-perdita-caching-admin.php' );
-$ok( substr_count( $aui_cache, '$this->guard();' ) === substr_count( $aui_cache, "check_admin_referer( '" ) && 6 === substr_count( $aui_cache, "check_admin_referer( '" ), 'admin ui: every Caching handler checks its own nonce' );
+$ok( substr_count( $aui_cache, '$this->guard();' ) === substr_count( $aui_cache, "check_admin_referer( '" ) && 9 === substr_count( $aui_cache, "check_admin_referer( '" ), 'admin ui: every Caching handler checks its own nonce' );

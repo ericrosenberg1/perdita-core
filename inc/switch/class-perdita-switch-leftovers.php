@@ -561,6 +561,17 @@ class Perdita_Switch_Leftovers {
 	}
 
 	/**
+	 * Add the WP_CACHE line for a caller outside a Switch card (the Caching
+	 * screen's button). Same checks, undo note and record as a card.
+	 *
+	 * @param string $owner Who asked, recorded so undo_wp_cache( $owner ) can take the line out.
+	 * @return array array{ok: bool, message: string}
+	 */
+	public static function add_wp_cache_line( $owner ) {
+		return self::add_wp_cache( (string) $owner );
+	}
+
+	/**
 	 * wp-config.php's source with Perdita's WP_CACHE line taken out, or null
 	 * when the line isn't there exactly once on a line of its own.
 	 *

@@ -503,7 +503,7 @@ remove_filter( 'perdita_cache_exclude', $cpar_pin, PHP_INT_MAX );
 /* 7. The drop-in, in its own PHP process.                              */
 /* ------------------------------------------------------------------ */
 
-$ok( '4' === Perdita_Caching::DROPIN_VERSION, 'cache parity: the drop-in version moved to 4 with the Markdown check' );
+$ok( '5' === Perdita_Caching::DROPIN_VERSION, 'cache parity: the drop-in version moved to 5 with s-maxage and the LiteSpeed headers' );
 if ( ! file_exists( $cpar_dropin ) ) {
 	$cpar_made_dropin = true;
 	file_put_contents( $cpar_dropin, "<?php\n/**\n * " . Perdita_Caching::DROPIN_MARKER . " v1.\n */\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents

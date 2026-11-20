@@ -386,4 +386,117 @@ class Perdita_Caching_Tools {
 			}
 		}
 	}
+
+	/* ---------- WP_CACHE ---------- */
+
+	/** Who added the line, in Switch's record. */
+	const WP_CACHE_OWNER = 'caching-screen';
+
+	/**
+	 * Add `define( 'WP_CACHE', true );` to wp-config.php, the way Switch to
+	 * Perdita does: never a copy of the file, an undo note in the Switch
+	 * backup folder, an atomic write, and the exact line to paste when the
+	 * file can't be written safely.
+	 *
+	 * @return array array{ok: bool, message: string, line: string}
+	 */
+	public static function wp_cache_add() {
+		if ( ! class_exists( 'Perdita_Switch_Leftovers' ) ) {
+			return array(
+				'ok'      => false,
+				'message' => __( 'Add this line to wp-config.php, above the "That\'s all, stop editing" line.', 'perdita-core' ),
+				'line'    => "define( 'WP_CACHE', true );",
+			);
+		}
+		$out         = Perdita_Switch_Leftovers::add_wp_cache_line( self::WP_CACHE_OWNER );
+		$out['line'] = $out['ok'] ? '' : Perdita_Switch_Leftovers::WP_CACHE_LINE;
+		return $out;
+	}
+
+	/**
+	 * Take out the line this button added. It stays while early serving is
+	 * on, and when another tool or a person added it.
+	 *
+	 * @return array array{ok: bool, message: string}
+	 */
+	public static function wp_cache_remove() {
+		if ( ! class_exists( 'Perdita_Switch_Leftovers' ) ) {
+			return array(
+				'ok'      => false,
+				'message' => '',
+			);
+		}
+		$message = Perdita_Switch_Leftovers::undo_wp_cache( self::WP_CACHE_OWNER );
+		$path    = Perdita_Switch_Leftovers::config_path();
+		$body    = '' !== $path && is_readable( $path ) ? (string) file_get_contents( $path ) : ''; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- local file.
+		return array(
+			'ok'      => '' !== $message && '' !== $body && false === strpos( $body, Perdita_Switch_Leftovers::WP_CACHE_LINE ),
+			'message' => '' !== $message ? $message : __( 'Perdita didn\'t add the WP_CACHE line from this screen, so it stays.', 'perdita-core' ),
+		);
+	}
+
+	/* ---------- cache folder exposure ---------- */
+
+	/** Runtime state: the folder probe's last result. */
+	const PROBE_OPTION = 'perdita_cache_folder_probe';
+
+	/**
+	 * Whether a visitor can download files from the cache folder. The
+	 * .htaccess guards cover Apache and LiteSpeed. nginx ignores them, and
+	 * a signed-in visitor's page (Perdita Pro's logged-in cache) sits in
+	 * that folder. This writes a small file there, asks for it over HTTP,
+	 * and deletes it.
+	 *
+	 * @return array array{state: string, time: int} state is safe, exposed or unknown.
+	 */
+	public static function probe_folder() {
+		$dir   = Perdita_Caching::cache_dir();
+		$token = wp_generate_password( 24, false );
+		$name  = 'perdita-probe-' . strtolower( wp_generate_password( 12, false ) ) . '.html';
+		$state = 'unknown';
+		if ( wp_mkdir_p( $dir ) && false !== file_put_contents( $dir . $name, $token ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- a probe file in our own cache dir, deleted below.
+			$uploads = wp_upload_dir( null, false );
+			$url     = trailingslashit( (string) $uploads['baseurl'] ) . 'perdita-cache/' . $name;
+			$res     = wp_remote_get(
+				$url,
+				array(
+					'timeout'     => 8,
+					'redirection' => 0,
+					'sslverify'   => false,
+				)
+			);
+			wp_delete_file( $dir . $name );
+			if ( ! is_wp_error( $res ) ) {
+				$code  = (int) wp_remote_retrieve_response_code( $res );
+				$body  = (string) wp_remote_retrieve_body( $res );
+				if ( 200 === $code && false !== strpos( $body, $token ) ) {
+					$state = 'exposed';
+				} elseif ( in_array( $code, array( 200, 403, 404, 410 ), true ) ) {
+					// The server refused the file, or answered with a page
+					// that isn't the file. A 401, a challenge page or a 5xx
+					// proves nothing, so those stay unknown.
+					$state = 'safe';
+				}
+			}
+		}
+		$out = array(
+			'state' => $state,
+			'time'  => time(),
+		);
+		update_option( self::PROBE_OPTION, $out, false );
+		return $out;
+	}
+
+	/**
+	 * The last probe result.
+	 *
+	 * @return array array{state: string, time: int}
+	 */
+	public static function last_probe() {
+		$probe = get_option( self::PROBE_OPTION, array() );
+		return is_array( $probe ) && isset( $probe['state'] ) ? $probe : array(
+			'state' => 'unknown',
+			'time'  => 0,
+		);
+	}
 }

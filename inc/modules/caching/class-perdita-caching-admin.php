@@ -52,6 +52,9 @@ class Perdita_Caching_Admin {
 		add_action( 'admin_post_perdita_caching_preload', array( $this, 'handle_preload' ) );
 		add_action( 'admin_post_perdita_caching_delete', array( $this, 'handle_delete' ) );
 		add_action( 'admin_post_perdita_caching_log_clear', array( $this, 'handle_log_clear' ) );
+		add_action( 'admin_post_perdita_caching_wp_cache_add', array( $this, 'handle_wp_cache_add' ) );
+		add_action( 'admin_post_perdita_caching_wp_cache_remove', array( $this, 'handle_wp_cache_remove' ) );
+		add_action( 'admin_post_perdita_caching_probe', array( $this, 'handle_probe' ) );
 		add_action( 'wp_ajax_perdita_caching_preload_status', array( $this, 'ajax_preload_status' ) );
 	}
 
@@ -98,10 +101,11 @@ class Perdita_Caching_Admin {
 	/**
 	 * Redirect back to the settings screen with a short status message.
 	 *
-	 * @param string $msg Message to show.
+	 * @param string $msg   Message to show.
+	 * @param array  $extra More query arguments.
 	 */
-	private function redirect( $msg ) {
-		wp_safe_redirect( add_query_arg( 'perdita_msg', rawurlencode( $msg ), admin_url( 'admin.php?page=' . self::PAGE ) ) );
+	private function redirect( $msg, $extra = array() ) {
+		wp_safe_redirect( add_query_arg( array_merge( array( 'perdita_msg' => rawurlencode( $msg ) ), $extra ), admin_url( 'admin.php?page=' . self::PAGE ) ) );
 		exit;
 	}
 
@@ -129,6 +133,8 @@ class Perdita_Caching_Admin {
 			'gc_schedule'   => isset( $_POST['gc_schedule'] ) ? sanitize_key( wp_unslash( $_POST['gc_schedule'] ) ) : 'daily',
 			'max_size_mb'   => isset( $_POST['max_size_mb'] ) ? (int) $_POST['max_size_mb'] : 1024,
 			'purge_on_save' => isset( $_POST['purge_on_save'] ) && 'smart' === sanitize_key( wp_unslash( $_POST['purge_on_save'] ) ) ? 'smart' : 'all',
+			'edge_max_age'  => isset( $_POST['edge_max_age'] ) ? (int) $_POST['edge_max_age'] : 0,
+			'litespeed'     => isset( $_POST['litespeed'] ) ? 1 : 0,
 			'cdn_host'      => isset( $_POST['cdn_host'] ) ? sanitize_text_field( wp_unslash( $_POST['cdn_host'] ) ) : '',
 		);
 		// Every list is a textarea, one entry per line. sanitize() cleans each line.
@@ -156,6 +162,11 @@ class Perdita_Caching_Admin {
 		} elseif ( ! $clean['browser_cache'] && $before['browser_cache'] ) {
 			$this->main->remove_htaccess_rules();
 			$msg = __( 'Settings saved and browser-cache rules removed from .htaccess.', 'perdita-core' );
+		}
+
+		$ls_msg = Perdita_Caching::apply_litespeed( $before, $clean );
+		if ( '' !== $ls_msg ) {
+			$msg .= ' ' . $ls_msg;
 		}
 
 		$dropin = Perdita_Caching::sync_dropin();
@@ -262,6 +273,43 @@ class Perdita_Caching_Admin {
 	}
 
 	/**
+	 * Add the WP_CACHE line to wp-config.php.
+	 */
+	public function handle_wp_cache_add() {
+		$this->guard();
+		check_admin_referer( 'perdita_caching_wp_cache_add' );
+		Perdita_Caching::load( 'tools' );
+		$out = Perdita_Caching_Tools::wp_cache_add();
+		if ( ! empty( $out['ok'] ) ) {
+			Perdita_Caching::sync_dropin();
+			$this->redirect( (string) $out['message'] );
+		}
+		$this->redirect( (string) $out['message'], array( 'perdita_wpc' => 1 ) );
+	}
+
+	/**
+	 * Take out the WP_CACHE line this screen or Switch added.
+	 */
+	public function handle_wp_cache_remove() {
+		$this->guard();
+		check_admin_referer( 'perdita_caching_wp_cache_remove' );
+		Perdita_Caching::load( 'tools' );
+		$out = Perdita_Caching_Tools::wp_cache_remove();
+		$this->redirect( (string) $out['message'] );
+	}
+
+	/**
+	 * Check whether visitors can download files from the cache folder.
+	 */
+	public function handle_probe() {
+		$this->guard();
+		check_admin_referer( 'perdita_caching_probe' );
+		Perdita_Caching::load( 'tools' );
+		Perdita_Caching_Tools::probe_folder();
+		$this->redirect( __( 'Checked the cache folder.', 'perdita-core' ) );
+	}
+
+	/**
 	 * Answer the screen's progress poll with the preload's current line.
 	 */
 	public function ajax_preload_status() {
@@ -338,6 +386,32 @@ class Perdita_Caching_Admin {
 
 		Perdita_Caching::load( 'preload' );
 		Perdita_Caching::load( 'tools' );
+		Perdita_Caching::load( 'edge' );
+		Perdita_Caching::load( 'hosts' );
+		Perdita_Caching::load( 'litespeed' );
+		$managed   = Perdita_Caching::managed_host();
+		$litespeed = Perdita_Caching::server_is_litespeed();
+		$ls_state  = get_option( Perdita_Caching_Litespeed::STATE_OPTION, array() );
+		$edge_ok   = Perdita_Caching_Edge::check_settings();
+		$wp_cache  = Perdita_Caching::wp_cache_on();
+		$cfg_path  = class_exists( 'Perdita_Switch_Leftovers' ) ? Perdita_Switch_Leftovers::config_path() : '';
+		$cfg_body  = '' !== $cfg_path && is_readable( $cfg_path ) ? (string) file_get_contents( $cfg_path ) : ''; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- local wp-config.php, read only.
+		$line_ours = $wp_cache && '' !== $cfg_body && false !== strpos( $cfg_body, Perdita_Switch_Leftovers::WP_CACHE_LINE );
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only flag echoed after a redirect.
+		$show_line = isset( $_GET['perdita_wpc'] ) && class_exists( 'Perdita_Switch_Leftovers' );
+		$probe     = Perdita_Caching_Tools::last_probe();
+		$no_apache = ! $apache && ! $litespeed;
+		$edge_ages = array(
+			0      => __( 'Off', 'perdita-core' ),
+			3600   => __( '1 hour', 'perdita-core' ),
+			21600  => __( '6 hours', 'perdita-core' ),
+			86400  => __( '1 day', 'perdita-core' ),
+			604800 => __( '7 days', 'perdita-core' ),
+		);
+		if ( ! isset( $edge_ages[ (int) $s['edge_max_age'] ] ) ) {
+			/* translators: %s: number of seconds. */
+			$edge_ages[ (int) $s['edge_max_age'] ] = sprintf( __( '%s seconds', 'perdita-core' ), number_format_i18n( (int) $s['edge_max_age'] ) );
+		}
 		$preload = Perdita_Caching_Preload::state( true );
 		$running = in_array( $preload['status'], array( 'running', 'waiting' ), true );
 		$stored  = get_option( Perdita_Caching::OPTION, array() );
@@ -372,7 +446,27 @@ class Perdita_Caching_Admin {
 				<?php esc_html_e( 'With this page cache, you save each guest page as a static file and serve that file on the next visit, so you save server work for anonymous visitors. By default, you serve cached pages from inside WordPress. Turn on "Serve before WordPress loads" for the speed of a drop-in cache. You never cache pages for logged-in users, carts, forms, searches, or any address with a query string.', 'perdita-core' ); ?>
 			</p>
 
-			<?php if ( '' !== $other ) : ?>
+			<?php if ( '' !== $managed ) : ?>
+				<div class="notice notice-info inline perdita-cache-narrow">
+					<p>
+						<?php
+						if ( Perdita_Caching_Hosts::can_purge( $managed ) ) {
+							printf(
+								/* translators: %s: hosting company name. */
+								esc_html__( '%1$s runs its own page cache, so Perdita\'s page cache stands down and Perdita\'s purges go to %1$s\'s cache.', 'perdita-core' ),
+								esc_html( $other )
+							);
+						} else {
+							printf(
+								/* translators: %s: hosting company name. */
+								esc_html__( '%1$s runs its own page cache, so Perdita\'s page cache stands down. Purge the cache from %1$s\'s dashboard.', 'perdita-core' ),
+								esc_html( $other )
+							);
+						}
+						?>
+					</p>
+				</div>
+			<?php elseif ( '' !== $other ) : ?>
 				<div class="notice notice-warning inline perdita-cache-narrow">
 					<p>
 						<?php
@@ -477,13 +571,23 @@ class Perdita_Caching_Admin {
 										esc_html_e( 'Status: off on a multisite network. Every site shares one drop-in, so you get each site\'s cached pages after WordPress loads instead.', 'perdita-core' );
 									} elseif ( 'ours' === $dropin && Perdita_Caching::wp_cache_on() && '' === $other ) {
 										esc_html_e( 'Status: on. Visitors get cached pages before WordPress loads.', 'perdita-core' );
-									} elseif ( ! Perdita_Caching::wp_cache_on() ) {
+									} elseif ( ! $wp_cache ) {
 										esc_html_e( 'Status: waiting for WP_CACHE. Add define( \'WP_CACHE\', true ); to wp-config.php, or run: wp config set WP_CACHE true --raw', 'perdita-core' );
 									} else {
 										esc_html_e( 'Status: not active yet. See the note above.', 'perdita-core' );
 									}
 									?>
-								</strong></p>
+									</strong></p>
+							<?php endif; ?>
+							<?php if ( ! $wp_cache && class_exists( 'Perdita_Switch_Leftovers' ) ) : ?>
+								<p><button type="submit" form="perdita-cache-wpc-add" class="button button-secondary"><?php esc_html_e( 'Add WP_CACHE to wp-config.php', 'perdita-core' ); ?></button></p>
+							<?php endif; ?>
+							<?php if ( $show_line && ! $wp_cache ) : ?>
+								<p class="description"><?php esc_html_e( 'Copy this line into wp-config.php, above the "That\'s all, stop editing" line.', 'perdita-core' ); ?></p>
+								<p><input type="text" readonly class="large-text code" value="<?php echo esc_attr( Perdita_Switch_Leftovers::WP_CACHE_LINE ); ?>" aria-label="<?php esc_attr_e( 'The WP_CACHE line to copy', 'perdita-core' ); ?>" /></p>
+							<?php endif; ?>
+							<?php if ( $line_ours ) : ?>
+								<p><button type="submit" form="perdita-cache-wpc-remove" class="button button-secondary"><?php esc_html_e( 'Remove the line Perdita added', 'perdita-core' ); ?></button></p>
 							<?php endif; ?>
 						</td>
 					</tr>
@@ -562,6 +666,51 @@ class Perdita_Caching_Admin {
 							<p class="description"><?php esc_html_e( 'Turn this on only when phones get different HTML from your theme or a plugin. With a responsive theme, everyone gets the same page, and you need one copy. Any device that WordPress calls mobile gets the phone copy, including Android tablets and Kindles. iPads get the desktop copy.', 'perdita-core' ); ?></p>
 						</td>
 					</tr>
+				</table>
+
+				<h2 class="perdita-cache-section"><?php esc_html_e( 'Edge and server cache', 'perdita-core' ); ?></h2>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><label for="perdita-cache-edge"><?php esc_html_e( 'Cache at the edge for', 'perdita-core' ); ?></label></th>
+						<td>
+							<select id="perdita-cache-edge" name="edge_max_age">
+								<?php foreach ( $edge_ages as $edge_value => $edge_label ) : ?>
+									<option value="<?php echo esc_attr( (string) $edge_value ); ?>" <?php selected( (int) $s['edge_max_age'], (int) $edge_value ); ?>><?php echo esc_html( $edge_label ); ?></option>
+								<?php endforeach; ?>
+							</select>
+							<p class="description"><?php esc_html_e( 'Perdita adds s-maxage to stored anonymous pages, so a CDN such as Cloudflare can keep them. Signed-in, cart, and other personal pages always go out private, no-store.', 'perdita-core' ); ?></p>
+							<?php if ( $s['mobile_cache'] ) : ?>
+								<p class="description"><strong><?php esc_html_e( 'Perdita sends no s-maxage while the separate phone copy is on.', 'perdita-core' ); ?></strong></p>
+							<?php endif; ?>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="perdita-cache-edge-rule"><?php esc_html_e( 'Cloudflare without Pro', 'perdita-core' ); ?></label></th>
+						<td>
+							<?php if ( true === $edge_ok ) : ?>
+								<p class="description"><?php esc_html_e( 'Cloudflare keeps HTML only under a Cache Rule. Enter these settings in your Cloudflare dashboard.', 'perdita-core' ); ?></p>
+								<textarea id="perdita-cache-edge-rule" readonly rows="9" class="large-text code"><?php echo esc_textarea( Perdita_Caching_Edge::dashboard_text() ); ?></textarea>
+							<?php else : ?>
+								<p id="perdita-cache-edge-rule"><?php echo esc_html( $edge_ok->get_error_message() ); ?></p>
+							<?php endif; ?>
+							<p class="description"><?php esc_html_e( 'Perdita Pro can install and check the rule for you.', 'perdita-core' ); ?></p>
+						</td>
+					</tr>
+					<?php if ( $litespeed ) : ?>
+						<tr>
+							<th scope="row"><?php esc_html_e( 'LiteSpeed cache', 'perdita-core' ); ?></th>
+							<td>
+								<label>
+									<input type="checkbox" name="litespeed" value="1" <?php checked( $s['litespeed'] ); ?> />
+									<?php esc_html_e( 'Hand stored pages to LiteSpeed\'s own cache', 'perdita-core' ); ?>
+								</label>
+								<p class="description"><?php esc_html_e( 'LiteSpeed serves the page before PHP runs and skips signed-in visitors. When you save, Perdita adds its rules to .htaccess and checks that the cache answers. It stays off while the separate phone copy is on. If the LiteSpeed Cache plugin is active, that plugin takes over instead.', 'perdita-core' ); ?></p>
+								<?php if ( is_array( $ls_state ) && ! empty( $ls_state['message'] ) ) : ?>
+									<p class="description"><strong><?php echo esc_html( $ls_state['message'] ); ?></strong></p>
+								<?php endif; ?>
+							</td>
+						</tr>
+					<?php endif; ?>
 				</table>
 
 				<h2 class="perdita-cache-section"><?php esc_html_e( 'Who skips the cache', 'perdita-core' ); ?></h2>
@@ -701,6 +850,42 @@ class Perdita_Caching_Admin {
 
 				<?php submit_button( __( 'Save changes', 'perdita-core' ) ); ?>
 			</form>
+
+			<form id="perdita-cache-wpc-add" method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+				<input type="hidden" name="action" value="perdita_caching_wp_cache_add" />
+				<?php wp_nonce_field( 'perdita_caching_wp_cache_add', '_wpnonce', false ); ?>
+			</form>
+			<form id="perdita-cache-wpc-remove" method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+				<input type="hidden" name="action" value="perdita_caching_wp_cache_remove" />
+				<?php wp_nonce_field( 'perdita_caching_wp_cache_remove', '_wpnonce', false ); ?>
+			</form>
+
+			<?php if ( $no_apache ) : ?>
+				<div class="card perdita-cache-card">
+					<h2 class="perdita-cache-card-title"><?php esc_html_e( 'Cache folder', 'perdita-core' ); ?></h2>
+					<p><?php esc_html_e( 'This server ignores the .htaccess guard on the cache folder. Check that visitors can\'t download your cached pages.', 'perdita-core' ); ?></p>
+					<?php if ( 'exposed' === $probe['state'] ) : ?>
+						<div class="notice notice-error inline perdita-cache-narrow">
+							<p><?php esc_html_e( 'Visitors can download cached pages from your cache folder, including the signed-in copies Perdita Pro stores. Add this rule inside your server block, then reload nginx, and check again.', 'perdita-core' ); ?></p>
+						</div>
+						<?php
+						$snippet = Perdita_Caching::nginx_snippet();
+						$at      = strpos( $snippet, 'location ^~' );
+						$rule    = false === $at ? $snippet : substr( $snippet, $at );
+						?>
+						<textarea readonly rows="4" class="large-text code" aria-label="<?php esc_attr_e( 'nginx rule for the cache folder', 'perdita-core' ); ?>"><?php echo esc_textarea( $rule ); ?></textarea>
+					<?php elseif ( 'safe' === $probe['state'] ) : ?>
+						<p><strong><?php esc_html_e( 'Visitors can\'t download files from your cache folder.', 'perdita-core' ); ?></strong></p>
+					<?php elseif ( ! empty( $probe['time'] ) ) : ?>
+						<p><?php esc_html_e( 'We couldn\'t check the cache folder. Try again, or request a cached file by hand.', 'perdita-core' ); ?></p>
+					<?php endif; ?>
+					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="perdita-cache-flush">
+						<input type="hidden" name="action" value="perdita_caching_probe" />
+						<?php wp_nonce_field( 'perdita_caching_probe' ); ?>
+						<?php submit_button( __( 'Check the cache folder', 'perdita-core' ), 'secondary', 'submit', false ); ?>
+					</form>
+				</div>
+			<?php endif; ?>
 
 			<div class="card perdita-cache-card">
 				<h2 class="perdita-cache-card-title"><?php esc_html_e( 'Cached pages', 'perdita-core' ); ?></h2>
