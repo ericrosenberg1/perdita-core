@@ -19,7 +19,7 @@ class Perdita_Switch_Catalog {
 	/**
 	 * Where someone without Pro reads about it.
 	 */
-	const PRO_URL = 'https://perdita.ericrosenberg.com/';
+	const PRO_URL = 'https://perdita.app/';
 
 	/**
 	 * The Pro module groups, for the screen's headings.

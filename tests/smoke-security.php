@@ -279,7 +279,7 @@ if ( ! file_exists( PERDITA_CORE_DIR . 'inc/class-perdita-core-updater.php' ) ) 
 	$psx_unhook( $psx_updater );
 
 	$psx_orig_manifest = get_transient( Perdita_Core_Updater::CACHE );
-	$psx_pkg           = 'https://perdita.ericrosenberg.com/updates/perdita-core-99.9.9-smoke.zip';
+	$psx_pkg           = 'https://perdita.app/updates/perdita-core-99.9.9-smoke.zip';
 	$psx_pkg_bytes     = 'perdita-core-smoke-package-bytes';
 	$psx_good_sum      = hash( 'sha256', $psx_pkg_bytes );
 	$psx_bad_sum       = str_repeat( 'a', 64 );
@@ -331,7 +331,7 @@ if ( ! file_exists( PERDITA_CORE_DIR . 'inc/class-perdita-core-updater.php' ) ) 
 
 	// A package that is not ours falls straight through to core.
 	$ok( false === $psx_updater->verify_download( false, 'https://example.com/some-other-plugin.zip', null ), 'updater: verify_download() ignores another plugin or theme package in the same request' );
-	$ok( false === $psx_updater->verify_download( false, 'https://perdita.ericrosenberg.com/updates/perdita-99.9.9.zip', null ), 'updater: the theme\'s zip on the same host is left to the theme\'s updater' );
+	$ok( false === $psx_updater->verify_download( false, 'https://perdita.app/updates/perdita-99.9.9.zip', null ), 'updater: the theme\'s zip on the same host is left to the theme\'s updater' );
 
 	// A manifest pointing off-host is not our package, however it is signed,
 	// and our own zip cannot be installed against it either.
@@ -407,7 +407,7 @@ if ( ! file_exists( PERDITA_CORE_DIR . 'inc/class-perdita-core-updater.php' ) ) 
 	$ok( is_string( $psx_rk ) && SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES === strlen( $psx_rk ), 'updater: SIGNING_KEY is a 32-byte Ed25519 public key' );
 
 	// One of our zips that the manifest no longer names is refused.
-	$psx_old = $psx_updater->verify_download( false, 'https://perdita.ericrosenberg.com/updates/perdita-core-99.9.8.zip', null );
+	$psx_old = $psx_updater->verify_download( false, 'https://perdita.app/updates/perdita-core-99.9.8.zip', null );
 	$ok( is_wp_error( $psx_old ) && 'perdita_core_package_superseded' === $psx_old->get_error_code(), 'updater: a stale offer for an older Core zip is refused, not installed unverified' );
 
 	// The matching digest under a valid signature returns the file to install.
@@ -472,7 +472,28 @@ if ( ! file_exists( PERDITA_CORE_DIR . 'inc/class-perdita-core-updater.php' ) ) 
 	$psx_offered = $psx_updater->check( clone $psx_wporg );
 	$ok( empty( $psx_offered->response[ $psx_base ] ), 'updater: a wordpress.org offer for this plugin is dropped when our manifest is unreachable' );
 	$psx_hdr = get_file_data( PERDITA_CORE_FILE, array( 'uri' => 'Update URI' ) );
-	$ok( 'https://perdita.ericrosenberg.com/updates/perdita-core.json' === $psx_hdr['uri'], 'updater: the plugin header names the self-hosted channel in Update URI' );
+	$ok( 'https://perdita.app/updates/perdita-core.json' === $psx_hdr['uri'], 'updater: the plugin header names the self-hosted channel in Update URI' );
+
+	// The move from perdita.ericrosenberg.com to perdita.app. This build pins packages to perdita.app.
+	// Installs that have not updated pin to the old host through their own MANIFEST constant.
+	$psx_old_pkg = 'https://perdita.ericrosenberg.com/updates/perdita-core-99.9.9-smoke.zip';
+	$psx_blank   = (object) array( 'checked' => array( $psx_base => '0.0.1' ), 'response' => array(), 'no_update' => array() );
+	$psx_new_manifest = array( 'version' => '99.9.9', 'download_url' => $psx_pkg, 'checksum' => $psx_good_sum, 'signature' => $psx_sign( '99.9.9', $psx_good_sum ) );
+	$psx_set( array_merge( $psx_new_manifest, array( 'download_url' => $psx_old_pkg ) ) );
+	$psx_manifest_http = function ( $pre, $args, $url ) use ( $psx_new_manifest ) {
+		if ( Perdita_Core_Updater::MANIFEST !== $url ) {
+			return $pre;
+		}
+		return array( 'headers' => array(), 'body' => wp_json_encode( $psx_new_manifest ), 'response' => array( 'code' => 200, 'message' => 'OK' ), 'cookies' => array() );
+	};
+	add_filter( 'pre_http_request', $psx_manifest_http, 5, 3 );
+	$psx_offered = $psx_updater->check( clone $psx_blank );
+	$ok( isset( $psx_offered->response[ $psx_base ] ) && $psx_pkg === $psx_offered->response[ $psx_base ]->package, 'move: a manifest cached by an older build (old host) is dropped and the update is offered from perdita.app' );
+	remove_filter( 'pre_http_request', $psx_manifest_http, 5 );
+	$psx_set( array_merge( $psx_new_manifest, array( 'download_url' => 'https://evil.example/perdita-core-99.9.9.zip' ) ) );
+	$psx_offered = $psx_updater->check( clone $psx_blank );
+	$ok( empty( $psx_offered->response[ $psx_base ] ) && 'https://evil.example/perdita-core-99.9.9.zip' === get_transient( Perdita_Core_Updater::CACHE )['download_url'], 'move: a manifest naming any other host is still refused by the pin, and is not refetched' );
+	$ok( false === $psx_updater->verify_download( false, $psx_old_pkg, null ), 'move: this build does not treat a package on the old host as ours (an old install pins to the old host itself)' );
 
 	// Background auto-updates follow the owner's Plugins-screen setting, so
 	// the Plugins screen is never told the setting is forced (0.19.7-beta).

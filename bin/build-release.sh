@@ -45,7 +45,7 @@ done
 [ -n "$out_dir" ] || out_dir="$repo_root/dist"
 
 slug="perdita-core"
-update_host="perdita.ericrosenberg.com"
+update_host="perdita.app"
 
 # Paths that are development-only and must not reach a user's site.
 EXCLUDE_TOP=(
@@ -257,7 +257,7 @@ for pattern, replacement in swaps:
         sys.exit('readme passage not found: ' + pattern)
 open(path, 'w', encoding='utf-8').write(text)
 PY
-	! grep -q 'perdita.ericrosenberg.com' "$work/$slug/readme.txt" || die "--wporg: readme.txt still points at the self-hosted update host"
+	! grep -q 'perdita.app' "$work/$slug/readme.txt" || die "--wporg: readme.txt still points at the self-hosted update host"
 	ok "--wporg: readme says the directory build makes no outbound request of its own"
 	# Every remaining reference to the class must sit next to a file_exists()
 	# guard, or a directory install would fatal on the first admin page.

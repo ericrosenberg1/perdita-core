@@ -2,7 +2,7 @@
 /**
  * Self-hosted plugin updates.
  *
- * Perdita Core is distributed from perdita.ericrosenberg.com as well as (in
+ * Perdita Core is distributed from perdita.app as well as (in
  * time) wordpress.org, so it checks a manifest hosted alongside the zip and
  * feeds WordPress the same update data the directory would. Live sites then
  * see the update on the Updates screen and can install it in one click.
@@ -10,10 +10,10 @@
  * Manifest (JSON) shape, served over HTTPS:
  *   {
  *     "name": "Perdita Core", "version": "1.0.0-alpha",
- *     "download_url": "https://perdita.ericrosenberg.com/updates/perdita-core-1.0.0-alpha.zip",
+ *     "download_url": "https://perdita.app/updates/perdita-core-1.0.0-alpha.zip",
  *     "checksum": "sha256 hex digest of the zip, e.g. from `shasum -a 256`",
  *     "requires": "6.4", "requires_php": "8.0", "tested": "7.1",
- *     "url": "https://perdita.ericrosenberg.com", "last_updated": "2026-09-03"
+ *     "url": "https://perdita.app", "last_updated": "2026-09-03"
  *   }
  *
  * "download_url" must name a VERSIONED artifact, never a mutable filename
@@ -50,7 +50,7 @@ defined( 'ABSPATH' ) || exit;
 
 class Perdita_Core_Updater {
 
-	const MANIFEST = 'https://perdita.ericrosenberg.com/updates/perdita-core.json';
+	const MANIFEST = 'https://perdita.app/updates/perdita-core.json';
 	const CACHE    = 'perdita_core_update_manifest';
 
 	/**
@@ -116,6 +116,16 @@ class Perdita_Core_Updater {
 	 */
 	private function manifest() {
 		$cached = get_transient( self::CACHE );
+		// A manifest cached by a build from before perdita.app names the old
+		// host, which the pin refuses, so the update would stay hidden until
+		// the cache expires. Only that exact retired host counts: a manifest
+		// naming any other host stays cached and refused by the pin.
+		if ( is_array( $cached ) && ! empty( $cached['download_url'] ) && is_string( $cached['download_url'] )
+			&& 'perdita.ericrosenberg.com' === wp_parse_url( $cached['download_url'], PHP_URL_HOST )
+			&& wp_parse_url( self::MANIFEST, PHP_URL_HOST ) !== 'perdita.ericrosenberg.com' ) {
+			delete_transient( self::CACHE );
+			$cached = false;
+		}
 		if ( false !== $cached ) {
 			return is_array( $cached ) ? $cached : array();
 		}
@@ -143,7 +153,7 @@ class Perdita_Core_Updater {
 			'slug'         => $this->slug,
 			'plugin'       => $this->basename,
 			'new_version'  => $m['version'],
-			'url'          => isset( $m['url'] ) ? $m['url'] : 'https://perdita.ericrosenberg.com',
+			'url'          => isset( $m['url'] ) ? $m['url'] : 'https://perdita.app',
 			'package'      => $m['download_url'],
 			'requires'     => isset( $m['requires'] ) ? $m['requires'] : '',
 			'requires_php' => isset( $m['requires_php'] ) ? $m['requires_php'] : '',
@@ -240,7 +250,7 @@ class Perdita_Core_Updater {
 			'slug'          => $this->slug,
 			'version'       => $m['version'],
 			'author'        => '<a href="https://ericrosenberg.com">Eric Rosenberg</a>',
-			'homepage'      => isset( $m['url'] ) ? $m['url'] : 'https://perdita.ericrosenberg.com',
+			'homepage'      => isset( $m['url'] ) ? $m['url'] : 'https://perdita.app',
 			'requires'      => isset( $m['requires'] ) ? $m['requires'] : '',
 			'requires_php'  => isset( $m['requires_php'] ) ? $m['requires_php'] : '',
 			'tested'        => isset( $m['tested'] ) ? $m['tested'] : '',
@@ -509,7 +519,7 @@ class Perdita_Core_Updater {
 			if ( self::is_our_package( $package ) ) {
 				return new WP_Error(
 					'perdita_core_signature_invalid',
-					__( 'The Perdita Core update is not signed with the Perdita release key, so it was not installed. Please try again later. If it keeps happening, check perdita.ericrosenberg.com directly before updating.', 'perdita-core' )
+					__( 'The Perdita Core update is not signed with the Perdita release key, so it was not installed. Please try again later. If it keeps happening, check perdita.app directly before updating.', 'perdita-core' )
 				);
 			}
 			return $reply;
@@ -536,7 +546,7 @@ class Perdita_Core_Updater {
 		if ( ! static::manifest_is_signed( $m ) ) {
 			return new WP_Error(
 				'perdita_core_signature_invalid',
-				__( 'The Perdita Core update is not signed with the Perdita release key, so it was not installed. Please try again later. If it keeps happening, check perdita.ericrosenberg.com directly before updating.', 'perdita-core' )
+				__( 'The Perdita Core update is not signed with the Perdita release key, so it was not installed. Please try again later. If it keeps happening, check perdita.app directly before updating.', 'perdita-core' )
 			);
 		}
 
@@ -552,7 +562,7 @@ class Perdita_Core_Updater {
 			wp_delete_file( $tmp );
 			return new WP_Error(
 				'perdita_core_checksum_mismatch',
-				__( 'The Perdita Core update package failed checksum verification and was not installed. This can mean the download was corrupted, or that the update server or connection was tampered with. Please try again later. If it keeps happening, check perdita.ericrosenberg.com directly before updating.', 'perdita-core' )
+				__( 'The Perdita Core update package failed checksum verification and was not installed. This can mean the download was corrupted, or that the update server or connection was tampered with. Please try again later. If it keeps happening, check perdita.app directly before updating.', 'perdita-core' )
 			);
 		}
 		return $tmp;

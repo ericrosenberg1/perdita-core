@@ -60,7 +60,7 @@ Yes. The plugin reads the theme's design token document, its encryption helper, 
 
 = Does it phone home? =
 
-Only for update checks, and only from wp-admin, cron, or WP-CLI. The plugin asks perdita.ericrosenberg.com for a small JSON file listing the current version, and verifies the sha256 checksum of any package before WordPress installs it. That check is the only outbound request the plugin makes on its own.
+Only for update checks, and only from wp-admin, cron, or WP-CLI. The plugin asks perdita.app for a small JSON file listing the current version, and verifies the sha256 checksum of any package before WordPress installs it. That check is the only outbound request the plugin makes on its own.
 
 Everything else that touches an outside service is a module you have to turn on and configure with your own credentials: Google Analytics, Google PageSpeed Insights, Google Search Console, your SMTP server, Stripe, and the AI provider you connected in the theme. None of them run until you set them up. See the Privacy section for the full list.
 
@@ -264,7 +264,7 @@ Yes, that's what Pro is built on. Pro registers its own modules into this plugin
 
 This plugin makes no outbound request on its own except the update check described below. Every other service listed here belongs to a module that's off until you turn it on and enter your own credentials.
 
-* **Update check (always on).** A request to perdita.ericrosenberg.com for a JSON manifest, from wp-admin, cron, or WP-CLI only. It sends no site data, no domain, and no identifier. Remove `inc/class-perdita-core-updater.php` to switch it off entirely.
+* **Update check (always on).** A request to perdita.app for a JSON manifest, from wp-admin, cron, or WP-CLI only. It sends no site data, no domain, and no identifier. Remove `inc/class-perdita-core-updater.php` to switch it off entirely.
 * **Google Analytics (analytics module).** Loads Google's gtag script with Google Consent Mode, only when you enter a measurement ID. In opt-in mode (the default), analytics cookies stay off until a visitor accepts the consent banner, and before that Google receives only cookieless pings. In opt-out mode they're on until a visitor opts out. Global Privacy Control, and Do Not Track when the site respects it, keep them off in both modes. Ad signals stay off unless you turn them on. The visitor's choice is stored in a first-party `perdita_consent` cookie for a year. Off by default.
 * **Google PageSpeed Insights (pagespeed module).** Sends your own public page URLs to Google's API from wp-admin, using your API key. No visitor data.
 * **Google Search Console (search-console module).** Connects to Google with an OAuth app you create in your own Google Cloud account, and reads your own site's search performance. No shared credentials, and nothing is sent to us.
