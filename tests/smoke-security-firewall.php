@@ -899,6 +899,67 @@ if ( function_exists( 'apcu_enabled' ) && apcu_enabled() ) {
 } else {
 	$ok( 'allow' === $pfw_v['action'] && in_array( 'rate_limits_skipped_no_apcu', $pfw_v['notes'], true ), 'firewall Pro: without APCu the rate limits skip and the verdict says so' );
 }
+// Pro's engine requests: the auto-block file, login paths, the Geo class
+// file, rate limits after trust, and the last verdict.
+$pfw_fwdir = $pfw_cfg['fw_dir'];
+wp_mkdir_p( $pfw_fwdir );
+$ok( WP_CONTENT_DIR === $pfw_cfg['content_dir'] && Perdita_Firewall_Config::dir() === $pfw_fwdir, 'firewall Pro: the config carries content_dir and fw_dir' );
+file_put_contents( $pfw_fwdir . 'blocked.php', '<?php return array( "203.0.113.77" => ' . ( time() + 600 ) . ', "203.0.113.78" => ' . ( time() - 5 ) . ' );' );
+$pfw_bcfg                 = $pfw_cfg;
+$pfw_bcfg['blocked_file'] = $pfw_fwdir . 'blocked.php';
+$ok( 'ip-002' === $pfw_run( array( 'config' => $pfw_bcfg, 'server' => array( 'REMOTE_ADDR' => '203.0.113.77' ) ) )['rule'], 'firewall Pro: an address in blocked_file blocks as ip-002' );
+$ok( 'allow' === $pfw_run( array( 'config' => $pfw_bcfg, 'server' => array( 'REMOTE_ADDR' => '203.0.113.78' ) ) )['action'], 'firewall Pro: an expired blocked_file entry no longer blocks, with no recompile' );
+$ok( 'ip-002' === $pfw_run( array( 'config' => $pfw_bcfg, 'server' => array( 'REMOTE_ADDR' => '203.0.113.77' ), 'cookie' => $pfw_trust ) )['rule'], 'firewall Pro: the trust cookie never skips blocked_file' );
+$ok( 'allowlist' === $pfw_run( array( 'config' => array_merge( $pfw_bcfg, array( 'allowlist' => Perdita_Firewall::parse_ranges( array( '203.0.113.77' ) ) ) ), 'server' => array( 'REMOTE_ADDR' => '203.0.113.77' ) ) )['reason'], 'firewall Pro: the allowlist wins over blocked_file' );
+$pfw_outside = $pfw_tmp . 'blocked-outside.php';
+file_put_contents( $pfw_outside, '<?php return array( "203.0.113.77" => ' . ( time() + 600 ) . ' );' );
+$pfw_bcfg['blocked_file'] = $pfw_outside;
+$ok( 'allow' === $pfw_run( array( 'config' => $pfw_bcfg, 'server' => array( 'REMOTE_ADDR' => '203.0.113.77' ) ) )['action'] && '' === Perdita_Firewall::safe_file( $pfw_cfg, $pfw_outside ), 'firewall Pro: the engine never includes a blocked_file outside wp-content and the firewall folder' );
+$ok( null === Perdita_Firewall_Config::exclusion_for_entry( array( 'rule' => 'ip-002', 'uri' => '/' ) ), 'firewall Pro: an auto-block offers no Allow button' );
+
+$pfw_lcfg                = $pfw_cfg;
+$pfw_lcfg['login_paths'] = array( 'my-login', '/Team-Door/' );
+$ok( Perdita_Firewall::is_login_path( $pfw_lcfg, '/my-login' ) && Perdita_Firewall::is_login_path( $pfw_lcfg, '/team-door/x' ) && Perdita_Firewall::is_login_path( $pfw_lcfg, '/blog/wp-login.php' ), 'firewall Pro: login_paths count as login beside wp-login.php' );
+$ok( ! Perdita_Firewall::is_login_path( $pfw_lcfg, '/my-login-page' ) && ! Perdita_Firewall::is_login_path( $pfw_cfg, '/my-login' ), 'firewall Pro: login_paths match on a segment, and nothing else counts without them' );
+$pfw_lcfg['country'] = array( 'mode' => 'block', 'countries' => array( 'KP' ), 'scope' => 'login', 'trust_server' => true );
+$ok( 'country-001' === $pfw_run( array( 'config' => $pfw_lcfg, 'uri' => '/my-login', 'server' => array( 'GEOIP_COUNTRY_CODE' => 'KP' ) ) )['rule'], 'firewall Pro: the country login scope covers a hidden login address' );
+$ok( 'allow' === $pfw_run( array( 'config' => $pfw_lcfg, 'uri' => '/shop/', 'server' => array( 'GEOIP_COUNTRY_CODE' => 'KP' ) ) )['action'], 'firewall Pro: the country login scope leaves other pages alone' );
+
+if ( ! class_exists( 'Perdita_Firewall_Geo', false ) ) {
+	file_put_contents( $pfw_fwdir . 'geo-test.php', '<?php class Perdita_Firewall_Geo { public static function lookup( $ip, $config ) { return "203.0.113.9" === $ip && ! empty( $config["geo"]["file"] ) ? "kp" : ""; } }' );
+	$pfw_gcfg            = $pfw_cfg;
+	$pfw_gcfg['geo']     = array( 'class_file' => $pfw_fwdir . 'geo-test.php', 'file' => 'x.mmdb' );
+	$pfw_gcfg['country'] = array( 'mode' => 'block', 'countries' => array( 'KP' ), 'scope' => 'site', 'trust_server' => false );
+	$ok( 'KP' === Perdita_Firewall::country_code( $pfw_gcfg, array( 'REMOTE_ADDR' => '203.0.113.9' ), '203.0.113.9' ), 'firewall Pro: country_code() loads the Geo class from geo.class_file in the firewall folder' );
+	$ok( 'country-001' === $pfw_run( array( 'config' => $pfw_gcfg, 'server' => array( 'REMOTE_ADDR' => '203.0.113.9' ) ) )['rule'], 'firewall Pro: a Geo lookup feeds the country rule' );
+} else {
+	echo "SKIP  firewall Pro: Geo class already loaded, so the class_file include check is skipped\n";
+}
+$ok( '' === Perdita_Firewall::safe_file( $pfw_cfg, '/etc/hosts' ) && '' === Perdita_Firewall::safe_file( $pfw_cfg, $pfw_tmp . 'nope.php' ) && '' !== Perdita_Firewall::safe_file( $pfw_cfg, $pfw_fwdir . 'blocked.php' ), 'firewall Pro: safe_file() takes only an existing .php file under wp-content or the firewall folder' );
+
+$pfw_rcfg                = $pfw_cfg;
+$pfw_rcfg['rate_limits'] = array( array( 'route' => 'any', 'limit' => 1, 'action' => 'block', 'block_minutes' => 1 ) );
+$pfw_rsrv                = array( 'REMOTE_ADDR' => '203.0.113.' . wp_rand( 100, 199 ) );
+if ( function_exists( 'apcu_enabled' ) && apcu_enabled() ) {
+	$pfw_run( array( 'config' => $pfw_rcfg, 'server' => $pfw_rsrv ) );
+	$ok( 'rate_limit' === $pfw_run( array( 'config' => $pfw_rcfg, 'server' => $pfw_rsrv ) )['category'], 'firewall Pro: a visitor over the rate limit blocks' );
+	$ok( 'allow' === $pfw_run( array( 'config' => $pfw_rcfg, 'server' => $pfw_rsrv, 'cookie' => $pfw_trust ) )['action'], 'firewall Pro: a verified trust cookie skips the rate limits' );
+} else {
+	$ok( in_array( 'rate_limits_skipped_no_apcu', $pfw_run( array( 'config' => $pfw_rcfg ) )['notes'], true ) && ! in_array( 'rate_limits_skipped_no_apcu', $pfw_run( array( 'config' => $pfw_rcfg, 'cookie' => $pfw_trust ) )['notes'], true ), 'firewall Pro: a verified trust cookie skips the rate limits before they run' );
+}
+
+$pfw_mv = $pfw_run( array( 'config' => $pfw_monitor, 'get' => array( 'id' => "1' OR '1'='1" ) ) );
+Perdita_Firewall::defer( $pfw_cfg, $pfw_mv, $pfw_server() );
+$pfw_settled = Perdita_Firewall::resolve_pending( true );
+$ok( $pfw_settled === Perdita_Firewall::last_verdict() && 'trusted_user' === Perdita_Firewall::last_verdict()['reason'], 'firewall Pro: last_verdict() returns the settled verdict' );
+remove_action( 'init', array( 'Perdita_Firewall', 'settle' ), Perdita_Firewall::SETTLE_PRIORITY );
+$ok( false !== strpos( $pfw_engine_src, 'self::$last = $verdict;' ), 'firewall Pro: boot() records each request\'s verdict for last_verdict()' );
+foreach ( array( 'blocked.php', 'geo-test.php' ) as $pfw_name ) {
+	if ( is_file( $pfw_fwdir . $pfw_name ) ) {
+		unlink( $pfw_fwdir . $pfw_name );
+	}
+}
+
 $pfw_empty = $pfw_cfg;
 foreach ( array( 'blocklist', 'custom_rules', 'country', 'rate_limits' ) as $pfw_sec ) {
 	unset( $pfw_empty[ $pfw_sec ] );

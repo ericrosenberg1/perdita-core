@@ -65,7 +65,17 @@
  *                     'rest' | 'wc-ajax' | 'any' | '404', 'limit' => per minute,
  *                     'action' => 'block'|'throttle', 'block_minutes' => int ).
  *                     Needs APCu. Without it the engine skips them and says so
- *                     in the verdict notes. '404' is left to WordPress.
+ *                     in the verdict notes. '404' is left to WordPress. A
+ *                     verified trust cookie skips them.
+ *   'blocked_file' => path to a PHP file returning array( ip => expiry unix time ),
+ *                     under wp-content or the firewall folder. A listed
+ *                     address blocks as ip-002 until its expiry.
+ *   'login_paths'  => list of path prefixes that count as login, beside
+ *                     wp-login.php, for the country 'login' scope and the
+ *                     'login' rate route (a hidden login address).
+ *   'geo'          => array( 'class_file' => path to the Perdita_Firewall_Geo
+ *                     class file, under wp-content or the firewall folder,
+ *                     plus the lookup settings Pro passes to lookup() ).
  *   'custom_rules' => list of array( 'id' => string, 'field' => 'uri'|'query'|
  *                     'post'|'cookie'|'header:<name>'|'user_agent'|'method'|'ip',
  *                     'op' => 'contains'|'equals'|'starts'|'regex', 'value' => string,
@@ -211,6 +221,14 @@ class Perdita_Firewall {
 	 * @var array|null
 	 */
 	private static $pending = null;
+
+	/**
+	 * The verdict boot() reached for this request (updated when init settles
+	 * a deferred one), or null.
+	 *
+	 * @var array|null
+	 */
+	private static $last = null;
 
 	/* ---------- rules ---------- */
 
@@ -373,7 +391,8 @@ class Perdita_Firewall {
 			$raw = @file_get_contents( 'php://input' ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- runs before WordPress.
 			return is_string( $raw ) ? $raw : '';
 		};
-		$verdict = self::run( $config, $server, $_GET, $_POST, $_COOKIE, $_FILES, $body_fn ); // phpcs:ignore WordPress.Security.NonceVerification -- a firewall reads every request.
+		$verdict    = self::run( $config, $server, $_GET, $_POST, $_COOKIE, $_FILES, $body_fn ); // phpcs:ignore WordPress.Security.NonceVerification -- a firewall reads every request.
+		self::$last = $verdict;
 		if ( self::should_defer( $verdict, $config, $_COOKIE, $server, $loader ) ) {
 			self::defer( $config, $verdict, $server );
 			return $verdict;
@@ -512,10 +531,23 @@ class Perdita_Firewall {
 			$verdict['action']  = 'allow';
 			$verdict['reason']  = 'trusted_user';
 			$verdict['trusted'] = true;
+			self::$last         = $verdict;
 			return $verdict;
 		}
 		self::log( $config, $verdict, $pending['server'] );
+		self::$last = $verdict;
 		return $verdict;
+	}
+
+	/**
+	 * The verdict boot() reached for this request, for Perdita Pro's traffic
+	 * log: monitor-mode matches, custom 'log' rules, and a deferred verdict
+	 * once init settles it. null when the engine didn't run.
+	 *
+	 * @return array|null
+	 */
+	public static function last_verdict() {
+		return self::$last;
 	}
 
 	/**
@@ -592,10 +624,19 @@ class Perdita_Firewall {
 		$npath = self::normalize( $path );
 		$rules = isset( $config['rules'] ) && is_array( $config['rules'] ) ? $config['rules'] : array();
 
-		// 2. Pro: IP blocklist. Blocks trusted visitors too.
+		// 2. Pro: IP blocklist, then the auto-block file. Both block trusted
+		// visitors too.
 		if ( ! empty( $config['blocklist'] ) && '' !== $ip && self::ip_in( $ip, $config['blocklist'] ) ) {
 			return self::hit( $verdict, $block_action, 'ip-001', 'ip_blocklist', 'ip', $ip, 403 );
 		}
+		if ( ! empty( $config['blocked_file'] ) && '' !== $ip && self::auto_blocked( $config, $ip ) ) {
+			return self::hit( $verdict, $block_action, 'ip-002', 'ip_blocklist', 'ip', $ip, 403 );
+		}
+
+		// A trust cookie that verifies skips the rate limits here and the
+		// content rules at step 10. The blocklist, country, and custom rules
+		// still apply.
+		$trusted = isset( $cookie[ self::TRUST_COOKIE ] ) && ! empty( $config['key'] ) && false !== self::verify_trust( (string) $cookie[ self::TRUST_COOKIE ], (string) $config['key'], null, self::session_tokens( $cookie ) );
 
 		// 3. Pro: country rules.
 		if ( ! empty( $config['country'] ) && is_array( $config['country'] ) ) {
@@ -605,9 +646,9 @@ class Perdita_Firewall {
 			}
 		}
 
-		// 4. Pro: rate limits.
-		if ( ! empty( $config['rate_limits'] ) && is_array( $config['rate_limits'] ) ) {
-			$r = self::check_rate_limits( $config['rate_limits'], $server, $get, $ip, $npath, $verdict );
+		// 4. Pro: rate limits, skipped for a trusted visitor.
+		if ( ! $trusted && ! empty( $config['rate_limits'] ) && is_array( $config['rate_limits'] ) ) {
+			$r = self::check_rate_limits( $config, $server, $get, $ip, $npath, $verdict );
 			if ( null !== $r ) {
 				return $r;
 			}
@@ -651,7 +692,7 @@ class Perdita_Firewall {
 		}
 
 		// 10. A verified trust cookie skips the content rules.
-		if ( isset( $cookie[ self::TRUST_COOKIE ] ) && ! empty( $config['key'] ) && false !== self::verify_trust( (string) $cookie[ self::TRUST_COOKIE ], (string) $config['key'], null, self::session_tokens( $cookie ) ) ) {
+		if ( $trusted ) {
 			$verdict['trusted'] = true;
 			$verdict['reason']  = 'trusted';
 			return $verdict;
@@ -1467,8 +1508,14 @@ class Perdita_Firewall {
 				}
 			}
 		}
-		$geo = __DIR__ . '/class-perdita-firewall-geo.php';
-		if ( '' !== (string) $ip && is_file( $geo ) ) {
+		$geo = '';
+		if ( ! empty( $config['geo']['class_file'] ) ) {
+			$geo = self::safe_file( $config, (string) $config['geo']['class_file'] );
+		}
+		if ( '' === $geo && is_file( __DIR__ . '/class-perdita-firewall-geo.php' ) ) {
+			$geo = __DIR__ . '/class-perdita-firewall-geo.php';
+		}
+		if ( '' !== (string) $ip && '' !== $geo ) {
 			include_once $geo;
 			if ( class_exists( 'Perdita_Firewall_Geo', false ) && is_callable( array( 'Perdita_Firewall_Geo', 'lookup' ) ) ) {
 				$cc = strtoupper( (string) call_user_func( array( 'Perdita_Firewall_Geo', 'lookup' ), (string) $ip, $config ) );
@@ -1478,6 +1525,80 @@ class Perdita_Firewall {
 			}
 		}
 		return '';
+	}
+
+	/**
+	 * Whether a path is a login screen: wp-login.php, or a path under one of
+	 * $config['login_paths'] (Perdita Pro's hidden login address), matched on
+	 * a segment boundary.
+	 *
+	 * @param array  $config Config.
+	 * @param string $npath  Normalized path.
+	 * @return bool
+	 */
+	public static function is_login_path( array $config, $npath ) {
+		if ( '/wp-login.php' === substr( (string) $npath, -13 ) ) {
+			return true;
+		}
+		if ( empty( $config['login_paths'] ) || ! is_array( $config['login_paths'] ) ) {
+			return false;
+		}
+		foreach ( $config['login_paths'] as $prefix ) {
+			$prefix = self::exclusion_path( (string) $prefix );
+			if ( '/' !== $prefix && self::path_covers( $prefix, $npath ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * A file Perdita Pro asks the engine to include, resolved, only when it
+	 * sits under wp-content or the firewall folder.
+	 *
+	 * @param array  $config Config (content_dir and fw_dir).
+	 * @param string $file   Path.
+	 * @return string The real path, or '' when it's missing or outside both.
+	 */
+	public static function safe_file( array $config, $file ) {
+		$real = @realpath( (string) $file ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- runs before WordPress.
+		if ( false === $real || ! is_file( $real ) || '.php' !== strtolower( substr( $real, -4 ) ) ) {
+			return '';
+		}
+		$roots = array();
+		foreach ( array( 'fw_dir', 'content_dir' ) as $k ) {
+			if ( ! empty( $config[ $k ] ) && is_string( $config[ $k ] ) ) {
+				$roots[] = $config[ $k ];
+			}
+		}
+		if ( defined( 'WP_CONTENT_DIR' ) ) {
+			$roots[] = (string) WP_CONTENT_DIR;
+		}
+		foreach ( $roots as $root ) {
+			$r = @realpath( $root ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- runs before WordPress.
+			if ( false !== $r && 0 === strpos( $real, rtrim( $r, '/\\' ) . DIRECTORY_SEPARATOR ) ) {
+				return $real;
+			}
+		}
+		return '';
+	}
+
+	/**
+	 * Whether Perdita Pro's auto-block file (ip => expiry) lists an address
+	 * that hasn't expired. The engine skips expired entries itself, so Pro
+	 * needn't recompile at each expiry.
+	 *
+	 * @param array  $config Config with blocked_file.
+	 * @param string $ip     Visitor address.
+	 * @return bool
+	 */
+	private static function auto_blocked( array $config, $ip ) {
+		$file = self::safe_file( $config, (string) $config['blocked_file'] );
+		if ( '' === $file ) {
+			return false;
+		}
+		$list = include $file;
+		return is_array( $list ) && isset( $list[ $ip ] ) && (int) $list[ $ip ] > time();
 	}
 
 	/**
@@ -1496,7 +1617,7 @@ class Perdita_Firewall {
 		if ( 'block' !== $mode && 'allow' !== $mode ) {
 			return '';
 		}
-		if ( isset( $c['scope'] ) && 'login' === $c['scope'] && '/wp-login.php' !== substr( $npath, -13 ) && '/xmlrpc.php' !== substr( $npath, -11 ) ) {
+		if ( isset( $c['scope'] ) && 'login' === $c['scope'] && ! self::is_login_path( $config, $npath ) && '/xmlrpc.php' !== substr( $npath, -11 ) ) {
 			return '';
 		}
 		$list = isset( $c['countries'] ) ? array_map( 'strtoupper', (array) $c['countries'] ) : array();
@@ -1511,7 +1632,7 @@ class Perdita_Firewall {
 	/**
 	 * Rate limits with APCu. Skipped, and noted in the verdict, without it.
 	 *
-	 * @param array  $limits  Rate limit rules.
+	 * @param array  $config  Config (rate_limits, and login_paths for the login route).
 	 * @param array  $server  $_SERVER.
 	 * @param array  $get     $_GET.
 	 * @param string $ip      Visitor address.
@@ -1519,7 +1640,8 @@ class Perdita_Firewall {
 	 * @param array  $verdict Verdict so far, by reference for notes.
 	 * @return array|null A block or throttle verdict, or null.
 	 */
-	private static function check_rate_limits( array $limits, array $server, array $get, $ip, $npath, array &$verdict ) {
+	private static function check_rate_limits( array $config, array $server, array $get, $ip, $npath, array &$verdict ) {
+		$limits = (array) $config['rate_limits'];
 		if ( ! function_exists( 'apcu_enabled' ) || ! apcu_enabled() ) {
 			$verdict['notes'][] = 'rate_limits_skipped_no_apcu';
 			return null;
@@ -1542,7 +1664,7 @@ class Perdita_Firewall {
 			if ( 'any' === $route ) {
 				$applies = true;
 			} elseif ( 'login' === $route ) {
-				$applies = '/wp-login.php' === substr( $npath, -13 ) && 'POST' === $method;
+				$applies = 'POST' === $method && self::is_login_path( $config, $npath );
 			} elseif ( 'xmlrpc' === $route ) {
 				$applies = '/xmlrpc.php' === substr( $npath, -11 );
 			} elseif ( 'rest' === $route ) {

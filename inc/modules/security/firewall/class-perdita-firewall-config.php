@@ -12,7 +12,11 @@
  *     add 'ip_blocklist', 'ip_allowlist' (strings, merged with Core's list),
  *     'custom_rules', 'country', and 'rate_limits'. The shapes are in the
  *     docblock of class-perdita-firewall.php. The compiler parses the two IP
- *     lists into ranges after the filter runs.
+ *     lists into ranges after the filter runs. Pro may also set
+ *     'blocked_file', 'login_paths', and 'geo' => array( 'class_file' ).
+ *     The engine includes a file only when it sits under 'content_dir' or
+ *     'fw_dir', which build() sets.
+ *   - Perdita_Firewall::last_verdict() returns this request's verdict.
  *   - Perdita_Firewall_Config::compile() rebuilds the file. Pro calls it after
  *     saving its own settings (the update_option_perdita_security_pro_settings
  *     hook already does).
@@ -295,6 +299,8 @@ class Perdita_Firewall_Config {
 			'cf_ranges'      => class_exists( 'Perdita_Client_IP' ) ? Perdita_Client_IP::cloudflare_ranges() : array(),
 			'host'           => strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) ),
 			'abspath'        => ABSPATH,
+			'content_dir'    => WP_CONTENT_DIR,
+			'fw_dir'         => self::dir(),
 			'trust_cap'      => sanitize_key( is_string( $settings['fw_trust_roles'] ) && '' !== $settings['fw_trust_roles'] ? $settings['fw_trust_roles'] : 'edit_posts' ),
 			'log_dir'        => self::log_dir(),
 			'disable_xmlrpc' => ! empty( $settings['disable_xmlrpc'] ),
@@ -743,7 +749,7 @@ class Perdita_Firewall_Config {
 	 */
 	public static function exclusion_for_entry( array $entry ) {
 		$rule = isset( $entry['rule'] ) ? (string) $entry['rule'] : '';
-		if ( '' === $rule || ! preg_match( '/^[a-z]+-[a-z0-9_-]+$/', $rule ) || in_array( $rule, array( 'ip-001', 'country-001' ), true ) || 0 === strpos( $rule, 'rate-' ) ) {
+		if ( '' === $rule || ! preg_match( '/^[a-z]+-[a-z0-9_-]+$/', $rule ) || in_array( $rule, array( 'ip-001', 'ip-002', 'country-001' ), true ) || 0 === strpos( $rule, 'rate-' ) ) {
 			return null;
 		}
 		$uri   = isset( $entry['uri'] ) ? (string) $entry['uri'] : '/';
