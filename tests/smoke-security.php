@@ -1080,7 +1080,8 @@ $ok( ( is_wp_error( $psn_wr ) && ! is_file( $psn_ht ) ) || is_writable( $psn_dir
 $psn_rule = Perdita_Security::uploads_nginx_rule();
 $ok( 0 === strpos( $psn_rule, 'location ~*' ) && false !== strpos( $psn_rule, 'deny all' ) && false !== strpos( $psn_rule, 'uploads' ), 'uploads block: the nginx rule names the uploads path' );
 remove_filter( 'upload_dir', $psn_ud, 99 );
-array_map( 'unlink', glob( $psn_dir . '/{,.}*', GLOB_BRACE | GLOB_NOSORT ) ?: array() );
+// The brace pattern also matches "." and "..", which are not files.
+array_map( 'unlink', array_filter( glob( $psn_dir . '/{,.}*', GLOB_BRACE | GLOB_NOSORT ) ?: array(), 'is_file' ) );
 @rmdir( $psn_dir ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- test cleanup.
 $ok( ! is_dir( $psn_dir ), 'uploads block: the temp folder is gone' );
 $ok( $psn_orig_uploads_md5 === ( is_file( $psn_orig_uploads_ht ) ? md5_file( $psn_orig_uploads_ht ) : null ), 'uploads block: the real uploads .htaccess never changed' );
@@ -1251,12 +1252,28 @@ $psr_canon = has_action( 'template_redirect', 'redirect_canonical' );
 $ok( 1 === $psr_pri && ( false === $psr_canon || $psr_pri < $psr_canon ), 'author scan: block_author_scan runs on template_redirect at priority 1, ahead of redirect_canonical' );
 
 /* ---------- 7. oEmbed and the users sitemap ---------- */
-$psr_oe = apply_filters( 'oembed_response_data', array( 'version' => '1.0', 'title' => 'T', 'author_name' => 'admin', 'author_url' => 'http://example.com/author/admin/' ), null, 0, 0 );
+
+// WordPress hooks get_oembed_response_data_rich() on this filter, and it
+// reads the post's ID, so the filter gets a post the way core calls it.
+$psr_oe_post = get_post(
+	wp_insert_post(
+		array(
+			'post_type'   => 'post',
+			'post_status' => 'draft',
+			'post_title'  => 'Smoke oembed post',
+		)
+	)
+);
+$psr_oe      = apply_filters( 'oembed_response_data', array( 'version' => '1.0', 'title' => 'T', 'author_name' => 'admin', 'author_url' => 'http://example.com/author/admin/' ), $psr_oe_post, 0, 0 );
 $ok( ! isset( $psr_oe['author_name'] ) && ! isset( $psr_oe['author_url'] ) && 'T' === $psr_oe['title'], 'oembed: author_name and author_url are dropped and the rest stays, with block_author_enum on' );
 $ok( false === apply_filters( 'wp_sitemaps_add_provider', new stdClass(), 'users' ) && is_object( apply_filters( 'wp_sitemaps_add_provider', new stdClass(), 'posts' ) ), 'sitemap: the users provider is removed and the others stay' );
 $psn_unhook( $psr_w );
-$psr_oe = apply_filters( 'oembed_response_data', array( 'author_name' => 'admin', 'author_url' => 'x' ), null, 0, 0 );
+$psr_oe = apply_filters( 'oembed_response_data', array( 'author_name' => 'admin', 'author_url' => 'x' ), $psr_oe_post, 0, 0 );
 $ok( isset( $psr_oe['author_name'] ) && is_object( apply_filters( 'wp_sitemaps_add_provider', new stdClass(), 'users' ) ), 'oembed and sitemap: with block_author_enum off both are left alone' );
+if ( $psr_oe_post ) {
+	wp_delete_post( $psr_oe_post->ID, true );
+}
+unset( $psr_oe_post );
 
 /* ---------- 2. IPv6 lockouts key on the /64 ---------- */
 $psr_m = $psn_make( array( 'login_limit' => true, 'login_max' => 3, 'ip_allowlist' => array( '2001:db8:1:2::5' ) ) );
