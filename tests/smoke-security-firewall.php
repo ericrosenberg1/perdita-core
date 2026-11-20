@@ -72,10 +72,10 @@ foreach ( glob( PERDITA_CORE_DIR . 'inc/modules/security/firewall/*.php' ) as $p
 	$ok( ! preg_match( '/<<<\s*[\'"]?[A-Za-z_]/', $pfw_src ), 'firewall: no heredoc or nowdoc in ' . basename( $pfw_file ) );
 }
 $pfw_engine_src = (string) file_get_contents( PERDITA_CORE_DIR . 'inc/modules/security/firewall/class-perdita-firewall.php' );
-// settle() runs on init and defer() may run inside WordPress, so those two
-// calls sit behind function_exists() guards.
-$ok( false !== strpos( $pfw_engine_src, "if ( function_exists( 'add_action' ) ) {\n\t\t\tadd_action( 'init', \$callback" ) && false !== strpos( $pfw_engine_src, "function_exists( 'current_user_can' ) && current_user_can( \$cap )" ), 'firewall: the engine guards its two WordPress calls with function_exists()' );
-$pfw_engine_bare = str_replace( array( "add_action( 'init', \$callback", 'current_user_can( $cap )' ), '', $pfw_engine_src );
+// settle() runs inside WordPress and defer() may, so those two calls sit
+// behind function_exists() guards.
+$ok( false !== strpos( $pfw_engine_src, "if ( function_exists( 'add_action' ) ) {\n\t\t\tadd_action( \$tag, \$callback" ) && false !== strpos( $pfw_engine_src, "function_exists( 'current_user_can' ) && current_user_can( \$cap )" ), 'firewall: the engine guards its two WordPress calls with function_exists()' );
+$pfw_engine_bare = str_replace( array( "add_action( \$tag, \$callback", 'current_user_can( $cap )' ), '', $pfw_engine_src );
 $ok( ! preg_match( '/\b(?:get_option|apply_filters|add_action|current_user_can|esc_html|wp_[a-z_]+)\s*\(/', $pfw_engine_bare ), 'firewall: the engine calls no other WordPress function, so it runs before WordPress loads' );
 
 /* ---------- engine config for the corpus ---------- */
@@ -113,6 +113,13 @@ $pfw_server = function ( $uri = '/', $extra = array() ) use ( $pfw_ua ) {
 $pfw_token = 'Tk' . str_repeat( 'a1B2', 10 ) . 'z';
 $pfw_li    = array( 'wordpress_logged_in_' . md5( 'smoke' ) => 'admin|' . ( time() + DAY_IN_SECONDS ) . '|' . $pfw_token . '|' . str_repeat( 'c', 64 ) );
 $pfw_trust = array( Perdita_Firewall::TRUST_COOKIE => Perdita_Firewall::trust_value( 1, time() + 3600, $pfw_cfg['key'], $pfw_token ) ) + $pfw_li;
+$pfw_unhook = function () {
+	remove_action( 'init', array( 'Perdita_Firewall', 'settle' ), Perdita_Firewall::SETTLE_PRIORITY );
+	remove_action( 'init', array( 'Perdita_Firewall', 'settle_if_trusted' ), Perdita_Firewall::SETTLE_PRIORITY );
+	remove_action( 'wp', array( 'Perdita_Firewall', 'settle' ), Perdita_Firewall::SETTLE_PRIORITY );
+	remove_action( 'xmlrpc_call', array( 'Perdita_Firewall', 'settle' ), Perdita_Firewall::SETTLE_PRIORITY );
+	remove_filter( 'rest_authentication_errors', array( 'Perdita_Firewall', 'settle_rest' ), Perdita_Firewall::REST_SETTLE_PRIORITY );
+};
 $pfw_run   = function ( $req ) use ( $pfw_cfg, $pfw_server ) {
 	$req = array_merge(
 		array(
@@ -781,7 +788,7 @@ wp_mkdir_p( $pfw_logcfg2['log_dir'] );
 $pfw_logfile2 = $pfw_logcfg2['log_dir'] . gmdate( 'Y-m-d' ) . '.log.php';
 $pfw_size     = is_file( $pfw_logfile2 ) ? filesize( $pfw_logfile2 ) : 0;
 Perdita_Firewall::defer( $pfw_logcfg2, $pfw_editor, $pfw_jsrv_full );
-$ok( Perdita_Firewall::has_pending() && false !== has_action( 'init', array( 'Perdita_Firewall', 'settle' ) ), 'firewall finding 5: defer() keeps the verdict and hooks settle() on init' );
+$ok( Perdita_Firewall::has_pending() && Perdita_Firewall::REST_SETTLE_PRIORITY === has_filter( 'rest_authentication_errors', array( 'Perdita_Firewall', 'settle_rest' ) ) && false === has_action( 'init', array( 'Perdita_Firewall', 'settle' ) ), 'firewall finding 5: defer() keeps a REST verdict and settles it on rest_authentication_errors, after the REST API knows the user' );
 $pfw_v = Perdita_Firewall::resolve_pending( true );
 clearstatcache();
 $ok( 'allow' === $pfw_v['action'] && true === $pfw_v['trusted'] && ( is_file( $pfw_logfile2 ) ? filesize( $pfw_logfile2 ) : 0 ) === $pfw_size && ! Perdita_Firewall::has_pending(), 'firewall finding 5: a user with the trust capability gets through and nothing is logged' );
@@ -790,12 +797,12 @@ $pfw_v = Perdita_Firewall::resolve_pending( false );
 clearstatcache();
 $pfw_last = is_file( $pfw_logfile2 ) ? json_decode( (string) array_slice( file( $pfw_logfile2, FILE_IGNORE_NEW_LINES ), -1 )[0], true ) : null;
 $ok( 'block' === $pfw_v['action'] && 403 === $pfw_v['status'] && is_array( $pfw_last ) && $pfw_editor['rule'] === $pfw_last['rule'] && 'block' === $pfw_last['action'] && $pfw_v['ref'] === $pfw_last['ref'], 'firewall finding 5: anyone else gets the same block and the same log line' );
-remove_action( 'init', array( 'Perdita_Firewall', 'settle' ), Perdita_Firewall::SETTLE_PRIORITY );
+$pfw_unhook();
 $pfw_cap_cfg              = $pfw_logcfg2;
 $pfw_cap_cfg['trust_cap'] = 'perdita_smoke_no_such_cap';
 Perdita_Firewall::defer( $pfw_cap_cfg, $pfw_editor, $pfw_jsrv_full );
 $ok( 'block' === Perdita_Firewall::resolve_pending()['action'], 'firewall finding 5: settle() asks WordPress for the trust capability from the config' );
-remove_action( 'init', array( 'Perdita_Firewall', 'settle' ), Perdita_Firewall::SETTLE_PRIORITY );
+$pfw_unhook();
 
 // Round 2 finding 4: an editor tab opened before the firewall went on (no
 // trust cookie yet) saves a code block with an escaped onclick. The engine
@@ -816,7 +823,7 @@ $pfw_stale_v = $pfw_run(
 $ok( 'block' === $pfw_stale_v['action'] && 'xss' === $pfw_stale_v['category'] && Perdita_Firewall::should_defer( $pfw_stale_v, $pfw_cfg, $pfw_li, $pfw_jsrv_full, 'plugin' ), 'firewall R2-4: the stale-tab editor save (' . $pfw_stale_v['rule'] . ' on an escaped onclick) waits for init instead of a 403' );
 Perdita_Firewall::defer( $pfw_cfg, $pfw_stale_v, $pfw_jsrv_full );
 $ok( 'allow' === Perdita_Firewall::resolve_pending( true )['action'], 'firewall R2-4: an editor with the trust capability saves it' );
-remove_action( 'init', array( 'Perdita_Firewall', 'settle' ), Perdita_Firewall::SETTLE_PRIORITY );
+$pfw_unhook();
 
 // Finding 6: exclusions match on a path segment boundary.
 $pfw_seg               = $pfw_cfg;
@@ -952,7 +959,7 @@ $pfw_mv = $pfw_run( array( 'config' => $pfw_monitor, 'get' => array( 'id' => "1'
 Perdita_Firewall::defer( $pfw_cfg, $pfw_mv, $pfw_server() );
 $pfw_settled = Perdita_Firewall::resolve_pending( true );
 $ok( $pfw_settled === Perdita_Firewall::last_verdict() && 'trusted_user' === Perdita_Firewall::last_verdict()['reason'], 'firewall Pro: last_verdict() returns the settled verdict' );
-remove_action( 'init', array( 'Perdita_Firewall', 'settle' ), Perdita_Firewall::SETTLE_PRIORITY );
+$pfw_unhook();
 $ok( false !== strpos( $pfw_engine_src, 'self::$last = $verdict;' ), 'firewall Pro: boot() records each request\'s verdict for last_verdict()' );
 foreach ( array( 'blocked.php', 'geo-test.php' ) as $pfw_name ) {
 	if ( is_file( $pfw_fwdir . $pfw_name ) ) {
@@ -985,12 +992,15 @@ $pfw_post = array( 'REQUEST_METHOD' => 'POST' );
 $pfw_big  = $pfw_run( array( 'server' => $pfw_post, 'post' => array( 'a' => str_repeat( 'x ', 150000 ), 'b' => "1' OR '1'='1" ) ) );
 $ok( 'sqli-005' === $pfw_big['rule'] && 'post:b' === $pfw_big['field'], 'firewall padding: 300 KB of filler in one field never hides an attack in the next' );
 $pfw_many = array();
-for ( $pfw_i = 0; $pfw_i < 40; $pfw_i++ ) {
+for ( $pfw_i = 0; $pfw_i < 14; $pfw_i++ ) {
 	$pfw_many[ 'pad' . $pfw_i ] = str_repeat( 'lorem ipsum ', 6000 );
+}
+for ( $pfw_i = 0; $pfw_i < 200; $pfw_i++ ) {
+	$pfw_many[ 'small' . $pfw_i ] = str_repeat( 'lorem ipsum ', 600 );
 }
 $pfw_many['last'] = '<script>alert(1)</script>';
 $pfw_v = $pfw_run( array( 'server' => $pfw_post, 'post' => $pfw_many ) );
-$ok( 'xss-001' === $pfw_v['rule'] && in_array( 'inspection_budget_reached', $pfw_v['notes'], true ), 'firewall padding: an attack after 2.8 MB of filler fields still blocks, and the verdict notes inspection_budget_reached' );
+$ok( 'xss-001' === $pfw_v['rule'] && in_array( 'inspection_budget_reached', $pfw_v['notes'], true ), 'firewall padding: an attack after 2.5 MB of filler fields still blocks, and the verdict notes inspection_budget_reached' );
 unset( $pfw_many['last'] );
 $pfw_many['late'] = str_repeat( 'lorem ipsum ', 6000 ) . '<script>alert(1)</script>';
 $ok( 'xss-001' === $pfw_run( array( 'server' => $pfw_post, 'post' => $pfw_many ) )['rule'], 'firewall padding: past the 1 MB budget, a field still gets its last 4 KB checked' );
@@ -999,11 +1009,78 @@ $ok( 'xss-001' === $pfw_run( array( 'server' => $pfw_post, 'post' => $pfw_many )
 $pfw_v = $pfw_run( array( 'server' => $pfw_post, 'post' => array( 'a' => str_repeat( 'lorem ipsum ', 6000 ) ) ) );
 $ok( 'allow' === $pfw_v['action'] && ! in_array( 'inspection_budget_reached', $pfw_v['notes'], true ), 'firewall padding: a 72 KB field stays inside the budget' );
 $pfw_v = $pfw_run( array( 'server' => $pfw_post, 'post' => array( 'a' => str_repeat( 'x ', 150000 ) . " 1' OR '1'='1" ) ) );
-$ok( 'sqli-005' === $pfw_v['rule'] && in_array( 'inspection_truncated', $pfw_v['notes'], true ), 'firewall padding: an attack at the end of a 300 KB field blocks (the last 8 KB), and the verdict notes inspection_truncated' );
+$ok( 'sqli-005' === $pfw_v['rule'] && ! in_array( 'inspection_truncated', $pfw_v['notes'], true ), 'firewall padding: an attack at the end of a 300 KB field blocks, inspected in full inside the budget' );
 $pfw_v = $pfw_run( array( 'server' => $pfw_post, 'post' => array( 'a' => "1' OR '1'='1 " . str_repeat( 'x ', 150000 ) ) ) );
 $ok( 'sqli-005' === $pfw_v['rule'], 'firewall padding: an attack at the start of a 300 KB field blocks (the first 64 KB)' );
 $pfw_v = $pfw_run( array( 'server' => array( 'REQUEST_METHOD' => 'POST', 'CONTENT_TYPE' => 'application/json' ), 'body' => wp_json_encode( array( 'pad' => str_repeat( 'a', 5000000 ), 'content' => "1' or '1'='1" ) ) ) );
-$ok( 'sqli-005' === $pfw_v['rule'] && 'json:content' === $pfw_v['field'], 'firewall padding: a 5 MB JSON body decodes whole, so a field after the filler blocks' );
+$ok( 'anomaly-003' === $pfw_v['rule'] && 'json:pad' === $pfw_v['field'], 'firewall padding: a 5 MB JSON field with bytes the engine never read is an anomaly for an anonymous visitor' );
+$pfw_v = $pfw_run( array( 'server' => array( 'REQUEST_METHOD' => 'POST', 'CONTENT_TYPE' => 'application/json' ), 'body' => wp_json_encode( array( 'pad' => str_repeat( 'a', 900000 ), 'content' => "1' or '1'='1" ) ) ) );
+$ok( 'sqli-005' === $pfw_v['rule'] && 'json:content' === $pfw_v['field'], 'firewall padding: a JSON body decodes whole, so a field after the filler blocks' );
+
+// anomaly-003: no byte goes uninspected without a verdict.
+$pfw_mid  = str_repeat( 'lorem ipsum ', 8500 ) . " 1' OR '1'='1 " . str_repeat( 'lorem ipsum ', 8500 );
+$pfw_fill = array();
+for ( $pfw_i = 0; $pfw_i < 16; $pfw_i++ ) {
+	$pfw_fill[ 'pad' . $pfw_i ] = str_repeat( 'lorem ipsum ', 5462 );
+}
+$ok( 'sqli-005' === $pfw_run( array( 'server' => $pfw_post, 'post' => array( 'content' => $pfw_mid ) ) )['rule'], 'firewall anomaly-003: an attack in the middle of a 200 KB field blocks, inspected in full' );
+$pfw_v = $pfw_run( array( 'server' => $pfw_post, 'post' => $pfw_fill + array( 'content' => $pfw_mid ) ) );
+$ok( 'block' === $pfw_v['action'] && 'anomaly-003' === $pfw_v['rule'] && 'post:content' === $pfw_v['field'] && in_array( 'inspection_budget_reached', $pfw_v['notes'], true ), 'firewall anomaly-003: past 1 MB of filler, the middle of a 200 KB field is an anomaly' );
+$ok( ! Perdita_Firewall::should_defer( $pfw_v, $pfw_cfg, array(), $pfw_server( '/', $pfw_post ), 'plugin' ), 'firewall anomaly-003: with no logged-in cookie and no Authorization header, the block is immediate' );
+$pfw_huge = array( 'content' => str_repeat( 'lorem ipsum ', 131072 ) );
+$ok( 'allow' === $pfw_run( array( 'server' => $pfw_post, 'post' => $pfw_huge, 'cookie' => $pfw_trust ) )['action'], 'firewall anomaly-003: a trusted editor\'s 1.5 MB post saves' );
+$pfw_v = $pfw_run( array( 'server' => $pfw_post, 'post' => $pfw_huge, 'cookie' => $pfw_li ) );
+$ok( 'anomaly-003' === $pfw_v['rule'] && Perdita_Firewall::should_defer( $pfw_v, $pfw_cfg, $pfw_li, $pfw_server( '/wp-admin/post.php', $pfw_post ), 'plugin' ), 'firewall anomaly-003: a signed-in 1.5 MB post with no trust cookie waits for WordPress' );
+$pfw_mcfg         = $pfw_cfg;
+$pfw_mcfg['mode'] = 'monitor';
+$ok( 'monitor' === Perdita_Firewall::run( $pfw_mcfg, $pfw_server( '/', $pfw_post ), array(), $pfw_huge, array(), array() )['action'], 'firewall anomaly-003: monitor mode only records the anomaly' );
+$pfw_xcfg               = $pfw_cfg;
+$pfw_xcfg['exclusions'] = array( array( 'rule' => 'anomaly-003', 'path' => '/', 'param' => 'content' ) );
+$pfw_v                  = Perdita_Firewall::run( $pfw_xcfg, $pfw_server( '/', $pfw_post ), array(), $pfw_huge, array(), array() );
+$ok( 'allow' === $pfw_v['action'] && in_array( 'inspection_truncated', $pfw_v['notes'], true ), 'firewall anomaly-003: an owner exclusion lets the field through and the verdict notes inspection_truncated' );
+
+$pfw_apsrv = $pfw_server( '/wp-json/wp/v2/posts', array( 'REQUEST_METHOD' => 'POST', 'CONTENT_TYPE' => 'application/json', 'PHP_AUTH_USER' => 'ed', 'PHP_AUTH_PW' => 'xxxx', 'HTTP_AUTHORIZATION' => 'Basic ' . base64_encode( 'ed:xxxx' ) ) );
+$pfw_apv   = Perdita_Firewall::run( $pfw_cfg, $pfw_apsrv, array(), array(), array(), array(), wp_json_encode( array( 'title' => 'Big', 'content' => $pfw_huge['content'] ) ) );
+$ok( 'anomaly-003' === $pfw_apv['rule'] && Perdita_Firewall::should_defer( $pfw_apv, $pfw_cfg, array(), $pfw_apsrv, 'plugin' ), 'firewall anomaly-003: an application password REST post of 1.5 MB waits for WordPress' );
+$ok( ! Perdita_Firewall::should_defer( array_merge( $pfw_apv, array( 'rule' => 'sqli-005', 'category' => 'sqli' ) ), $pfw_cfg, array(), $pfw_apsrv, 'plugin' ), 'firewall anomaly-003: an Authorization header defers only anomaly-003' );
+$ok( 'rest' === Perdita_Firewall::settle_point( $pfw_cfg, $pfw_apsrv ) && 'rest' === Perdita_Firewall::settle_point( $pfw_cfg, $pfw_server( '/?rest_route=/wp/v2/posts', array( 'QUERY_STRING' => 'rest_route=/wp/v2/posts' ) ) ) && 'rest' === Perdita_Firewall::settle_point( array_merge( $pfw_cfg, array( 'rest_prefix' => 'api' ) ), $pfw_server( '/blog/api/wp/v2/posts' ) ) && 'xmlrpc' === Perdita_Firewall::settle_point( $pfw_cfg, array( 'SCRIPT_FILENAME' => ABSPATH . 'xmlrpc.php', 'REQUEST_URI' => '/xmlrpc.php' ) ) && 'init' === Perdita_Firewall::settle_point( $pfw_cfg, $pfw_server( '/wp-admin/post.php' ) ) && 'init' === Perdita_Firewall::settle_point( $pfw_cfg, $pfw_server( '/wp-jsonx/' ) ), 'firewall anomaly-003: deferred verdicts settle on the REST hook, XML-RPC\'s own hook, or init' );
+$ok( ( function_exists( 'rest_get_url_prefix' ) ? rest_get_url_prefix() : 'wp-json' ) === $pfw_cfg['rest_prefix'], 'firewall anomaly-003: the config carries the REST prefix' );
+$pfw_prev_user = get_current_user_id();
+$pfw_ap_users  = array();
+foreach ( array( 'editor', 'subscriber' ) as $pfw_role ) {
+	$pfw_ap_users[ $pfw_role ] = wp_insert_user( array( 'user_login' => 'pfw_ap_' . $pfw_role . wp_rand( 1000, 9999 ), 'user_pass' => wp_generate_password( 24 ), 'user_email' => 'pfw_ap_' . $pfw_role . wp_rand( 1000, 9999 ) . '@example.test', 'role' => $pfw_role ) );
+}
+if ( ! is_wp_error( $pfw_ap_users['editor'] ) && ! is_wp_error( $pfw_ap_users['subscriber'] ) ) {
+	Perdita_Firewall::defer( $pfw_cfg, $pfw_apv, $pfw_apsrv );
+	$ok( Perdita_Firewall::REST_SETTLE_PRIORITY === has_filter( 'rest_authentication_errors', array( 'Perdita_Firewall', 'settle_rest' ) ) && false !== has_action( 'wp', array( 'Perdita_Firewall', 'settle' ) ) && false === has_action( 'init', array( 'Perdita_Firewall', 'settle' ) ), 'firewall anomaly-003: a REST verdict skips init, where application passwords are still unknown' );
+	wp_set_current_user( $pfw_ap_users['editor'] );
+	$pfw_v = Perdita_Firewall::resolve_pending();
+	$ok( 'allow' === $pfw_v['action'] && 'trusted_user' === $pfw_v['reason'], 'firewall anomaly-003: an application password REST post of 1.5 MB from an editor passes' );
+	$pfw_unhook();
+	Perdita_Firewall::defer( $pfw_cfg, $pfw_apv, $pfw_apsrv );
+	wp_set_current_user( $pfw_ap_users['subscriber'] );
+	$pfw_v = Perdita_Firewall::resolve_pending();
+	$ok( 'block' === $pfw_v['action'] && 403 === $pfw_v['status'] && 'anomaly-003' === $pfw_v['rule'], 'firewall anomaly-003: the same post from a subscriber gets the 403' );
+	$pfw_unhook();
+	$pfw_xsrv = array( 'SCRIPT_FILENAME' => ABSPATH . 'xmlrpc.php', 'REQUEST_URI' => '/xmlrpc.php', 'REQUEST_METHOD' => 'POST' );
+	Perdita_Firewall::defer( $pfw_cfg, $pfw_apv, $pfw_xsrv );
+	$ok( false !== has_action( 'xmlrpc_call', array( 'Perdita_Firewall', 'settle' ) ) && false !== has_action( 'init', array( 'Perdita_Firewall', 'settle_if_trusted' ) ), 'firewall anomaly-003: an XML-RPC verdict settles on xmlrpc_call, after XML-RPC logs the user in' );
+	wp_set_current_user( $pfw_ap_users['subscriber'] );
+	Perdita_Firewall::settle_if_trusted();
+	$ok( Perdita_Firewall::has_pending(), 'firewall anomaly-003: at init, an XML-RPC user without the capability still waits for xmlrpc_call' );
+	wp_set_current_user( $pfw_ap_users['editor'] );
+	Perdita_Firewall::settle_if_trusted();
+	$ok( ! Perdita_Firewall::has_pending() && 'allow' === Perdita_Firewall::last_verdict()['action'], 'firewall anomaly-003: an XML-RPC user WordPress already knows at init passes' );
+	$pfw_unhook();
+}
+$ok( 'kept' === Perdita_Firewall::settle_rest( 'kept' ), 'firewall anomaly-003: settle_rest() passes the REST auth value on' );
+wp_set_current_user( $pfw_prev_user );
+require_once ABSPATH . 'wp-admin/includes/user.php';
+foreach ( $pfw_ap_users as $pfw_uid ) {
+	if ( ! is_wp_error( $pfw_uid ) ) {
+		wp_delete_user( $pfw_uid );
+	}
+}
 
 /* ---------- log ---------- */
 

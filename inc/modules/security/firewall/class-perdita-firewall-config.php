@@ -301,6 +301,7 @@ class Perdita_Firewall_Config {
 			'abspath'        => ABSPATH,
 			'content_dir'    => WP_CONTENT_DIR,
 			'fw_dir'         => self::dir(),
+			'rest_prefix'    => function_exists( 'rest_get_url_prefix' ) ? rest_get_url_prefix() : 'wp-json',
 			'trust_cap'      => sanitize_key( is_string( $settings['fw_trust_roles'] ) && '' !== $settings['fw_trust_roles'] ? $settings['fw_trust_roles'] : 'edit_posts' ),
 			'log_dir'        => self::log_dir(),
 			'disable_xmlrpc' => ! empty( $settings['disable_xmlrpc'] ),

@@ -17,9 +17,13 @@
  *
  * Deferred verdicts: a content block (sqli, xss, traversal, rfi, php_upload,
  * anomaly) on a request that carries a wordpress_logged_in_* cookie but no
- * valid trust cookie isn't answered before WordPress loads. boot() keeps the
- * verdict and settles it on init (settle()), once WordPress knows the user:
- * a user with the trust capability gets through, and anyone else gets the
+ * valid trust cookie isn't answered before WordPress loads. anomaly-003 (bytes
+ * left uninspected past the budget) also defers for a request with an
+ * Authorization header, for application passwords. boot() keeps the verdict
+ * and settles it once WordPress knows the user: on rest_authentication_errors
+ * for a REST request (application passwords resolve only there), on
+ * xmlrpc_call for XML-RPC (after its own login), and on init for the rest. A
+ * user with the trust capability gets through, and anyone else gets the
  * same 403 and the same log line. Before WordPress (auto_prepend_file), only
  * a request for one of WordPress's own entry points defers, so a direct hit
  * on a plugin file still blocks at once. Monitor mode never defers.
@@ -50,7 +54,7 @@
  *   'status'   => HTTP status for a block (403 or 429),
  *   'logged'   => list of custom rule ids whose action is 'log' and matched,
  *   'notes'    => list of strings, such as 'rate_limits_skipped_no_apcu' or
- *                 'inspection_truncated',
+ *                 'inspection_truncated', 'inspection_budget_reached', 'deferred',
  * )
  *
  * Config sections Perdita Pro may add through the perdita_firewall_config
@@ -101,29 +105,25 @@ class Perdita_Firewall {
 	const VERSION = '1';
 
 	/**
-	 * Bytes inspected from the start of each value. A longer value also gets
-	 * its last TAIL_CAP bytes inspected, so filler can't push an attack past
-	 * the cap. Every field gets both, whatever the request size.
-	 */
-	const VALUE_CAP = 65536;
-
-	/**
-	 * Bytes inspected from the end of a value longer than VALUE_CAP + TAIL_CAP.
-	 */
-	const TAIL_CAP = 8192;
-
-	/**
-	 * Bytes inspected in full (VALUE_CAP head, TAIL_CAP tail) per request.
-	 * Past it, every remaining field still gets LEAN_CAP bytes from each end,
-	 * so no field goes unchecked, and the verdict notes
-	 * inspection_budget_reached.
+	 * Bytes inspected per request. Inside it every value is inspected in
+	 * full. Past it, a value gets LEAN_CAP bytes from each end, the verdict
+	 * notes inspection_budget_reached, and a value with bytes left between
+	 * the two is an anomaly (anomaly-003), so nothing hides in a part the
+	 * engine never read.
 	 */
 	const INSPECT_BUDGET = 1048576;
 
 	/**
-	 * Head and tail size per field once INSPECT_BUDGET is spent.
+	 * Head and tail size per value once INSPECT_BUDGET is spent.
 	 */
 	const LEAN_CAP = 4096;
+
+	/**
+	 * rest_authentication_errors priority for a REST request's deferred
+	 * verdict: after WordPress's application password (90) and cookie
+	 * nonce (100) checks, so the user is the one the REST API will use.
+	 */
+	const REST_SETTLE_PRIORITY = 101;
 
 	/**
 	 * Log cap per day, in bytes.
@@ -430,10 +430,49 @@ class Perdita_Firewall {
 		if ( 'block' !== $verdict['action'] || ! empty( $verdict['trusted'] ) || ! in_array( $verdict['category'], self::DEFERRABLE, true ) ) {
 			return false;
 		}
-		if ( ! self::session_tokens( $cookie ) ) {
+		if ( ! self::session_tokens( $cookie ) && ! ( 'anomaly-003' === $verdict['rule'] && self::has_auth_header( $server ) ) ) {
 			return false;
 		}
 		return 'prepend' !== $loader || self::entry_point( $config, $server );
+	}
+
+	/**
+	 * Whether the request carries an Authorization header (or the Basic
+	 * credentials PHP parsed from one).
+	 *
+	 * @param array $server $_SERVER.
+	 * @return bool
+	 */
+	public static function has_auth_header( array $server ) {
+		foreach ( array( 'HTTP_AUTHORIZATION', 'REDIRECT_HTTP_AUTHORIZATION', 'PHP_AUTH_USER' ) as $key ) {
+			if ( isset( $server[ $key ] ) && '' !== (string) $server[ $key ] ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Where a deferred verdict settles: 'rest', 'xmlrpc', or 'init'.
+	 *
+	 * @param array $config Config.
+	 * @param array $server $_SERVER.
+	 * @return string
+	 */
+	public static function settle_point( array $config, array $server ) {
+		$script = isset( $server['SCRIPT_FILENAME'] ) ? str_replace( '\\', '/', (string) $server['SCRIPT_FILENAME'] ) : '';
+		if ( '/xmlrpc.php' === substr( $script, -11 ) || defined( 'XMLRPC_REQUEST' ) ) {
+			return 'xmlrpc';
+		}
+		$uri = isset( $server['REQUEST_URI'] ) ? (string) $server['REQUEST_URI'] : '';
+		$q   = isset( $server['QUERY_STRING'] ) ? (string) $server['QUERY_STRING'] : '';
+		if ( preg_match( '~(?:^|&)rest_route=~', $q ) || false !== strpos( $uri, '?rest_route=' ) || false !== strpos( $uri, '&rest_route=' ) ) {
+			return 'rest';
+		}
+		$prefix = isset( $config['rest_prefix'] ) && '' !== (string) $config['rest_prefix'] ? trim( (string) $config['rest_prefix'], '/' ) : 'wp-json';
+		$qpos   = strpos( $uri, '?' );
+		$path   = strtolower( false === $qpos ? $uri : substr( $uri, 0, $qpos ) );
+		return preg_match( '~/' . preg_quote( strtolower( $prefix ), '~' ) . '(?:/|$)~', $path ) ? 'rest' : 'init';
 	}
 
 	/**
@@ -483,23 +522,49 @@ class Perdita_Firewall {
 			'verdict' => $verdict,
 			'server'  => $server,
 		);
-		$callback = array( __CLASS__, 'settle' );
-		if ( function_exists( 'add_action' ) ) {
-			add_action( 'init', $callback, self::SETTLE_PRIORITY, 0 );
+		$point = self::settle_point( $config, $server );
+		if ( 'rest' === $point ) {
+			// The REST API resolves application passwords during dispatch,
+			// after init. 'wp' catches a request that turned out not to be REST.
+			self::hook( 'rest_authentication_errors', array( __CLASS__, 'settle_rest' ), self::REST_SETTLE_PRIORITY, 1 );
+			self::hook( 'wp', array( __CLASS__, 'settle' ), self::SETTLE_PRIORITY, 0 );
+		} elseif ( 'xmlrpc' === $point ) {
+			// XML-RPC logs the user in inside each method, then fires
+			// xmlrpc_call. A user already known at init passes there.
+			self::hook( 'init', array( __CLASS__, 'settle_if_trusted' ), self::SETTLE_PRIORITY, 0 );
+			self::hook( 'xmlrpc_call', array( __CLASS__, 'settle' ), self::SETTLE_PRIORITY, 0 );
 		} else {
-			if ( ! isset( $GLOBALS['wp_filter'] ) || ! is_array( $GLOBALS['wp_filter'] ) ) {
-				$GLOBALS['wp_filter'] = array(); // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- WordPress builds its hooks from this array.
-			}
-			$GLOBALS['wp_filter']['init'][ self::SETTLE_PRIORITY ][] = array( // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- WordPress builds its hooks from this array.
-				'function'      => $callback,
-				'accepted_args' => 0,
-			);
+			self::hook( 'init', array( __CLASS__, 'settle' ), self::SETTLE_PRIORITY, 0 );
 		}
+		self::$pending['point'] = $point;
 		register_shutdown_function( array( __CLASS__, 'settle_at_shutdown' ) );
 	}
 
 	/**
-	 * init callback: allow a user with the trust capability, else log and
+	 * Hook a callback through the plugin API when it's loaded, or through the
+	 * global $wp_filter array WordPress builds its hooks from when it isn't.
+	 *
+	 * @param string   $tag      Hook name.
+	 * @param callable $callback Callback.
+	 * @param int      $priority Priority.
+	 * @param int      $args     Accepted args.
+	 */
+	private static function hook( $tag, $callback, $priority, $args ) {
+		if ( function_exists( 'add_action' ) ) {
+			add_action( $tag, $callback, $priority, $args );
+			return;
+		}
+		if ( ! isset( $GLOBALS['wp_filter'] ) || ! is_array( $GLOBALS['wp_filter'] ) ) {
+			$GLOBALS['wp_filter'] = array(); // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- WordPress builds its hooks from this array.
+		}
+		$GLOBALS['wp_filter'][ $tag ][ $priority ][] = array( // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- WordPress builds its hooks from this array.
+			'function'      => $callback,
+			'accepted_args' => $args,
+		);
+	}
+
+	/**
+	 * Settle callback: allow a user with the trust capability, else log and
 	 * send the 403.
 	 */
 	public static function settle() {
@@ -507,6 +572,38 @@ class Perdita_Firewall {
 		if ( is_array( $verdict ) && 'block' === $verdict['action'] ) {
 			self::respond( $verdict );
 		}
+	}
+
+	/**
+	 * rest_authentication_errors callback: settle, and pass the value on.
+	 *
+	 * @param mixed $errors The filtered value.
+	 * @return mixed
+	 */
+	public static function settle_rest( $errors ) {
+		self::settle();
+		return $errors;
+	}
+
+	/**
+	 * XML-RPC init callback: let a user WordPress already knows through, and
+	 * leave anyone else for xmlrpc_call.
+	 */
+	public static function settle_if_trusted() {
+		if ( null !== self::$pending && self::can_trust( self::$pending['config'] ) ) {
+			self::resolve_pending( true );
+		}
+	}
+
+	/**
+	 * Whether the current WordPress user has the trust capability.
+	 *
+	 * @param array $config Config.
+	 * @return bool
+	 */
+	private static function can_trust( array $config ) {
+		$cap = isset( $config['trust_cap'] ) && is_string( $config['trust_cap'] ) && '' !== $config['trust_cap'] ? $config['trust_cap'] : 'edit_posts';
+		return function_exists( 'current_user_can' ) && current_user_can( $cap );
 	}
 
 	/**
@@ -524,8 +621,7 @@ class Perdita_Firewall {
 		$config        = $pending['config'];
 		$verdict       = $pending['verdict'];
 		if ( null === $can ) {
-			$cap = isset( $config['trust_cap'] ) && is_string( $config['trust_cap'] ) && '' !== $config['trust_cap'] ? $config['trust_cap'] : 'edit_posts';
-			$can = function_exists( 'current_user_can' ) && current_user_can( $cap );
+			$can = self::can_trust( $config );
 		}
 		if ( $can ) {
 			$verdict['action']  = 'allow';
@@ -931,25 +1027,34 @@ class Perdita_Firewall {
 		if ( $len < 3 ) {
 			return null;
 		}
-		if ( self::$inspected < self::INSPECT_BUDGET ) {
-			$head = self::VALUE_CAP;
-			$tail = self::TAIL_CAP;
-		} else {
-			$head                 = self::LEAN_CAP;
-			$tail                 = self::LEAN_CAP;
-			self::$budget_reached = true;
+		$left = self::INSPECT_BUDGET - self::$inspected;
+		if ( $len <= $left ) {
+			self::$inspected += $len;
+			return self::scan_piece( $ctx, $source, $param, $value, $is_param );
 		}
-		if ( $len > $head + $tail ) {
-			// The head and the tail, each scanned on its own, so no match can
-			// span the bytes left out. Rules anchored to the start of a value
-			// skip the tail.
-			self::$truncated  = true;
-			self::$inspected += $head + $tail;
-			$r                = self::scan_piece( $ctx, $source, $param, substr( $value, 0, $head ), $is_param );
-			return $r ? $r : self::scan_piece( $ctx, $source, $param, substr( $value, -$tail ), false );
+		self::$budget_reached = true;
+		$head                 = max( $left, self::LEAN_CAP );
+		$tail                 = self::LEAN_CAP;
+		if ( $len <= $head + $tail ) {
+			self::$inspected += $len;
+			return self::scan_piece( $ctx, $source, $param, $value, $is_param );
 		}
-		self::$inspected += $len;
-		return self::scan_piece( $ctx, $source, $param, $value, $is_param );
+		// The head and the tail, each scanned on its own. Rules anchored to
+		// the start of a value skip the tail. The bytes between them go
+		// uninspected, so the value is an anomaly unless a rule matched.
+		self::$inspected += $head + $tail;
+		$r                = self::scan_piece( $ctx, $source, $param, substr( $value, 0, $head ), $is_param );
+		if ( ! $r ) {
+			$r = self::scan_piece( $ctx, $source, $param, substr( $value, -$tail ), false );
+		}
+		if ( $r ) {
+			return $r;
+		}
+		if ( self::excluded( $ctx['exclusions'], 'anomaly-003', 'anomaly', $param ) ) {
+			self::$truncated = true;
+			return null;
+		}
+		return array( 'anomaly-003', 'anomaly', ( $len - $head - $tail ) . ' bytes uninspected past ' . self::INSPECT_BUDGET );
 	}
 
 	/**

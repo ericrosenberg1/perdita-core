@@ -120,8 +120,8 @@ $cases = array(
 	'POST, ' . round( strlen( $json ) / 1024 ) . ' KB Gutenberg JSON' => array( array_merge( $server, array( 'REQUEST_METHOD' => 'POST', 'REQUEST_URI' => '/wp-json/wp/v2/posts/42?_locale=user', 'CONTENT_TYPE' => 'application/json' ) ), array( '_locale' => 'user' ), array(), $json ),
 	'POST, 1 MB form (16 x 64 KB)'     => array( $post_srv, array(), $big_form( 1048576 ), null, 200 ),
 	'POST, 1 MB form (one field)'      => array( $post_srv, array(), array( 'content' => substr( str_repeat( $blocks, 40 ), 0, 1048576 ) ), null, 200 ),
-	'POST, 8 MB form (128 x 64 KB)'    => array( $post_srv, array(), $big_form( 8388608 ), null, 100 ),
-	'POST, 4 MB Gutenberg JSON'        => array( array_merge( $post_srv, array( 'REQUEST_URI' => '/wp-json/wp/v2/posts/42', 'CONTENT_TYPE' => 'application/json' ) ), array(), array(), $big_json, 30 ),
+	'POST, 8 MB form, anonymous (anomaly-003)' => array( $post_srv, array(), $big_form( 8388608 ), null, 100, 'block' ),
+	'POST, 4 MB JSON, anonymous (anomaly-003)' => array( array_merge( $post_srv, array( 'REQUEST_URI' => '/wp-json/wp/v2/posts/42', 'CONTENT_TYPE' => 'application/json' ) ), array(), array(), $big_json, 30, 'block' ),
 	'POST, padded repro (blocks)'      => array( $post_srv, array(), array( 'a' => str_repeat( 'x ', 150000 ), 'b' => "1' OR '1'='1" ), null, 2000, 'block' ),
 );
 
@@ -146,5 +146,5 @@ foreach ( $cases as $label => $case ) {
 	sort( $times );
 	$median = $times[ (int) floor( count( $times ) / 2 ) ] / 1000;
 	$p95    = $times[ (int) floor( count( $times ) * 0.95 ) ] / 1000;
-	printf( "  %-34s median %8.2f us   p95 %8.2f us\n", $label, $median, $p95 );
+	printf( "  %-42s median %8.2f us   p95 %8.2f us\n", $label, $median, $p95 );
 }
