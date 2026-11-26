@@ -263,10 +263,12 @@ class Perdita_Caching {
 		// query resolves, so is_404()/is_search()/is_preview() are reliable, but
 		// still before any template output. A low priority (1) means we decide
 		// early. On a hit we send the file and exit; on a miss we start buffering.
-		// Remember the URI the visitor asked for before any plugin's init
-		// callback rewrites it (BetterDocs strips a .md suffix there).
-		if ( null === self::$raw_request_uri ) {
-			self::$raw_request_uri = isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_unslash( $_SERVER['REQUEST_URI'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- only parsed, never echoed.
+		// The URI the visitor asked for, from before any plugin's init callback
+		// rewrote it (BetterDocs strips a .md suffix there). Core's main file
+		// records it when WordPress loads the plugin, because modules boot on
+		// init priority 0, the same slot BetterDocs uses.
+		if ( null === self::$raw_request_uri && defined( 'PERDITA_CORE_RAW_REQUEST_URI' ) ) {
+			self::$raw_request_uri = (string) PERDITA_CORE_RAW_REQUEST_URI;
 		}
 		if ( ! is_admin() ) {
 			add_action( 'template_redirect', array( $this, 'serve_or_capture' ), 1 );

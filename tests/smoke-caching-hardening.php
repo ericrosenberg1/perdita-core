@@ -996,6 +996,7 @@ if ( '' !== $chd_php && function_exists( 'proc_open' ) ) {
 				'if ( "cookie_ok" === $chd_probe ) { $chd_add( "perdita_cache_allow_set_cookie", function ( $n ) { $n[] = "chd_probe"; return $n; } ); }',
 				'if ( "redirect" === $chd_probe ) { $chd_add( "template_redirect", function () { wp_redirect( home_url( "/elsewhere/" ), 302 ); exit; }, 5 ); }',
 				'if ( "private" === $chd_probe ) { $chd_add( "template_redirect", function () { header( "Cache-Control: private, max-age=60" ); }, 5 ); }',
+				'if ( "mdrewrite" === $chd_probe ) { $chd_add( "init", function () { $u = (string) $_SERVER["REQUEST_URI"]; if ( "/index.md" === substr( $u, 0, 9 ) ) { $_SERVER["REQUEST_URI"] = "/" . substr( $u, 9 ); } }, 0 ); }',
 				'chdir( ' . var_export( ABSPATH, true ) . ' );', // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_var_export
 				'require ' . var_export( ABSPATH . 'index.php', true ) . ';', // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_var_export
 			)
@@ -1066,6 +1067,15 @@ if ( '' !== $chd_php && function_exists( 'proc_open' ) ) {
 		$chd_r2 = $chd_get( '/' );
 		$ok( 200 === $chd_r1['status'] && 'MISS' === $chd_h( $chd_r1, 'x-cache' ) && 'HIT' === $chd_h( $chd_r2, 'x-cache' ) && $chd_has( '/' ), 'cache hardening http: control, the home page is stored on the first request and served on the second' . ( 200 !== $chd_r1['status'] ? ' (status ' . $chd_r1['status'] . ', ' . $chd_h( $chd_r1, 'x-cache' ) . ')' : '' ) );
 		$ok( false !== stripos( $chd_h( $chd_r1, 'cache-control' ), 'public' ) && false !== strpos( $chd_h( $chd_r1, 'cache-control' ), 'max-age=300' ) && 1 === count( $chd_r1['headers']['cache-control'] ?? array() ), 'cache hardening 5: a stored page goes out public for five minutes, with one Cache-Control header' );
+
+		// A151: a plugin that rewrites /index.md to / on init (BetterDocs does this for /help/<doc>.md) must not get the stored HTML for the .md URL.
+		Perdita_Caching::purge_everything();
+		$chd_get( '/' );
+		$chd_md1 = $chd_get( '/index.md', 'mdrewrite' );
+		$chd_md2 = $chd_get( '/index.md?x=1', 'mdrewrite' );
+		$ok( $chd_has( '/' ) && '' === $chd_h( $chd_md1, 'x-cache' ) && '' === $chd_h( $chd_md1, 'x-perdita-cache' ), 'cache hardening A151: a .md URL that a plugin rewrote to the cached page still goes to WordPress, never to the stored HTML' );
+		$chd_fm = $chd_get( '/?format=md', 'mdrewrite' );
+		$ok( 'HIT' !== $chd_h( $chd_fm, 'x-cache' ), 'cache hardening A151: ?format=md is never served from the cache' );
 
 		Perdita_Caching::purge_everything();
 		$chd_r = $chd_get( '/', 'dnc' );
