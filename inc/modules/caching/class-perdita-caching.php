@@ -263,6 +263,11 @@ class Perdita_Caching {
 		// query resolves, so is_404()/is_search()/is_preview() are reliable, but
 		// still before any template output. A low priority (1) means we decide
 		// early. On a hit we send the file and exit; on a miss we start buffering.
+		// Remember the URI the visitor asked for before any plugin's init
+		// callback rewrites it (BetterDocs strips a .md suffix there).
+		if ( null === self::$raw_request_uri ) {
+			self::$raw_request_uri = isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_unslash( $_SERVER['REQUEST_URI'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- only parsed, never echoed.
+		}
 		if ( ! is_admin() ) {
 			add_action( 'template_redirect', array( $this, 'serve_or_capture' ), 1 );
 		}
@@ -2057,6 +2062,45 @@ class Perdita_Caching {
 	/* ---------- exclusions (the safety feature) ---------- */
 
 	/**
+	 * The REQUEST_URI as it arrived, captured when the module loads.
+	 *
+	 * @var string|null
+	 */
+	private static $raw_request_uri = null;
+
+	/**
+	 * Whether the URL itself asks for Markdown: a path ending in .md (or
+	 * .markdown), or a format=md (or markdown) query arg. BetterDocs rewrites
+	 * REQUEST_URI from /help/doc.md to /help/doc/ on init, so the cache key
+	 * would otherwise match the doc's HTML copy. Reads the raw URI captured
+	 * at load, and the current one too in case the module loaded late.
+	 *
+	 * @return bool
+	 */
+	public static function url_wants_markdown() {
+		$uris = array();
+		if ( null !== self::$raw_request_uri ) {
+			$uris[] = self::$raw_request_uri;
+		}
+		if ( isset( $_SERVER['REQUEST_URI'] ) ) {
+			$uris[] = (string) wp_unslash( $_SERVER['REQUEST_URI'] ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- only parsed, never echoed.
+		}
+		foreach ( $uris as $uri ) {
+			$parts = explode( '?', $uri, 2 );
+			if ( preg_match( '/\.(?:md|markdown)$/i', rtrim( rawurldecode( $parts[0] ), '/' ) ) ) {
+				return true;
+			}
+			if ( isset( $parts[1] ) ) {
+				parse_str( $parts[1], $args );
+				if ( isset( $args['format'] ) && is_string( $args['format'] ) && in_array( strtolower( trim( $args['format'] ) ), array( 'md', 'markdown' ), true ) ) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * Whether an Accept header asks for Markdown (text/markdown or
 	 * text/x-markdown) with a nonzero q value. The page cache stores HTML
 	 * only, so such a request goes to WordPress. The early-serve drop-in
@@ -2108,6 +2152,10 @@ class Perdita_Caching {
 		// cached HTML, and the Markdown answer must never land in the HTML key.
 		if ( self::accept_wants_markdown( isset( $_SERVER['HTTP_ACCEPT'] ) ? sanitize_text_field( wp_unslash( $_SERVER['HTTP_ACCEPT'] ) ) : '' ) ) {
 			return $this->skip( 'markdown accept' );
+		}
+		// A .md URL or ?format=md answers Markdown too, whatever the Accept header says.
+		if ( self::url_wants_markdown() ) {
+			return $this->skip( 'markdown url' );
 		}
 		// Logged-in users see personalized chrome (admin bar, edit links), so
 		// they stay out unless another plugin vouches for the request AND
