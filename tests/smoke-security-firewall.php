@@ -1261,7 +1261,9 @@ $ok( false !== strpos( Perdita_Firewall_Loader::status()['message'], 'cached .us
 $pfw_state['bootstrap_until'] = time() - 1;
 update_option( Perdita_Firewall_Config::STATE_OPTION, $pfw_state, false );
 $pfw_removed_ref = new ReflectionProperty( 'Perdita_Firewall_Loader', 'user_ini_removed' );
-$pfw_removed_ref->setAccessible( true );
+if ( PHP_VERSION_ID < 80100 ) {
+	$pfw_removed_ref->setAccessible( true );
+}
 $pfw_removed_was = $pfw_removed_ref->getValue();
 $pfw_removed_ref->setValue( null, 0 );
 Perdita_Firewall_Loader::status();
