@@ -436,6 +436,30 @@ $ok( Perdita_Caching::accept_wants_markdown( 'text/html, TEXT/X-Markdown;q=0.9' 
 $_SERVER['HTTP_ACCEPT'] = 'text/html,application/xhtml+xml,*/*;q=0.8';
 $ok( true === $cpar_is->invoke( $cpar_cache, $cpar_req ), 'cache parity: a browser Accept header stays cacheable' );
 unset( $_SERVER['HTTP_ACCEPT'] );
+// A .md URL and ?format=md never use the doc's cached HTML (A151: BetterDocs rewrites /help/doc.md to /help/doc/ on init).
+$cpar_raw = new ReflectionProperty( 'Perdita_Caching', 'raw_request_uri' );
+$cpar_raw->setAccessible( true );
+$cpar_raw->setValue( null, '/help/doc.md' );
+$_SERVER['REQUEST_URI'] = '/help/doc/';
+$ok( false === $cpar_is->invoke( $cpar_cache, $cpar_req ) && 'markdown url' === $cpar_p( 'skip_reason' )->getValue( $cpar_cache ), 'cache parity: /help/<doc>.md skips the cache even after a plugin rewrote REQUEST_URI to the doc path' );
+$cpar_raw->setValue( null, '/help/doc.md/?x=1' );
+$ok( Perdita_Caching::url_wants_markdown(), 'cache parity: a .md path with a trailing slash and query counts as Markdown' );
+$cpar_raw->setValue( null, '/help/doc/?format=md' );
+$_SERVER['REQUEST_URI'] = '/help/doc/?format=md';
+$ok( false === $cpar_is->invoke( $cpar_cache, $cpar_req ) && 'markdown url' === $cpar_p( 'skip_reason' )->getValue( $cpar_cache ), 'cache parity: ?format=md skips the cache' );
+$cpar_raw->setValue( null, '/help/doc/?format=MARKDOWN' );
+$ok( Perdita_Caching::url_wants_markdown(), 'cache parity: format=markdown in any case counts as Markdown' );
+$cpar_raw->setValue( null, '/help/doc/' );
+$_SERVER['REQUEST_URI'] = '/help/doc/';
+$ok( ! Perdita_Caching::url_wants_markdown() && true === $cpar_is->invoke( $cpar_cache, $cpar_req ), 'cache parity: the doc page itself stays cacheable' );
+$cpar_raw->setValue( null, '/help/doc/?format=pdf' );
+$_SERVER['REQUEST_URI'] = '/help/doc/?format=pdf';
+$ok( ! Perdita_Caching::url_wants_markdown(), 'cache parity: another format arg is not a Markdown URL' );
+$cpar_raw->setValue( null, '/readme.mdx' );
+$_SERVER['REQUEST_URI'] = '/readme.mdx';
+$ok( ! Perdita_Caching::url_wants_markdown(), 'cache parity: .mdx is not a Markdown URL' );
+$cpar_raw->setValue( null, null );
+$_SERVER['REQUEST_URI'] = '/';
 $cpar_set( array() );
 $ok( false === strpos( Perdita_Caching::dropin_source(), 'badbot-in-dropin' ), 'cache parity: the drop-in holds no rejected user agent until one is set' );
 $cpar_set(

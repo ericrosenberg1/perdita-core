@@ -3,7 +3,7 @@
  * Plugin Name:       Perdita Core
  * Plugin URI:        https://perdita.app
  * Description:       The free companion plugin for the Perdita theme. Adds SEO, forms, caching, security, analytics, email, and more as modules you turn on one at a time.
- * Version:           0.19.33-beta
+ * Version:           0.19.36-beta
  * Requires at least: 6.4
  * Requires PHP:      8.0
  * Author:            Eric Rosenberg
@@ -28,10 +28,15 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'PERDITA_CORE_VERSION', '0.19.33-beta' );
+define( 'PERDITA_CORE_VERSION', '0.19.36-beta' );
 define( 'PERDITA_CORE_FILE', __FILE__ );
 define( 'PERDITA_CORE_DIR', plugin_dir_path( __FILE__ ) );
 define( 'PERDITA_CORE_URL', plugin_dir_url( __FILE__ ) );
+
+// The URI the visitor asked for, before any plugin's init callback rewrites it
+// (BetterDocs strips a .md suffix there). The page cache reads it to keep
+// Markdown URLs out of the cache.
+define( 'PERDITA_CORE_RAW_REQUEST_URI', isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_unslash( $_SERVER['REQUEST_URI'] ) : '' ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- only parsed, never echoed.
 
 require_once PERDITA_CORE_DIR . 'inc/perdita-notices.php';
 require_once PERDITA_CORE_DIR . 'inc/class-perdita-client-ip.php';
