@@ -438,7 +438,9 @@ $ok( true === $cpar_is->invoke( $cpar_cache, $cpar_req ), 'cache parity: a brows
 unset( $_SERVER['HTTP_ACCEPT'] );
 // A .md URL and ?format=md never use the doc's cached HTML (A151: BetterDocs rewrites /help/doc.md to /help/doc/ on init).
 $cpar_raw = new ReflectionProperty( 'Perdita_Caching', 'raw_request_uri' );
-$cpar_raw->setAccessible( true );
+if ( PHP_VERSION_ID < 80100 ) {
+	$cpar_raw->setAccessible( true );
+}
 $cpar_raw->setValue( null, '/help/doc.md' );
 $_SERVER['REQUEST_URI'] = '/help/doc/';
 $ok( false === $cpar_is->invoke( $cpar_cache, $cpar_req ) && 'markdown url' === $cpar_p( 'skip_reason' )->getValue( $cpar_cache ), 'cache parity: /help/<doc>.md skips the cache even after a plugin rewrote REQUEST_URI to the doc path' );
